@@ -28,7 +28,10 @@ pnpm add @pebbletech/infra @pulumi/pulumi
 A product's `infra/` program builds every stage from one `Stage` (`pr-<n>`, `staging`, `prod`, plus `shared` for the
 Vercel project). Names stay inside `<product>-<env>`, roles carry a permissions boundary, APIs need a custom domain,
 and prod resources are protected and retained; the components refuse anything else. Compile the program with `tsc`
-and run Pulumi with `typescript: false`, since Pulumi's TypeScript peer is `<7`.
+and run Pulumi with `typescript: false`, since Pulumi's TypeScript peer is `<7`; install with pnpm, because npm
+refuses that optional peer next to TypeScript 7 without an `overrides` entry or `--legacy-peer-deps`. `shared` and
+`prod` are protected, so their teardown starts with `pulumi state unprotect --all`. `DeployRole`'s API Gateway
+permission covers every HTTP API in the account (API ids are random); the rest is scoped to the product and env.
 [packages/infra/README.md](packages/infra/README.md) has the components, the naming table and the precompile setup;
 [examples/basefresh](examples/basefresh) is a whole product program with tests.
 

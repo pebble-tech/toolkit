@@ -36,11 +36,21 @@ Hostnames and database names keep base-app's `stg`/`prd` suffixes; resource name
   `prod`). `ApiFunction` defaults its boundary to `<product>-<env>-boundary` in the current account, the policy the
   deploy role created.
 
+Tearing down `shared` or `prod` takes an explicit step: every child there is protected, so run
+`pulumi state unprotect --all -s <stack>` before `pulumi destroy -s <stack>`.
+
+Known limit of `DeployRole`: HTTP API ids are random, so its API Gateway statement covers every HTTP API and custom
+domain in the account, not only the product's. Lambda, IAM, logs, certificates and state are scoped to the product
+and env.
+
 ## Use it
 
 ```sh
 pnpm add @pebbletech/infra @pulumi/pulumi
 ```
+
+Use pnpm. `@pulumi/pulumi` declares `typescript <7` as an optional peer; pnpm warns, but npm refuses to install it next
+to TypeScript 7, so npm users need an `overrides` entry or `--legacy-peer-deps`.
 
 ```ts
 import { Database, Stage } from '@pebbletech/infra';
