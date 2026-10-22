@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency: release-${{ github.ref }}
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Enable corepack (pnpm from packageManager)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify (lint, format, typecheck, build, tests)
+        run: pnpm verify
+
+      # Pending changesets: open or update the "Version packages" PR.
+      # None pending: publish every package whose version is not on npm yet (prepack builds dist/).
+      - name: Version PR or publish
+        uses: changesets/action@v2
+        with:
+          version-script: pnpm changeset version
+          publish-script: pnpm release
+          pr-title: 'chore: version packages'
+          commit-message: 'chore: version packages'
+        env:
+          # setup-node's registry-url writes an .npmrc that reads this. The first publish of each package uses the
+          # token; once trusted publishing is configured on npm for every package, delete this env block and the
+          # NPM_TOKEN secret, and id-token: write is what npm trusts.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
