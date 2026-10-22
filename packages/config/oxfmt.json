@@ -1,0 +1,61 @@
+{
+  "printWidth": 120,
+  "tabWidth": 2,
+  "semi": true,
+  "singleQuote": true,
+  "useTabs": false,
+  "trailingComma": "es5",
+  "bracketSpacing": true,
+  "arrowParens": "always",
+  "endOfLine": "lf",
+  "proseWrap": "preserve",
+  "quoteProps": "as-needed",
+  "jsxSingleQuote": false,
+  "sortPackageJson": false,
+  "sortImports": {
+    "newlinesBetween": true,
+    "ignoreCase": false,
+    "customGroups": [
+      {
+        "groupName": "react",
+        "elementNamePattern": [
+          "react",
+          "react/**",
+          "react-native",
+          "react-native**"
+        ]
+      }
+    ],
+    "groups": [
+      "side_effect",
+      "react",
+      {
+        "newlinesBetween": false
+      },
+      [
+        "builtin",
+        "external"
+      ],
+      [
+        "parent",
+        "sibling",
+        "index"
+      ],
+      "unknown"
+    ]
+  },
+  "ignorePatterns": [
+    "**/routeTree.gen.ts",
+    "**/dist/**",
+    "**/.vercel/**",
+    "**/.output/**",
+    "**/playwright-report/**",
+    "**/*.md",
+    "**/*.json",
+    "**/*.jsonc",
+    "**/*.css",
+    "**/*.html",
+    "**/*.yml",
+    "**/*.yaml"
+  ]
+}

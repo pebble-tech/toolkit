@@ -1,0 +1,3 @@
+{
+  "extends": "@pebbletech/config/tsconfig.base.json"
+}

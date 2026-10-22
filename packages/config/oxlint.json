@@ -1,0 +1,24 @@
+{
+  "plugins": [
+    "eslint",
+    "unicorn",
+    "oxc",
+    "typescript",
+    "react",
+    "vitest"
+  ],
+  "rules": {
+    "eqeqeq": "error",
+    "unicorn/no-anonymous-default-export": "error",
+    "no-console": "error",
+    "react/exhaustive-deps": "error",
+    "react/rules-of-hooks": "error",
+    "vitest/expect-expect": "error",
+    "vitest/no-conditional-expect": "error",
+    "vitest/valid-expect": "error",
+    "vitest/no-disabled-tests": "error",
+    "vitest/no-focused-tests": "error",
+    "vitest/no-identical-title": "error",
+    "vitest/no-standalone-expect": "error"
+  }
+}
