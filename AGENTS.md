@@ -19,10 +19,15 @@ compiled ESM (`dist/`) plus any files its `files` list names. See `README.md` fo
 
 ## Tests
 
-- Vitest, one project per package (`packages/*/vitest.config.ts`), tests next to the code as `src/**/*.test.ts`.
-  `pnpm test -- <path>` narrows the run.
+- Vitest, one project per package and per example (`packages/*/vitest.config.ts`, `examples/*/vitest.config.ts`),
+  tests next to the code as `src/**/*.test.ts`. `pnpm test -- <path>` narrows the run.
 - Pure logic gets a unit test that calls it the way a consumer does.
 - Never mock owned code. Fake an external service at its boundary.
+- Pulumi components and programs run under `pulumi.runtime.setMocks` through `@pebbletech/infra/testing`
+  (`runProgram`): the Pulumi engine is the one thing faked. Components, `Stage` and the provider SDKs run for real,
+  and tests assert on what the engine received (types, names, inputs, `protect`, `retainOnDelete`, import ids).
+- `examples/*` tests import `@pebbletech/infra` from its source (a vitest alias), because the infra pack test rebuilds
+  `dist/` while they run. The tarball itself is proved by the pack listing test.
 - A test you add or change must fail on the code before your change and pass after it. There is no CI gate for this
   yet: run it by hand and say so in the PR.
 - oxlint runs the vitest rules: every test asserts, no conditional or standalone `expect`, no `.skip` / `.only`.
