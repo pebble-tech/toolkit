@@ -7,6 +7,8 @@ compiled ESM (`dist/`) plus any files its `files` list names. See `README.md` fo
 
 - Node 24 (`.node-version`, `engines >=24`; published packages declare `>=22.14`) and the pnpm in `packageManager`:
   `corepack enable` or `corepack pnpm`.
+- A script that calls pnpm again writes it as `"$npm_execpath"`, so the nested call runs the pnpm that started the
+  script rather than whichever `pnpm` is first on PATH.
 - pnpm 12 refuses unapproved build scripts: `allowBuilds` in `pnpm-workspace.yaml` is the list.
 - Shared version pins go in the `catalog` in `pnpm-workspace.yaml`; everything else is pinned exactly.
 
