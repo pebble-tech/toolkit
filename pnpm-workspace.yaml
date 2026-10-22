@@ -1,11 +1,17 @@
 packages:
   - packages/*
 allowBuilds:
+  # protobufjs (through @pulumi/pulumi) only prints a version-scheme warning from postinstall
+  protobufjs: false
   simple-git-hooks: true
 catalog:
+  '@pulumi/pulumi': 3.271.0
   '@types/node': 24.19.2
   typescript: 7.0.2
   vitest: 5.0.5
 
 overrides:
   '@types/node': 'catalog:'
+# Published 2026-10-21; inside pnpm's default one-day minimumReleaseAge when this was added. Remove once it ages out.
+minimumReleaseAgeExclude:
+  - '@pulumi/pulumi@3.271.0'

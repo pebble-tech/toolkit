@@ -1,0 +1,59 @@
+{
+  "name": "@pebbletech/infra",
+  "version": "0.0.0",
+  "description": "Pulumi components for Pebble product stacks: stage naming, Vercel, Postgres, Lambda, Workers and deploy roles",
+  "keywords": [
+    "pebbletech",
+    "pulumi"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pebble-tech/toolkit.git",
+    "directory": "packages/infra"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "default": "./dist/testing.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc --project tsconfig.build.json",
+    "prepack": "pnpm run build"
+  },
+  "dependencies": {
+    "@pulumi/aws": "7.51.1",
+    "@pulumi/cloudflare": "6.23.1",
+    "@pulumi/postgresql": "3.18.2",
+    "@pulumi/random": "4.21.4",
+    "@pulumiverse/vercel": "5.21.1"
+  },
+  "peerDependencies": {
+    "@pulumi/pulumi": "^3.271.0"
+  },
+  "devDependencies": {
+    "@pulumi/pulumi": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
