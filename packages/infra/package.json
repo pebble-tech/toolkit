@@ -35,7 +35,7 @@
   ],
   "scripts": {
     "build": "rm -rf dist && tsc --project tsconfig.build.json",
-    "prepack": "pnpm run build"
+    "prepack": "\"$npm_execpath\" run build"
   },
   "dependencies": {
     "@pulumi/aws": "7.51.1",
