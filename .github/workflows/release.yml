@@ -35,7 +35,8 @@ jobs:
         run: pnpm verify
 
       # Pending changesets: open or update the "Version packages" PR.
-      # None pending: publish every package whose version is not on npm yet (prepack builds dist/).
+      # None pending: `changeset publish` runs `pnpm publish` for every package whose version is not on npm yet
+      # (prepack builds dist/) and tags each one; the action pushes the tags and creates the GitHub releases.
       - name: Version PR or publish
         uses: changesets/action@v2
         with:
