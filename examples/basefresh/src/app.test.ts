@@ -1,0 +1,154 @@
+import { defaultMocks, type Registration, runProgram } from '@pebbletech/infra/testing';
+import type * as pulumi from '@pulumi/pulumi';
+import { join } from 'node:path';
+import { describe, expect, test } from 'vitest';
+
+import { basefresh, type BasefreshInputs } from './app.js';
+
+const root = join(import.meta.dirname, '..');
+const inputs = (stack: string): BasefreshInputs => ({
+  apex: 'pebbletech.my',
+  cloudflareZoneId: 'zone-1',
+  cloudflareAccountId: 'account-1',
+  pgAdminUrl: 'postgresql://postgres.abc123:admin@sin.pg.psdb.cloud:5432/postgres',
+  ...(stack.startsWith('pr-') || stack === 'shared' ? {} : { pgOwner: { role: 'basefresh_app', password: 'owner' } }),
+  sharedStack: 'organization/basefresh/shared',
+  authSecret: 'auth-secret',
+  bundles: { api: join(root, 'bundles/api'), uploads: join(root, 'bundles/uploads/server.js') },
+});
+
+// The shared stack's outputs, as a StackReference reads them.
+const mocks: pulumi.runtime.Mocks = {
+  ...defaultMocks,
+  newResource(args) {
+    if (args.type === 'pulumi:pulumi:StackReference') {
+      return {
+        id: args.inputs.name,
+        state: {
+          name: args.inputs.name,
+          outputs: { projectId: 'prj_basefresh', customEnvironmentIds: { staging: 'env_staging' } },
+          secretOutputNames: [],
+        },
+      };
+    }
+    return defaultMocks.newResource(args);
+  },
+};
+
+const run = (stack: string) => runProgram({ project: 'basefresh', stack, mocks }, () => basefresh(inputs(stack)));
+
+/** `type name physical-name`, one line per registered resource. */
+function summary(resources: Registration[]): string[] {
+  return resources
+    .map((r) => {
+      const i = r.inputs;
+      const physical = i.name ?? i.scriptName ?? i.domainName ?? i.domain ?? i.hostname ?? i.key ?? '';
+      return `${r.type} ${r.name} ${physical}`.trim();
+    })
+    .sort();
+}
+
+const DATABASE_STAGE = (db: string) => [
+  'pebbletech:index:Database db',
+  'postgresql:index/database:Database db ' + db,
+  'postgresql:index/grant:Grant db-revoke-public',
+  'postgresql:index/grantRole:GrantRole db-admin-member',
+  'pulumi:providers:postgresql db-admin',
+];
+
+const RUNTIME = (env: string, suffix: string) => {
+  const host = (kind: string) => `${kind}-basefresh${suffix}.pebbletech.my`;
+  return [
+    'aws:acm/certificate:Certificate api-certificate ' + host('api'),
+    'aws:acm/certificateValidation:CertificateValidation api-certificate-validated',
+    `aws:apigatewayv2/api:Api api-api basefresh-${env}-api`,
+    'aws:apigatewayv2/apiMapping:ApiMapping api-mapping ' + host('api'),
+    'aws:apigatewayv2/domainName:DomainName api-domain ' + host('api'),
+    'aws:apigatewayv2/integration:Integration api-integration',
+    'aws:apigatewayv2/route:Route api-route',
+    'aws:apigatewayv2/stage:Stage api-stage $default',
+    `aws:cloudwatch/logGroup:LogGroup api-logs /aws/lambda/basefresh-${env}-api`,
+    `aws:iam/role:Role api-role basefresh-${env}-api`,
+    'aws:iam/rolePolicyAttachment:RolePolicyAttachment api-basic-execution',
+    `aws:lambda/function:Function api basefresh-${env}-api`,
+    'aws:lambda/permission:Permission api-invoke',
+    'cloudflare:index/dnsRecord:DnsRecord api-certificate-validation _validation.' + host('api'),
+    'cloudflare:index/dnsRecord:DnsRecord api-cname ' + host('api'),
+    'cloudflare:index/dnsRecord:DnsRecord web-cname ' + host('app'),
+    `cloudflare:index/r2Bucket:R2Bucket uploads-bucket basefresh-${env}-uploads`,
+    'cloudflare:index/workersCustomDomain:WorkersCustomDomain uploads-domain ' + host('uploads'),
+    `cloudflare:index/workersScript:WorkersScript uploads basefresh-${env}-uploads`,
+    'pebbletech:index:ApiFunction api',
+    'pebbletech:index:Stage stage',
+    'pebbletech:index:VercelProject web',
+    'pebbletech:index:Worker uploads',
+    'vercel:index/projectDomain:ProjectDomain web-domain ' + host('app'),
+    'vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable web-env-APP_BASE_URL APP_BASE_URL',
+    'vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable web-env-BETTER_AUTH_SECRET BETTER_AUTH_SECRET',
+    'vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable web-env-DATABASE_URL DATABASE_URL',
+    'vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable web-env-NODE_ENV NODE_ENV',
+    'vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable web-env-UPLOADS_BASE_URL UPLOADS_BASE_URL',
+  ];
+};
+
+describe('basefresh program', () => {
+  test('shared owns the Vercel project, its staging environment and the bypass, nothing else', async () => {
+    const { resources, result } = await run('shared');
+    expect(summary(resources)).toEqual([
+      'pebbletech:index:Stage stage',
+      'pebbletech:index:VercelProject web',
+      'vercel:index/customEnvironment:CustomEnvironment web-staging staging',
+      'vercel:index/project:Project web basefresh-web',
+      'vercel:index/projectProtectionBypass:ProjectProtectionBypass web-bypass',
+    ]);
+    expect(Object.keys(result).sort()).toEqual(['bypassSecret', 'customEnvironmentIds', 'projectId']);
+  });
+
+  test('pr-7 owns one database and its login role, nothing else', async () => {
+    const { resources } = await run('pr-7');
+    expect(summary(resources)).toEqual([
+      'pebbletech:index:Database db',
+      'pebbletech:index:Stage stage',
+      'postgresql:index/database:Database db basefresh_pr_7',
+      'postgresql:index/grant:Grant db-revoke-public',
+      'postgresql:index/grantRole:GrantRole db-admin-member',
+      'postgresql:index/role:Role db-owner basefresh_pr_7',
+      'pulumi:providers:postgresql db-admin',
+      'random:index/randomPassword:RandomPassword db-owner-password',
+    ]);
+  });
+
+  test('staging builds the database, API, Worker and web env under -stg hostnames and basefresh_stg', async () => {
+    const { resources } = await run('staging');
+    expect(summary(resources)).toEqual([...DATABASE_STAGE('basefresh_stg'), ...RUNTIME('staging', '-stg')].sort());
+  });
+
+  test('prod builds the same set under unsuffixed hostnames and basefresh_prd, all protected and retained', async () => {
+    const { resources } = await run('prod');
+    expect(summary(resources)).toEqual([...DATABASE_STAGE('basefresh_prd'), ...RUNTIME('prod', '')].sort());
+    const exposed = resources.filter((r) => r.custom && !r.type.startsWith('pulumi:providers:'));
+    expect(exposed.filter((r) => !r.protect || !r.retainOnDelete).map((r) => r.name)).toEqual([]);
+  });
+
+  test('staging web env goes to the shared custom environment; prod to the production target', async () => {
+    const env = (resources: Registration[]) =>
+      resources
+        .filter((r) => r.type === 'vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable')
+        .map((r) => [r.inputs.projectId, r.inputs.customEnvironmentIds ?? r.inputs.targets]);
+    expect(new Set(env((await run('staging')).resources).map((e) => JSON.stringify(e)))).toEqual(
+      new Set([JSON.stringify(['prj_basefresh', ['env_staging']])])
+    );
+    expect(new Set(env((await run('prod')).resources).map((e) => JSON.stringify(e)))).toEqual(
+      new Set([JSON.stringify(['prj_basefresh', ['production']])])
+    );
+  });
+
+  test('every IAM role in every stack carries a permissions boundary', async () => {
+    for (const stack of ['shared', 'pr-7', 'staging', 'prod']) {
+      const { resources } = await run(stack);
+      for (const role of resources.filter((r) => r.type === 'aws:iam/role:Role')) {
+        expect([stack, role.inputs.permissionsBoundary]).toEqual([stack, expect.stringMatching(/:policy\/basefresh-/)]);
+      }
+    }
+  });
+});

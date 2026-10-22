@@ -1,4 +1,8 @@
 {
   "files": [],
-  "references": [{ "path": "./packages/config" }, { "path": "./packages/infra" }]
+  "references": [
+    { "path": "./packages/config" },
+    { "path": "./packages/infra" },
+    { "path": "./examples/basefresh" }
+  ]
 }

@@ -1,5 +1,6 @@
 packages:
   - packages/*
+  - examples/*
 allowBuilds:
   # protobufjs (through @pulumi/pulumi) only prints a version-scheme warning from postinstall
   protobufjs: false
