@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { basefresh, type BasefreshInputs } from './app.js';
+import { bootstrap } from './bootstrap.js';
 
 const root = join(import.meta.dirname, '..');
 const inputs = (stack: string): BasefreshInputs => ({
@@ -151,4 +152,40 @@ describe('basefresh program', () => {
       }
     }
   });
+
+  test.each(['staging', 'prod'] as const)(
+    "%s: the deploy role's IAM scope covers every role, function and log group the stack creates",
+    async (env) => {
+      const { resources: roleResources } = await runProgram({ project: 'basefresh-bootstrap', stack: env }, () =>
+        bootstrap({
+          env,
+          oidcProviderArn: 'arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com',
+          stateBucket: 'pebble-stg-pulumi-state',
+          kmsKeyArn: 'arn:aws:kms:ap-southeast-1:123456789012:key/abc',
+        })
+      );
+      const policy = JSON.parse(
+        roleResources.find((r) => r.type === 'aws:iam/rolePolicy:RolePolicy')!.inputs.policy
+      ) as { Statement: { Sid: string; Resource: string | string[] }[] };
+      const allows = (sid: string, arn: string) =>
+        [policy.Statement.find((s) => s.Sid === sid)!.Resource]
+          .flat()
+          .some((glob) =>
+            new RegExp(`^${glob.replace(/[.+?^${}()|[\]\\/]/g, '\\$&').replace(/\*/g, '.*')}$`).test(arn)
+          );
+      const boundaryArn = roleResources.find((r) => r.type === 'pebbletech:index:DeployRole')!.outputs!.boundaryArn;
+
+      const { resources } = await run(env);
+      const role = resources.find((r) => r.type === 'aws:iam/role:Role')!;
+      const fn = resources.find((r) => r.type === 'aws:lambda/function:Function')!;
+      const logs = resources.find((r) => r.type === 'aws:cloudwatch/logGroup:LogGroup')!;
+      expect([
+        allows('RolesOnlyWithBoundary', `arn:aws:iam::123456789012:role/${role.inputs.name}`),
+        allows('PassRolesToLambda', `arn:aws:iam::123456789012:role/${role.inputs.name}`),
+        allows('Lambda', `arn:aws:lambda:ap-southeast-1:123456789012:function:${fn.inputs.name}`),
+        allows('Logs', `arn:aws:logs:ap-southeast-1:123456789012:log-group:${logs.inputs.name}`),
+        role.inputs.permissionsBoundary,
+      ]).toEqual([true, true, true, true, boundaryArn]);
+    }
+  );
 });
