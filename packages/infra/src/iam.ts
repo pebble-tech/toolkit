@@ -23,11 +23,8 @@ export function defaultBoundaryArn(stage: Stage, parent: pulumi.Resource): pulum
 
 /** Throws PermissionsBoundaryError unless the boundary is given and, when known now, an IAM policy ARN. */
 export function assertBoundary(boundary: pulumi.Input<string> | undefined): asserts boundary is pulumi.Input<string> {
-  if (boundary === undefined || boundary === null || boundary === '') {
-    throw new PermissionsBoundaryError('an IAM role needs a permissions boundary');
-  }
-  if (typeof boundary === 'string' && !POLICY_ARN.test(boundary)) {
-    throw new PermissionsBoundaryError(`permissions boundary "${boundary}" is not an IAM policy ARN`);
+  if (typeof boundary === 'string' ? !POLICY_ARN.test(boundary) : boundary === undefined || boundary === null) {
+    throw new PermissionsBoundaryError(`an IAM role needs a permissions boundary policy ARN (got "${boundary}")`);
   }
 }
 

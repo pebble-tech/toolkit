@@ -161,10 +161,12 @@ describe('ApiFunction', () => {
     ).rejects.toThrow(NamespaceError);
   });
 
-  test.each(['', 'not-an-arn', 'arn:aws:iam::123456789012:role/x'])(
+  test.each([null, '', 'not-an-arn', 'arn:aws:iam::123456789012:role/x'])(
     'refuses the permissions boundary "%s"',
     async (permissionsBoundary) => {
-      await expect(apiIn('staging', { permissionsBoundary })).rejects.toThrow(PermissionsBoundaryError);
+      await expect(apiIn('staging', { permissionsBoundary: permissionsBoundary as string })).rejects.toThrow(
+        PermissionsBoundaryError
+      );
     }
   );
 
