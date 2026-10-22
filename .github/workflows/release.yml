@@ -16,8 +16,12 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # The action pushes the version commit and tags through the GitHub API with its own token, so install and
+      # verify scripts get no persisted write credential.
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
