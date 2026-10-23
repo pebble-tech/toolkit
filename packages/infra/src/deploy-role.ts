@@ -242,7 +242,10 @@ export class DeployRole extends pulumi.ComponentResource {
         Effect: 'Allow',
         Action: 'iam:PassRole',
         Resource: roles,
-        Condition: { StringEquals: { 'iam:PassedToService': 'lambda.amazonaws.com' } },
+        // Only roles that carry the boundary: a leftover role in the name glob without it cannot be passed.
+        Condition: {
+          StringEquals: { 'iam:PassedToService': 'lambda.amazonaws.com', 'iam:PermissionsBoundary': boundaryArn },
+        },
       },
       {
         Sid: 'NeverTouchSelfOrBoundary',

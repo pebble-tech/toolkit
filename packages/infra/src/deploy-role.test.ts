@@ -94,7 +94,9 @@ describe('DeployRole', () => {
     });
     expect(statement(policy, 'PassRolesToLambda')).toMatchObject({
       Resource: 'arn:aws:iam::*:role/basefresh-staging-*',
-      Condition: { StringEquals: { 'iam:PassedToService': 'lambda.amazonaws.com' } },
+      Condition: {
+        StringEquals: { 'iam:PassedToService': 'lambda.amazonaws.com', 'iam:PermissionsBoundary': boundary },
+      },
     });
     expect(statement(policy, 'NeverTouchSelfOrBoundary')).toEqual({
       Sid: 'NeverTouchSelfOrBoundary',
