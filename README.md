@@ -6,6 +6,7 @@ copying config and infrastructure code from base-app.
 | Package | What it carries |
 |---|---|
 | [`@pebbletech/config`](packages/config) | base-app's tsconfig base, oxlint and oxfmt presets, and the lint-staged map |
+| [`@pebbletech/infra`](packages/infra) | Pulumi components for a product's `infra/` program: `Stage`, `VercelProject`, `Database`, `ApiFunction`, `Worker`, `DeployRole` |
 
 ## Use `@pebbletech/config`
 
@@ -17,6 +18,22 @@ echo '{ "extends": ["./node_modules/@pebbletech/config/oxlint.json"] }' > .oxlin
 
 oxfmt has no `extends`: spread `@pebbletech/config/oxfmt.json` in `oxfmt.config.ts` and add the product's import
 groups. [packages/config/README.md](packages/config/README.md) has the example and the lint-staged setup.
+
+## Use `@pebbletech/infra`
+
+```sh
+pnpm add @pebbletech/infra @pulumi/pulumi
+```
+
+A product's `infra/` program builds every stage from one `Stage` (`pr-<n>`, `staging`, `prod`, plus `shared` for the
+Vercel project). Names stay inside `<product>-<env>`, roles carry a permissions boundary, APIs need a custom domain,
+and prod resources are protected and retained; the components refuse anything else. Compile the program with `tsc`
+and run Pulumi with `typescript: false`, since Pulumi's TypeScript peer is `<7`; install with pnpm, because npm
+refuses that optional peer next to TypeScript 7 without an `overrides` entry or `--legacy-peer-deps`. `shared` and
+`prod` are protected, so their teardown starts with `pulumi state unprotect --all`. `DeployRole`'s API Gateway
+permission covers every HTTP API in the account (API ids are random); the rest is scoped to the product and env.
+[packages/infra/README.md](packages/infra/README.md) has the components, the naming table and the precompile setup;
+[examples/basefresh](examples/basefresh) is a whole product program with tests.
 
 ## Develop
 

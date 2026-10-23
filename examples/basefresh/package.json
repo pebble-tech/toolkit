@@ -1,0 +1,20 @@
+{
+  "name": "@pebbletech/example-basefresh",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Second-product proof: basefresh's infra/ program built from @pebbletech/infra",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "rm -rf dist && tsc --project tsconfig.build.json"
+  },
+  "dependencies": {
+    "@pebbletech/infra": "workspace:*",
+    "@pulumi/pulumi": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

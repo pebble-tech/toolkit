@@ -1,0 +1,7 @@
+name: basefresh-bootstrap
+description: basefresh deploy roles (stacks preview, staging, prod), applied by hand with SSO
+runtime:
+  name: nodejs
+  options:
+    typescript: false
+main: ../dist/bootstrap-main.js
