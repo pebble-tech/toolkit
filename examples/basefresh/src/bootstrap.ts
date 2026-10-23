@@ -6,6 +6,7 @@ export function bootstrap(env: DeployEnv): Record<string, pulumi.Input<unknown>>
   const role = new DeployRole('deploy', {
     product: 'basefresh',
     env,
+    apex: 'pebbletech.my',
     github: { org: 'pebble-tech', repo: 'basefresh' },
   });
   return { roleArn: role.roleArn, boundaryArn: role.boundaryArn };

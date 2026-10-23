@@ -229,7 +229,12 @@ describe('the OIDC provider', () => {
 
   test('the provider DeployRole trusts is the one the bootstrap adopts', async () => {
     const { resources } = await runProgram({ project: 'p', stack: 'staging', mocks: mocks() }, () => {
-      new DeployRole('deploy', { product: 'anyproduct', env: 'staging', github: { org: 'o', repo: 'r' } });
+      new DeployRole('deploy', {
+        product: 'anyproduct',
+        env: 'staging',
+        apex: 'pebbletech.my',
+        github: { org: 'o', repo: 'r' },
+      });
     });
     const role = ofType(resources, 'aws:iam/role:Role')[0]!;
     expect(JSON.parse(role.inputs.assumeRolePolicy).Statement[0].Principal.Federated).toBe(OIDC_ARN);
@@ -241,7 +246,7 @@ describe('names shared with DeployRole', () => {
   async function deployRoleNames(env: DeployEnv) {
     const lookups: string[] = [];
     const { resources } = await runProgram({ project: 'p', stack: env, mocks: mocks(lookups) }, () => {
-      new DeployRole('deploy', { product: 'anyproduct', env, github: { org: 'o', repo: 'r' } });
+      new DeployRole('deploy', { product: 'anyproduct', env, apex: 'pebbletech.my', github: { org: 'o', repo: 'r' } });
     });
     const policy = JSON.parse(ofType(resources, 'aws:iam/rolePolicy:RolePolicy')[0]!.inputs.policy);
     const bucketArn: string = policy.Statement.find((s: { Sid: string }) => s.Sid === 'StateList').Resource;

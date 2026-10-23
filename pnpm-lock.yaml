@@ -242,6 +242,9 @@ importers:
       '@pulumi/pulumi':
         specifier: 'catalog:'
         version: 3.271.0(typescript@7.0.2)
+      '@pulumiverse/vercel':
+        specifier: 5.21.1
+        version: 5.21.1(typescript@7.0.2)
     devDependencies:
       '@types/node':
         specifier: 24.19.2

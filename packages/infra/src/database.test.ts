@@ -129,9 +129,7 @@ describe('Database', () => {
   });
 
   test('refuses a product id whose database name would pass 63 characters', async () => {
-    await expect(databaseIn('staging', { owner: OWNER }, `basefresh-${'x'.repeat(60)}`)).rejects.toThrow(
-      DatabaseNameError
-    );
+    await expect(databaseIn('staging', { owner: OWNER }, `b${'x'.repeat(60)}`)).rejects.toThrow(DatabaseNameError);
   });
 
   test.each(['basefresh_stg', 'basefresh_prd'])(

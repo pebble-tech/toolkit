@@ -30,9 +30,12 @@ export interface VercelProjectArgs {
   teamId?: pulumi.Input<string>;
   /** `shared` stack only: the project itself. */
   project?: VercelProjectSettings;
-  /** `staging`/`prod`: the shared stack's `projectId` (a StackReference output). */
+  /** `staging`/`prod`: the shared project's id, from `vercel.getProjectOutput({ name })`. */
   projectId?: pulumi.Input<string>;
-  /** `staging`: the shared stack's custom environment id for this stage. Prod targets `production`. */
+  /**
+   * `staging`: that project's custom environment id, from `vercel.getCustomEnvironmentOutput`.
+   * Prod targets `production`.
+   */
   customEnvironmentId?: pulumi.Input<string>;
   /** Plain env vars. Names that look like secrets are refused unless listed in `plainTextAllowed`. */
   vars?: Record<string, pulumi.Input<string>>;

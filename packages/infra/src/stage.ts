@@ -10,7 +10,7 @@ export type StageEnv = 'staging' | 'prod' | 'shared' | `pr-${number}`;
 export type StageKind = 'preview' | 'staging' | 'prod' | 'shared';
 
 export interface StageArgs {
-  /** Product id, lowercase kebab case (`base`, `basefresh`). The `pebble` prefix is reserved for shared infrastructure. */
+  /** Product id: one DNS label (`base`, `basefresh`). The `pebble` prefix is reserved for shared infrastructure. */
   product: string;
   /** Pulumi stack name; defaults to the running stack. */
   stack?: string;
@@ -85,16 +85,20 @@ export function githubEnvironment(env: DeployEnv): string {
 }
 
 const SLUG = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+/** One DNS label. A hyphen would let `*-<product>.*` match another product that ends in `-<product>`. */
+const LABEL = /^[a-z][a-z0-9]{1,}$/;
 const PREVIEW = /^pr-([1-9][0-9]*)$/;
 
-/** Throws StageError unless `product` is a kebab-case id outside the reserved `pebble` prefix. */
+/** Throws StageError unless `product` is one DNS label outside the reserved `pebble` prefix. */
 export function assertProduct(product: string): void {
-  if (!SLUG.test(product)) {
-    throw new StageError(`product id "${product}" must be lowercase kebab case, e.g. "basefresh"`);
+  if (!LABEL.test(product)) {
+    throw new StageError(
+      `product id "${product}" must be one DNS label: lowercase letters and digits, no hyphen, at least two characters`
+    );
   }
-  // A segment like `staging` or `pr` would let one product's names fall inside another's `<product>-<env>-*` scope.
-  if (product.split('-').some((segment) => ['pr', 'staging', 'prod', 'shared'].includes(segment))) {
-    throw new StageError(`product id "${product}" contains an env word (pr, staging, prod, shared) as a segment`);
+  // `staging` or `pr` as the whole id would let one product's names fall inside another's `<product>-<env>-*` scope.
+  if (['pr', 'staging', 'prod', 'shared'].includes(product)) {
+    throw new StageError(`product id "${product}" is an env word (pr, staging, prod, shared)`);
   }
   if (product.startsWith('pebble')) {
     throw new StageError(`product id "${product}" starts with "pebble", which is reserved for shared infrastructure`);
@@ -110,6 +114,14 @@ function parseEnv(stack: string): { env: StageEnv; kind: StageKind; pr?: number 
 
 function assertSlug(what: string, value: string): void {
   if (!SLUG.test(value)) throw new NamespaceError(`${what} "${value}" must be lowercase kebab case`);
+}
+
+function assertLabel(what: string, value: string): void {
+  if (!LABEL.test(value)) {
+    throw new NamespaceError(
+      `${what} "${value}" must be one DNS label: lowercase letters and digits, no hyphen, at least two characters`
+    );
+  }
 }
 
 /**
@@ -151,7 +163,7 @@ export class Stage extends pulumi.ComponentResource {
 
   /** `<product>-<env>[-kind][-suffix]`: the only shape a product resource name may take. */
   name(kind?: string, suffix?: string): string {
-    if (kind !== undefined) assertSlug('kind', kind);
+    if (kind !== undefined) assertLabel('kind', kind);
     if (suffix !== undefined) assertSlug('suffix', suffix);
     return [this.product, this.env, kind, suffix].filter(Boolean).join('-');
   }
@@ -165,7 +177,7 @@ export class Stage extends pulumi.ComponentResource {
 
   /** `<kind>-<product>[-<suffix>].<apex>`, e.g. `api-base-stg.pebbletech.my` on staging, `api-base.pebbletech.my` on prod. */
   hostname(kind: string, apex: string): string {
-    assertSlug('kind', kind);
+    assertLabel('kind', kind);
     const suffix = this.domainSuffix;
     return `${kind}-${this.product}${suffix ? `-${suffix}` : ''}.${apex}`;
   }

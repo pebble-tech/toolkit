@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { DeployRole, type DeployRoleArgs, StageError } from './index.js';
+import { DeployRole, type DeployRoleArgs, Stage, StageError } from './index.js';
 import { runProgram } from './testing.js';
 
 const OIDC = 'arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com';
@@ -12,6 +12,7 @@ async function roleFor(env: DeployRoleArgs['env'], extra: Partial<DeployRoleArgs
       new DeployRole('deploy', {
         product: 'basefresh',
         env,
+        apex: 'pebbletech.my',
         github: { org: 'pebble-tech', repo: 'basefresh' },
         ...extra,
       })
@@ -20,6 +21,37 @@ async function roleFor(env: DeployRoleArgs['env'], extra: Partial<DeployRoleArgs
 
 const find = (resources: { type: string }[], type: string) => resources.find((r) => r.type === type) as any;
 const statement = (policy: any, sid: string) => policy.Statement.find((s: any) => s.Sid === sid);
+const asList = (value: unknown): unknown[] => (Array.isArray(value) ? value : [value]);
+const gatewayArn = (path: string) => `arn:aws:apigateway:ap-southeast-1::${path}`;
+
+function iamMatches(pattern: string, value: string): boolean {
+  return new RegExp(
+    '^' +
+      pattern
+        .split('*')
+        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('.*') +
+      '$'
+  ).test(value);
+}
+
+/** StringLike / StringLikeIfExists against the policy document. Not the IAM simulator. */
+function allows(policy: { Statement: any[] }, action: string, resource: string, context: Record<string, string> = {}) {
+  const matching = policy.Statement.filter(
+    (s) =>
+      asList(s.Action).some((item) => iamMatches(String(item), action)) &&
+      asList(s.Resource).some((item) => iamMatches(String(item), resource)) &&
+      Object.entries(s.Condition ?? {}).every(([op, entries]) => {
+        if (op !== 'StringLike' && op !== 'StringLikeIfExists') throw new Error(`unsupported operator ${op}`);
+        return Object.entries(entries as Record<string, string>).every(([key, value]) =>
+          context[key] === undefined
+            ? op.endsWith('IfExists')
+            : asList(value).some((pattern) => iamMatches(String(pattern), context[key]!))
+        );
+      })
+  );
+  return matching.some((s) => s.Effect === 'Allow') && !matching.some((s) => s.Effect === 'Deny');
+}
 
 describe('DeployRole', () => {
   test('creates the boundary policy, the role and its inline policy', async () => {
@@ -137,11 +169,157 @@ describe('DeployRole', () => {
     });
   });
 
-  test('a preview role covers every pr-<n> stack and nothing else', async () => {
+  test('a preview role allows only its state bucket and KMS key, and still publishes the boundary', async () => {
     const { resources } = await roleFor('preview');
     const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
-    expect(statement(policy, 'Lambda').Resource).toBe('arn:aws:lambda:*:*:function:basefresh-pr-*');
-    expect(statement(policy, 'CertificatesChangeOwn').Condition.StringLike['aws:ResourceTag/env']).toBe('pr-*');
+    expect(policy.Statement.map((s: { Sid: string }) => s.Sid)).toEqual(['StateList', 'StateObjects', 'StateSecrets']);
+    expect(find(resources, 'aws:iam/policy:Policy').inputs.name).toBe('basefresh-preview-boundary');
+    expect(find(resources, 'pebbletech:index:DeployRole').outputs.boundaryArn).toBe(
+      'arn:aws:iam::123456789012:policy/basefresh-preview-boundary'
+    );
+    expect(find(resources, 'pebbletech:index:DeployRole').outputs.roleArn).toBe(
+      'arn:aws:iam::123456789012:role/basefresh-preview-deploy'
+    );
+  });
+
+  test.each([
+    ['staging', 'basefresh-staging-*', 'arn:aws:apigateway:*::/domainnames/*-basefresh-stg.pebbletech.my'],
+    ['prod', 'basefresh-prod-*', 'arn:aws:apigateway:*::/domainnames/*-basefresh.pebbletech.my'],
+  ] as const)(
+    '%s creates an HTTP API only under its name, and reads domains only under its hostname',
+    async (env, apiName, domainArn) => {
+      const { resources } = await roleFor(env);
+      const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
+      const verbs = [
+        'apigateway:GET',
+        'apigateway:POST',
+        'apigateway:PUT',
+        'apigateway:PATCH',
+        'apigateway:DELETE',
+        'apigateway:TagResource',
+        'apigateway:UntagResource',
+      ];
+      expect(statement(policy, 'HttpApiCreate')).toEqual({
+        Sid: 'HttpApiCreate',
+        Effect: 'Allow',
+        Action: 'apigateway:POST',
+        Resource: 'arn:aws:apigateway:*::/apis',
+        Condition: { StringLike: { 'apigateway:Request/ApiName': apiName } },
+      });
+      expect(statement(policy, 'HttpApi')).toEqual({
+        Sid: 'HttpApi',
+        Effect: 'Allow',
+        Action: verbs,
+        Resource: 'arn:aws:apigateway:*::/apis/*',
+        Condition: {
+          StringLikeIfExists: {
+            'apigateway:Resource/ApiName': apiName,
+            'apigateway:Request/ApiName': apiName,
+          },
+        },
+      });
+      expect(statement(policy, 'HttpApiDomainCreate')).toEqual({
+        Sid: 'HttpApiDomainCreate',
+        Effect: 'Allow',
+        Action: 'apigateway:POST',
+        Resource: 'arn:aws:apigateway:*::/domainnames',
+      });
+      expect(statement(policy, 'HttpApiDomain')).toEqual({
+        Sid: 'HttpApiDomain',
+        Effect: 'Allow',
+        Action: ['apigateway:GET', 'apigateway:POST', 'apigateway:PUT', 'apigateway:PATCH', 'apigateway:DELETE'],
+        Resource: [domainArn, `${domainArn}/apimappings`, `${domainArn}/apimappings/*`],
+      });
+      expect(statement(policy, 'HttpApiTags')).toBeUndefined();
+    }
+  );
+
+  test.each(['staging', 'prod'] as const)('rename-refusal: %s cannot rename its API to other-prod-api', async (env) => {
+    const { resources } = await roleFor(env);
+    const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
+    const own = { 'apigateway:Resource/ApiName': `basefresh-${env}-api` };
+    expect(
+      allows(policy, 'apigateway:PATCH', gatewayArn('/apis/own-id'), {
+        ...own,
+        'apigateway:Request/ApiName': 'other-prod-api',
+      })
+    ).toBe(false);
+    expect(allows(policy, 'apigateway:PATCH', gatewayArn('/apis/own-id'), own)).toBe(true);
+    expect(
+      allows(policy, 'apigateway:PATCH', gatewayArn('/apis/own-id'), {
+        ...own,
+        'apigateway:Request/ApiName': `basefresh-${env}-renamed`,
+      })
+    ).toBe(true);
+  });
+
+  test.each(['staging', 'prod'] as const)('%s cannot tag or untag through /tags', async (env) => {
+    const { resources } = await roleFor(env);
+    const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
+    const tags = gatewayArn('/tags/' + encodeURIComponent(gatewayArn('/apis/foreign-id')));
+    expect([allows(policy, 'apigateway:POST', tags), allows(policy, 'apigateway:DELETE', tags)]).toEqual([
+      false,
+      false,
+    ]);
+  });
+
+  test.each(['pebbletech.my', 'tenant-basefresh-stg.com', 'tenant-basefresh.com'] as const)(
+    'hostname globs for apex %s match only the product and env that produced them',
+    async (apex) => {
+      const products = ['basefresh', 'basefreshstg', 'otherbasefresh'] as const;
+      const kinds = ['api', 'uploads', 'app'] as const;
+      const stacks = ['pr-7', 'staging', 'prod'] as const;
+      const hostnames: { product: string; stack: string; host: string }[] = [];
+      for (const product of products) {
+        for (const stack of stacks) {
+          const { result } = await runProgram({ project: product, stack }, () => {
+            const stage = new Stage('stage', { product });
+            return kinds.map((kind) => stage.hostname(kind, apex));
+          });
+          for (const host of result) hostnames.push({ product, stack, host });
+        }
+      }
+      for (const product of products) {
+        for (const env of ['staging', 'prod'] as const) {
+          const { resources } = await roleFor(env, { product, apex });
+          const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
+          const patterns = asList(statement(policy, 'HttpApiDomain').Resource).map(String);
+          const matched = hostnames.filter((row) =>
+            patterns.some((pattern) => iamMatches(pattern, gatewayArn(`/domainnames/${row.host}`)))
+          );
+          const own = hostnames.filter((row) => row.product === product && row.stack === env);
+          expect(own).toHaveLength(kinds.length);
+          expect(matched.map((row) => row.host).sort()).toEqual(own.map((row) => row.host).sort());
+          for (const host of own.map((row) => row.host)) {
+            const mapping = gatewayArn(`/domainnames/${host}/apimappings`);
+            expect([
+              allows(policy, 'apigateway:POST', mapping),
+              allows(policy, 'apigateway:GET', `${mapping}/mapping-id`),
+              allows(policy, 'apigateway:PATCH', `${mapping}/mapping-id`),
+              allows(policy, 'apigateway:DELETE', `${mapping}/mapping-id`),
+            ]).toEqual([true, true, true, true]);
+          }
+          const foreign = hostnames.find((row) => row.product !== product && row.stack === env)!;
+          expect(
+            allows(policy, 'apigateway:DELETE', gatewayArn(`/domainnames/${foreign.host}/apimappings/mapping-id`))
+          ).toBe(false);
+        }
+      }
+    }
+  );
+
+  test('residual: a sub-zone of the apex whose label ends with the product suffix matches', async () => {
+    const apex = 'pebbletech.my';
+    const staging = JSON.parse(
+      find((await roleFor('staging', { apex })).resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy
+    );
+    const prod = JSON.parse(
+      find((await roleFor('prod', { apex })).resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy
+    );
+    const matches = (policy: { Statement: unknown[] }, arn: string) =>
+      asList(statement(policy, 'HttpApiDomain').Resource).some((pattern) => iamMatches(String(pattern), arn));
+    expect(matches(staging, gatewayArn(`/domainnames/api-x-stg.foo-basefresh-stg.${apex}`))).toBe(true);
+    expect(matches(prod, gatewayArn(`/domainnames/api-x.foo-basefresh.${apex}`))).toBe(true);
   });
 
   test.each([
@@ -233,6 +411,17 @@ describe('DeployRole', () => {
   });
 
   test('refuses a pebble product', async () => {
-    await expect(roleFor('staging', { product: 'pebble-tools' })).rejects.toThrow(StageError);
+    await expect(roleFor('staging', { product: 'pebblefresh' })).rejects.toThrow(StageError);
   });
+
+  test('refuses a product id that is not one DNS label', async () => {
+    await expect(roleFor('staging', { product: 'other-basefresh' })).rejects.toThrow(/one DNS label/);
+  });
+
+  test.each(['', 'pebbletech.my.', '.pebbletech.my', 'Pebbletech.my', 'pebbletech..my', 'pebble_tech.my'])(
+    'refuses an apex that is not a zone name: %s',
+    async (apex) => {
+      await expect(roleFor('staging', { apex })).rejects.toThrow(/zone name/);
+    }
+  );
 });

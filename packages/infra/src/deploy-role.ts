@@ -1,6 +1,7 @@
 import * as aws from '@pulumi/aws';
 import * as pulumi from '@pulumi/pulumi';
 
+import { StageError } from './errors.js';
 import {
   assertProduct,
   boundaryPolicyName,
@@ -12,10 +13,25 @@ import {
 
 const BASIC_EXECUTION = 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole';
 
+/** One DNS label in a zone name: letters, digits and hyphens, not starting or ending with a hyphen. */
+const APEX_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/** Throws StageError unless `apex` is a zone name of lowercase labels with no leading or trailing dot. */
+function assertApex(apex: string): void {
+  const labels = apex.split('.');
+  if (labels.some((label) => !APEX_LABEL.test(label))) {
+    throw new StageError(
+      `apex "${apex}" must be a registered zone name: lowercase labels separated by dots, no leading or trailing dot`
+    );
+  }
+}
+
 export interface DeployRoleArgs {
   product: string;
   /** The stacks this role deploys: `preview` covers every `pr-<n>` stack. */
   env: DeployEnv;
+  /** Registered zone name. Staging and prod domain globs end with this literal. */
+  apex: string;
   /** The product's repository. The trusted GitHub environment comes from `env` (`preview`, `staging`, `production`). */
   github: { org: string; repo: string };
 }
@@ -26,7 +42,10 @@ type Statement = Record<string, unknown>;
  * The role a product's GitHub workflow assumes for one env, plus the permissions boundary every role it creates must
  * carry. Applied by hand once per product and env from the product's `infra/bootstrap` stack. Everything that ties it
  * to an env (trusted GitHub environment, OIDC provider, state bucket and paths, KMS key) is derived from `product` and
- * `env`, so a role cannot be pointed at another env's state or tokens.
+ * `env`, so a role cannot be pointed at another env's state or tokens. Domain globs end with the given `apex`. A `preview`
+ * role deploys only `pr-<n>` stacks
+ * (a database and a SQL role on PlanetScale), so its policy is the state path and its KMS key. `staging` and `prod`
+ * also manage AWS resources named `<product>-<env>-*`.
  */
 export class DeployRole extends pulumi.ComponentResource {
   readonly roleArn: pulumi.Output<string>;
@@ -36,9 +55,10 @@ export class DeployRole extends pulumi.ComponentResource {
 
   constructor(name: string, args: DeployRoleArgs, opts?: pulumi.ComponentResourceOptions) {
     assertProduct(args.product);
+    assertApex(args.apex);
     super('pebbletech:index:DeployRole', name, {}, opts);
 
-    const { product, env } = args;
+    const { product, env, apex } = args;
     const scope = env === 'preview' ? `${product}-pr-*` : `${product}-${env}-*`;
     const roleName = `${product}-${env}-deploy`;
     const boundaryName = boundaryPolicyName(product, env);
@@ -107,149 +127,10 @@ export class DeployRole extends pulumi.ComponentResource {
 
     const { bucket, paths } = state;
     const roles = `arn:aws:iam::*:role/${scope}`;
-    // Stage tags carry the stack's env (`pr-7` on a preview).
     const tagged = (prefix: 'aws:RequestTag' | 'aws:ResourceTag') => ({
-      StringLike: { [`${prefix}/product`]: product, [`${prefix}/env`]: env === 'preview' ? 'pr-*' : env },
+      StringLike: { [`${prefix}/product`]: product, [`${prefix}/env`]: env },
     });
-    const statements = (boundaryArn: string, kmsKeyArn: string): Statement[] => [
-      {
-        Sid: 'Lambda',
-        Effect: 'Allow',
-        Action: [
-          'lambda:CreateFunction',
-          'lambda:DeleteFunction',
-          'lambda:Get*',
-          'lambda:List*',
-          'lambda:Update*',
-          'lambda:PublishVersion',
-          'lambda:AddPermission',
-          'lambda:RemovePermission',
-          'lambda:PutFunctionConcurrency',
-          'lambda:DeleteFunctionConcurrency',
-          'lambda:TagResource',
-          'lambda:UntagResource',
-        ],
-        Resource: `arn:aws:lambda:*:*:function:${scope}`,
-      },
-      {
-        Sid: 'HttpApi',
-        Effect: 'Allow',
-        Action: [
-          'apigateway:GET',
-          'apigateway:POST',
-          'apigateway:PUT',
-          'apigateway:PATCH',
-          'apigateway:DELETE',
-          'apigateway:TagResource',
-          'apigateway:UntagResource',
-        ],
-        Resource: [
-          'arn:aws:apigateway:*::/apis',
-          'arn:aws:apigateway:*::/apis/*',
-          'arn:aws:apigateway:*::/domainnames',
-          'arn:aws:apigateway:*::/domainnames/*',
-          'arn:aws:apigateway:*::/tags/*',
-        ],
-      },
-      {
-        Sid: 'CertificatesRead',
-        Effect: 'Allow',
-        Action: ['acm:DescribeCertificate', 'acm:ListCertificates', 'acm:ListTagsForCertificate'],
-        Resource: '*',
-      },
-      {
-        Sid: 'CertificatesCreateTagged',
-        Effect: 'Allow',
-        Action: ['acm:RequestCertificate', 'acm:AddTagsToCertificate'],
-        Resource: '*',
-        Condition: tagged('aws:RequestTag'),
-      },
-      {
-        Sid: 'CertificatesChangeOwn',
-        Effect: 'Allow',
-        Action: ['acm:DeleteCertificate', 'acm:RemoveTagsFromCertificate'],
-        Resource: '*',
-        Condition: tagged('aws:ResourceTag'),
-      },
-      {
-        Sid: 'Logs',
-        Effect: 'Allow',
-        Action: [
-          'logs:CreateLogGroup',
-          'logs:DeleteLogGroup',
-          'logs:PutRetentionPolicy',
-          'logs:DeleteRetentionPolicy',
-          'logs:TagResource',
-          'logs:UntagResource',
-          'logs:ListTagsForResource',
-          'logs:TagLogGroup',
-          'logs:UntagLogGroup',
-          'logs:ListTagsLogGroup',
-        ],
-        Resource: [
-          `arn:aws:logs:*:*:log-group:/aws/lambda/${scope}`,
-          `arn:aws:logs:*:*:log-group:/aws/lambda/${scope}:*`,
-        ],
-      },
-      { Sid: 'LogsDescribe', Effect: 'Allow', Action: 'logs:DescribeLogGroups', Resource: '*' },
-      {
-        Sid: 'RolesOnlyWithBoundary',
-        Effect: 'Allow',
-        Action: [
-          'iam:CreateRole',
-          'iam:PutRolePermissionsBoundary',
-          'iam:PutRolePolicy',
-          'iam:DeleteRolePolicy',
-          'iam:DetachRolePolicy',
-        ],
-        Resource: roles,
-        Condition: { StringEquals: { 'iam:PermissionsBoundary': boundaryArn } },
-      },
-      {
-        Sid: 'AttachOnlyBasicExecution',
-        Effect: 'Allow',
-        Action: 'iam:AttachRolePolicy',
-        Resource: roles,
-        Condition: {
-          StringEquals: { 'iam:PermissionsBoundary': boundaryArn },
-          ArnEquals: { 'iam:PolicyARN': BASIC_EXECUTION },
-        },
-      },
-      {
-        Sid: 'RolesManage',
-        Effect: 'Allow',
-        Action: [
-          'iam:GetRole',
-          'iam:GetRolePolicy',
-          'iam:ListRolePolicies',
-          'iam:ListAttachedRolePolicies',
-          'iam:ListInstanceProfilesForRole',
-          'iam:DeleteRole',
-          'iam:TagRole',
-          'iam:UntagRole',
-          'iam:UpdateRole',
-          'iam:UpdateRoleDescription',
-          'iam:UpdateAssumeRolePolicy',
-        ],
-        Resource: roles,
-      },
-      {
-        Sid: 'PassRolesToLambda',
-        Effect: 'Allow',
-        Action: 'iam:PassRole',
-        Resource: roles,
-        // PassRole's only condition keys are iam:PassedToService and iam:AssociatedResourceArn; a boundary condition
-        // here would deny every deploy. The write side carries it: this role can neither create a role in the glob
-        // nor change one's policies or boundary without the boundary, and can never delete a boundary.
-        Condition: { StringEquals: { 'iam:PassedToService': 'lambda.amazonaws.com' } },
-      },
-      {
-        Sid: 'NeverTouchSelfOrBoundary',
-        Effect: 'Deny',
-        Action: 'iam:*',
-        Resource: [`arn:aws:iam::*:role/${roleName}`, `arn:aws:iam::*:policy/${boundaryName}`],
-      },
-      { Sid: 'NeverDropBoundary', Effect: 'Deny', Action: 'iam:DeleteRolePermissionsBoundary', Resource: '*' },
+    const stateStatements = (kmsKeyArn: string): Statement[] => [
       {
         Sid: 'StateList',
         Effect: 'Allow',
@@ -270,6 +151,188 @@ export class DeployRole extends pulumi.ComponentResource {
         Resource: kmsKeyArn,
       },
     ];
+    const statements = (boundaryArn: string, kmsKeyArn: string): Statement[] => {
+      const stateOnly = stateStatements(kmsKeyArn);
+      if (env === 'preview') return stateOnly;
+      // Hostname suffix Stage.domainSuffix uses: `stg` on staging, none on prod (`<kind>-<product>[-stg].<apex>`).
+      // The apex is literal. `*` still matches a dot, so a name in a sub-zone of the apex whose label ends with
+      // `-<product>[-stg]` matches too.
+      const domainSuffix = env === 'staging' ? 'stg' : '';
+      const domainNames = `arn:aws:apigateway:*::/domainnames/*-${product}${domainSuffix ? `-${domainSuffix}` : ''}.${apex}`;
+      // The domain glob ends at the apex, so it does not cover Create/Get/Update/DeleteApiMapping.
+      const domainResources = [domainNames, `${domainNames}/apimappings`, `${domainNames}/apimappings/*`];
+      const apiName = `${product}-${env}-*`;
+      const httpApi: Statement[] = [
+        {
+          Sid: 'HttpApiCreate',
+          Effect: 'Allow',
+          Action: 'apigateway:POST',
+          Resource: 'arn:aws:apigateway:*::/apis',
+          Condition: { StringLike: { 'apigateway:Request/ApiName': apiName } },
+        },
+        {
+          // Resource/ApiName is on the API and absent on routes, integrations and stages, so IfExists lets those
+          // through. Request/ApiName is present on UpdateApi when the request sets Name, so a rename stays inside
+          // <product>-<env>-*. Residual: an edit under another API's id still succeeds.
+          Sid: 'HttpApi',
+          Effect: 'Allow',
+          Action: [
+            'apigateway:GET',
+            'apigateway:POST',
+            'apigateway:PUT',
+            'apigateway:PATCH',
+            'apigateway:DELETE',
+            'apigateway:TagResource',
+            'apigateway:UntagResource',
+          ],
+          Resource: 'arn:aws:apigateway:*::/apis/*',
+          Condition: {
+            StringLikeIfExists: {
+              'apigateway:Resource/ApiName': apiName,
+              'apigateway:Request/ApiName': apiName,
+            },
+          },
+        },
+        {
+          Sid: 'HttpApiDomainCreate',
+          Effect: 'Allow',
+          Action: 'apigateway:POST',
+          Resource: 'arn:aws:apigateway:*::/domainnames',
+        },
+        {
+          // POST on `/apimappings` is CreateApiMapping; GET, PATCH and DELETE on `/apimappings/*` are the read,
+          // update and delete. The same actions also cover the domain name itself.
+          Sid: 'HttpApiDomain',
+          Effect: 'Allow',
+          Action: ['apigateway:GET', 'apigateway:POST', 'apigateway:PUT', 'apigateway:PATCH', 'apigateway:DELETE'],
+          Resource: domainResources,
+        },
+        // No /tags/* grant. The API Gateway V2 reference does not list aws:ResourceTag/${TagKey} for
+        // TagResource or UntagResource. CreateApi still sends tags; a later tag update is denied.
+      ];
+      return [
+        {
+          Sid: 'Lambda',
+          Effect: 'Allow',
+          Action: [
+            'lambda:CreateFunction',
+            'lambda:DeleteFunction',
+            'lambda:Get*',
+            'lambda:List*',
+            'lambda:Update*',
+            'lambda:PublishVersion',
+            'lambda:AddPermission',
+            'lambda:RemovePermission',
+            'lambda:PutFunctionConcurrency',
+            'lambda:DeleteFunctionConcurrency',
+            'lambda:TagResource',
+            'lambda:UntagResource',
+          ],
+          Resource: `arn:aws:lambda:*:*:function:${scope}`,
+        },
+        ...httpApi,
+        {
+          Sid: 'CertificatesRead',
+          Effect: 'Allow',
+          Action: ['acm:DescribeCertificate', 'acm:ListCertificates', 'acm:ListTagsForCertificate'],
+          Resource: '*',
+        },
+        {
+          Sid: 'CertificatesCreateTagged',
+          Effect: 'Allow',
+          Action: ['acm:RequestCertificate', 'acm:AddTagsToCertificate'],
+          Resource: '*',
+          Condition: tagged('aws:RequestTag'),
+        },
+        {
+          Sid: 'CertificatesChangeOwn',
+          Effect: 'Allow',
+          Action: ['acm:DeleteCertificate', 'acm:RemoveTagsFromCertificate'],
+          Resource: '*',
+          Condition: tagged('aws:ResourceTag'),
+        },
+        {
+          Sid: 'Logs',
+          Effect: 'Allow',
+          Action: [
+            'logs:CreateLogGroup',
+            'logs:DeleteLogGroup',
+            'logs:PutRetentionPolicy',
+            'logs:DeleteRetentionPolicy',
+            'logs:TagResource',
+            'logs:UntagResource',
+            'logs:ListTagsForResource',
+            'logs:TagLogGroup',
+            'logs:UntagLogGroup',
+            'logs:ListTagsLogGroup',
+          ],
+          Resource: [
+            `arn:aws:logs:*:*:log-group:/aws/lambda/${scope}`,
+            `arn:aws:logs:*:*:log-group:/aws/lambda/${scope}:*`,
+          ],
+        },
+        { Sid: 'LogsDescribe', Effect: 'Allow', Action: 'logs:DescribeLogGroups', Resource: '*' },
+        {
+          Sid: 'RolesOnlyWithBoundary',
+          Effect: 'Allow',
+          Action: [
+            'iam:CreateRole',
+            'iam:PutRolePermissionsBoundary',
+            'iam:PutRolePolicy',
+            'iam:DeleteRolePolicy',
+            'iam:DetachRolePolicy',
+          ],
+          Resource: roles,
+          Condition: { StringEquals: { 'iam:PermissionsBoundary': boundaryArn } },
+        },
+        {
+          Sid: 'AttachOnlyBasicExecution',
+          Effect: 'Allow',
+          Action: 'iam:AttachRolePolicy',
+          Resource: roles,
+          Condition: {
+            StringEquals: { 'iam:PermissionsBoundary': boundaryArn },
+            ArnEquals: { 'iam:PolicyARN': BASIC_EXECUTION },
+          },
+        },
+        {
+          Sid: 'RolesManage',
+          Effect: 'Allow',
+          Action: [
+            'iam:GetRole',
+            'iam:GetRolePolicy',
+            'iam:ListRolePolicies',
+            'iam:ListAttachedRolePolicies',
+            'iam:ListInstanceProfilesForRole',
+            'iam:DeleteRole',
+            'iam:TagRole',
+            'iam:UntagRole',
+            'iam:UpdateRole',
+            'iam:UpdateRoleDescription',
+            'iam:UpdateAssumeRolePolicy',
+          ],
+          Resource: roles,
+        },
+        {
+          Sid: 'PassRolesToLambda',
+          Effect: 'Allow',
+          Action: 'iam:PassRole',
+          Resource: roles,
+          // PassRole's only condition keys are iam:PassedToService and iam:AssociatedResourceArn; a boundary condition
+          // here would deny every deploy. The write side carries it: this role can neither create a role in the glob
+          // nor change one's policies or boundary without the boundary, and can never delete a boundary.
+          Condition: { StringEquals: { 'iam:PassedToService': 'lambda.amazonaws.com' } },
+        },
+        {
+          Sid: 'NeverTouchSelfOrBoundary',
+          Effect: 'Deny',
+          Action: 'iam:*',
+          Resource: [`arn:aws:iam::*:role/${roleName}`, `arn:aws:iam::*:policy/${boundaryName}`],
+        },
+        { Sid: 'NeverDropBoundary', Effect: 'Deny', Action: 'iam:DeleteRolePermissionsBoundary', Resource: '*' },
+        ...stateOnly,
+      ];
+    };
 
     new aws.iam.RolePolicy(
       `${name}-policy`,

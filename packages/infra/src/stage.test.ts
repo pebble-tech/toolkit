@@ -29,9 +29,9 @@ describe('Stage', () => {
     expect([stage.isPreview, stage.isProd, stage.isShared]).toEqual([false, false, false]);
   });
 
-  test('a product id with dashes gives an underscored database name', async () => {
-    const { stage } = await stageIn('staging', 'founder-voice');
-    expect(stage.databaseName()).toBe('founder_voice_stg');
+  test('a product id is the database name prefix', async () => {
+    const { stage } = await stageIn('staging', 'foundervoice');
+    expect(stage.databaseName()).toBe('foundervoice_stg');
   });
 
   test('registers itself as pebbletech:index:Stage with its namespace as an output', async () => {
@@ -60,10 +60,17 @@ describe('Stage', () => {
     expect(() => new Stage('stage', { product, stack: 'staging' })).toThrow(StageError);
   });
 
-  test.each(['Base', 'base_app', '-base', '', 'base-staging', 'base-pr', 'shared-tools'])(
+  test.each(['Base', 'base_app', '-base', '', 'a', 'base-staging', 'base-pr', 'shared-tools'])(
     'refuses the malformed product id "%s"',
     (product) => {
       expect(() => new Stage('stage', { product, stack: 'staging' })).toThrow(StageError);
+    }
+  );
+
+  test.each(['founder-voice', 'other-basefresh', 'basefresh-stg'])(
+    'refuses a product id that is not one DNS label: %s',
+    (product) => {
+      expect(() => new Stage('stage', { product, stack: 'staging' })).toThrow(/one DNS label/);
     }
   );
 
@@ -75,6 +82,8 @@ describe('Stage', () => {
     const { stage } = await stageIn('staging');
     expect(() => stage.name('../x')).toThrow(NamespaceError);
     expect(() => stage.name('Api')).toThrow(NamespaceError);
+    expect(() => stage.name('api-v2')).toThrow(/one DNS label/);
+    expect(() => stage.hostname('api-v2', 'pebbletech.my')).toThrow(/one DNS label/);
   });
 
   test('a hostname from another stage or product is refused', async () => {
