@@ -31,8 +31,9 @@ and prod resources are protected and retained; the components refuse anything el
 and run Pulumi with `typescript: false`, since Pulumi's TypeScript peer is `<7`; install with pnpm, because npm
 refuses that optional peer next to TypeScript 7 without an `overrides` entry or `--legacy-peer-deps`. `shared` and
 `prod` are protected, so their teardown starts with `pulumi state unprotect --all`. A `preview` deploy role can use
-only its state path and KMS key. A `staging` or `prod` role can create or delete an HTTP API only when the name
-matches `<product>-<env>-*`. It can still edit routes, integrations and stages under another API's id.
+only its state path and KMS key. A `staging` or `prod` role can create a custom domain of any name (`POST` on
+`/domainnames` has no name condition), and it can edit routes, integrations and stages under another HTTP API's id.
+Nothing else.
 [packages/infra/README.md](packages/infra/README.md) has the components, the naming table and the precompile setup;
 [examples/basefresh](examples/basefresh) is a whole product program with tests.
 

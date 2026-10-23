@@ -5,12 +5,12 @@ pinning a version; the guardrails are defaults it cannot turn off.
 
 | Component | Creates | Refuses |
 |---|---|---|
-| `Stage` | nothing; parses the stack name and names, tags and protects everything else | a product id starting with `pebble` or containing `pr`/`staging`/`prod`/`shared` as a segment; any stack other than `pr-<n>`, `staging`, `prod`, `shared` |
+| `Stage` | nothing; parses the stack name and names, tags and protects everything else | a product id that is not one DNS label, starts with `pebble`, or is `pr`/`staging`/`prod`/`shared`; a kind that is not one DNS label; any stack other than `pr-<n>`, `staging`, `prod`, `shared` |
 | `VercelProject` | `shared`: the project (no Git connection, private source, Vercel Authentication on previews), custom environments, the protection bypass. `staging`/`prod`: env vars (secrets `sensitive`), the domain bound to the stage's environment, an unproxied Cloudflare CNAME | previews; the project outside `shared`; env vars or domains on `shared`; a secret-looking name in `vars` |
 | `Database` | an explicit Postgres provider on port 5432 with `sslmode=verify-full`, the database, its owner (a generated login role on previews), the `public` revoke; `directUrl` and `pooledUrl` as secrets | staging/prod without an existing owner role; a derived name longer than 63 characters. The name is always `stage.databaseName()` |
 | `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; a boundary other than the stage's own `<product>-<env>-boundary` in the current account (a typed `PermissionsBoundaryArn` from `Stage` or `DeployRole`, checked when it resolves, so `pulumi preview` fails). Timeouts above 29 s are clamped |
 | `Worker` | Workers script from a prebuilt module, R2 bucket `<product>-<env>-<kind>` (on prod, `adoptExisting` imports that same name instead of creating it), plain and secret bindings, custom domain | a secret-looking name in `vars` unless listed in `plainTextAllowed`; `adoptExisting` outside prod |
-| `DeployRole` | the GitHub OIDC role for one product and env, its inline policy, and the boundary policy its roles must carry. `preview` allows the state bucket and the KMS key only. `staging` and `prod` also allow Lambda, API Gateway, ACM, logs and IAM inside `<product>-<env>`. Takes only `product`, `env` and the repo: the trusted GitHub environment, the account's OIDC provider, the state bucket and paths (`pebble-<stg\|prd>-pulumi-state/<product>/<env>`, plus `<product>/shared` for staging) and the KMS key (`alias/pebble-<stg\|prd>-pulumi-<env>`) are derived | a `pebble` product |
+| `DeployRole` | the GitHub OIDC role for one product and env, its inline policy, and the boundary policy its roles must carry. `preview` allows the state bucket and the KMS key only. `staging` and `prod` also allow Lambda, API Gateway, ACM, logs and IAM inside `<product>-<env>`. Takes only `product`, `env` and the repo: the trusted GitHub environment, the account's OIDC provider, the state bucket and paths (`pebble-<stg\|prd>-pulumi-state/<product>/<env>`, plus `<product>/shared` for staging) and the KMS key (`alias/pebble-<stg\|prd>-pulumi-<env>`) are derived | a product id that is not one DNS label, or a `pebble` product |
 
 Every component refuses a hostname or name outside its stage (`NamespaceError`), and every refusal is a
 `GuardrailError` subclass. On `prod` (and `shared`, which owns production's Vercel project) every child resource gets
@@ -25,6 +25,8 @@ Every component refuses a hostname or name outside its stage (`NamespaceError`),
 | `prod` | `base-prod-api` | `api-base.pebbletech.my` | `base_prd` |
 
 Hostnames and database names keep base-app's `stg`/`prd` suffixes; resource names use the env.
+
+A product id is one DNS label (`^[a-z][a-z0-9]{1,}$`, no hyphen), and a kind passed to `Stage.name` or `hostname` is one label too.
 
 ## Ownership
 
@@ -54,11 +56,9 @@ const customEnvironmentId = stage.isProd
 Tearing down `shared` or `prod` takes an explicit step: every child there is protected, so run
 `pulumi state unprotect --all -s <stack>` before `pulumi destroy -s <stack>`.
 
-Known limit of `DeployRole`: routes, integrations and stages carry no API name key. A `staging` or `prod` role can edit
-those sub-resources under another HTTP API's id. It cannot create that API unless `apigateway:Request/ApiName` matches
-`<product>-<env>-*`. It cannot delete that API unless `apigateway:Resource/ApiName` matches the same pattern.
-Custom-domain reads, updates, deletes and `CreateApiMapping` must match the stage hostname
-(`*-<product>-stg.*` on staging, `*-<product>.*` on prod). `POST` on `/domainnames` has no name condition.
+Known limit of `DeployRole`: a `staging` or `prod` role can create a custom domain of any name (`POST` on
+`/domainnames` has no name condition), and it can edit routes, integrations and stages under another HTTP API's id.
+Nothing else.
 
 The `preview` role's policy contains the state-bucket statements and the KMS key statement only.
 
