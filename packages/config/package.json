@@ -1,0 +1,67 @@
+{
+  "name": "@pebbletech/config",
+  "version": "0.0.0",
+  "description": "Shared TypeScript, oxlint, oxfmt and lint-staged presets for Pebble product repos",
+  "keywords": [
+    "oxfmt",
+    "oxlint",
+    "pebbletech",
+    "tsconfig"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pebble-tech/toolkit.git",
+    "directory": "packages/config"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./tsconfig.base.json": "./tsconfig.base.json",
+    "./oxlint.json": "./oxlint.json",
+    "./oxfmt.json": "./oxfmt.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "tsconfig.base.json",
+    "oxlint.json",
+    "oxfmt.json"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc --project tsconfig.build.json",
+    "prepack": "\"$npm_execpath\" run build"
+  },
+  "peerDependencies": {
+    "oxfmt": ">=0.74.0",
+    "oxlint": ">=1.89.0",
+    "typescript": ">=7.0.2"
+  },
+  "peerDependenciesMeta": {
+    "oxfmt": {
+      "optional": true
+    },
+    "oxlint": {
+      "optional": true
+    },
+    "typescript": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

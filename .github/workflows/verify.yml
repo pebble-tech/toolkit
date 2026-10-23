@@ -1,0 +1,42 @@
+name: Verify
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Enable corepack (pnpm from packageManager)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify (lint, format, typecheck, build, tests)
+        run: pnpm verify
+
+      # The filter leaves out the private workspace root, which pnpm -r pack would otherwise pack too.
+      - name: Pack every package
+        run: pnpm -r --filter './packages/*' pack --pack-destination out
+
+      - name: List tarball contents
+        run: |
+          for tarball in out/*.tgz; do
+            echo "== $tarball"
+            tar -tzf "$tarball"
+          done
