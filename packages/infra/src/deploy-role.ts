@@ -1,6 +1,7 @@
 import * as aws from '@pulumi/aws';
 import * as pulumi from '@pulumi/pulumi';
 
+import { StageError } from './errors.js';
 import {
   assertProduct,
   boundaryPolicyName,
@@ -12,10 +13,25 @@ import {
 
 const BASIC_EXECUTION = 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole';
 
+/** One DNS label in a zone name: letters, digits and hyphens, not starting or ending with a hyphen. */
+const APEX_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/** Throws StageError unless `apex` is a zone name of lowercase labels with no leading or trailing dot. */
+function assertApex(apex: string): void {
+  const labels = apex.split('.');
+  if (labels.some((label) => !APEX_LABEL.test(label))) {
+    throw new StageError(
+      `apex "${apex}" must be a registered zone name: lowercase labels separated by dots, no leading or trailing dot`
+    );
+  }
+}
+
 export interface DeployRoleArgs {
   product: string;
   /** The stacks this role deploys: `preview` covers every `pr-<n>` stack. */
   env: DeployEnv;
+  /** Registered zone name. Staging and prod domain globs end with this literal. */
+  apex: string;
   /** The product's repository. The trusted GitHub environment comes from `env` (`preview`, `staging`, `production`). */
   github: { org: string; repo: string };
 }
@@ -26,7 +42,8 @@ type Statement = Record<string, unknown>;
  * The role a product's GitHub workflow assumes for one env, plus the permissions boundary every role it creates must
  * carry. Applied by hand once per product and env from the product's `infra/bootstrap` stack. Everything that ties it
  * to an env (trusted GitHub environment, OIDC provider, state bucket and paths, KMS key) is derived from `product` and
- * `env`, so a role cannot be pointed at another env's state or tokens. A `preview` role deploys only `pr-<n>` stacks
+ * `env`, so a role cannot be pointed at another env's state or tokens. Domain globs end with the given `apex`. A `preview`
+ * role deploys only `pr-<n>` stacks
  * (a database and a SQL role on PlanetScale), so its policy is the state path and its KMS key. `staging` and `prod`
  * also manage AWS resources named `<product>-<env>-*`.
  */
@@ -38,9 +55,10 @@ export class DeployRole extends pulumi.ComponentResource {
 
   constructor(name: string, args: DeployRoleArgs, opts?: pulumi.ComponentResourceOptions) {
     assertProduct(args.product);
+    assertApex(args.apex);
     super('pebbletech:index:DeployRole', name, {}, opts);
 
-    const { product, env } = args;
+    const { product, env, apex } = args;
     const scope = env === 'preview' ? `${product}-pr-*` : `${product}-${env}-*`;
     const roleName = `${product}-${env}-deploy`;
     const boundaryName = boundaryPolicyName(product, env);
@@ -136,9 +154,11 @@ export class DeployRole extends pulumi.ComponentResource {
     const statements = (boundaryArn: string, kmsKeyArn: string): Statement[] => {
       const stateOnly = stateStatements(kmsKeyArn);
       if (env === 'preview') return stateOnly;
-      // Hostname suffix Stage.domainSuffix uses: `stg` on staging, none on prod (`api-<product>.<apex>`).
+      // Hostname suffix Stage.domainSuffix uses: `stg` on staging, none on prod (`<kind>-<product>[-stg].<apex>`).
+      // The apex is literal. `*` still matches a dot, so a name in a sub-zone of the apex whose label ends with
+      // `-<product>[-stg]` matches too.
       const domainSuffix = env === 'staging' ? 'stg' : '';
-      const domainNames = `arn:aws:apigateway:*::/domainnames/*-${product}${domainSuffix ? `-${domainSuffix}` : ''}.*`;
+      const domainNames = `arn:aws:apigateway:*::/domainnames/*-${product}${domainSuffix ? `-${domainSuffix}` : ''}.${apex}`;
       const apiName = `${product}-${env}-*`;
       const httpApi: Statement[] = [
         {

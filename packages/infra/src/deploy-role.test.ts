@@ -12,6 +12,7 @@ async function roleFor(env: DeployRoleArgs['env'], extra: Partial<DeployRoleArgs
       new DeployRole('deploy', {
         product: 'basefresh',
         env,
+        apex: 'pebbletech.my',
         github: { org: 'pebble-tech', repo: 'basefresh' },
         ...extra,
       })
@@ -182,8 +183,8 @@ describe('DeployRole', () => {
   });
 
   test.each([
-    ['staging', 'basefresh-staging-*', 'arn:aws:apigateway:*::/domainnames/*-basefresh-stg.*'],
-    ['prod', 'basefresh-prod-*', 'arn:aws:apigateway:*::/domainnames/*-basefresh.*'],
+    ['staging', 'basefresh-staging-*', 'arn:aws:apigateway:*::/domainnames/*-basefresh-stg.pebbletech.my'],
+    ['prod', 'basefresh-prod-*', 'arn:aws:apigateway:*::/domainnames/*-basefresh.pebbletech.my'],
   ] as const)(
     '%s creates an HTTP API only under its name, and reads domains only under its hostname',
     async (env, apiName, domainArn) => {
@@ -262,31 +263,53 @@ describe('DeployRole', () => {
     ]);
   });
 
-  test('hostname globs match only the product and env that produced them', async () => {
-    const products = ['basefresh', 'basefreshstg', 'otherbasefresh'] as const;
-    const kinds = ['api', 'uploads', 'app'] as const;
-    const stacks = ['pr-7', 'staging', 'prod'] as const;
-    const hostnames: { product: string; stack: string; host: string }[] = [];
-    for (const product of products) {
-      for (const stack of stacks) {
-        const { result } = await runProgram({ project: product, stack }, () => {
-          const stage = new Stage('stage', { product });
-          return kinds.map((kind) => stage.hostname(kind, 'pebbletech.my'));
-        });
-        for (const host of result) hostnames.push({ product, stack, host });
+  test.each(['pebbletech.my', 'tenant-basefresh-stg.com', 'tenant-basefresh.com'] as const)(
+    'hostname globs for apex %s match only the product and env that produced them',
+    async (apex) => {
+      const products = ['basefresh', 'basefreshstg', 'otherbasefresh'] as const;
+      const kinds = ['api', 'uploads', 'app'] as const;
+      const stacks = ['pr-7', 'staging', 'prod'] as const;
+      const hostnames: { product: string; stack: string; host: string }[] = [];
+      for (const product of products) {
+        for (const stack of stacks) {
+          const { result } = await runProgram({ project: product, stack }, () => {
+            const stage = new Stage('stage', { product });
+            return kinds.map((kind) => stage.hostname(kind, apex));
+          });
+          for (const host of result) hostnames.push({ product, stack, host });
+        }
+      }
+      for (const product of products) {
+        for (const env of ['staging', 'prod'] as const) {
+          const { resources } = await roleFor(env, { product, apex });
+          const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
+          const glob = statement(policy, 'HttpApiDomain').Resource as string;
+          const matched = hostnames.filter((row) => iamMatches(glob, gatewayArn(`/domainnames/${row.host}`)));
+          const own = hostnames.filter((row) => row.product === product && row.stack === env);
+          expect(own).toHaveLength(kinds.length);
+          expect(matched.map((row) => row.host).sort()).toEqual(own.map((row) => row.host).sort());
+        }
       }
     }
-    for (const product of products) {
-      for (const env of ['staging', 'prod'] as const) {
-        const { resources } = await roleFor(env, { product });
-        const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
-        const glob = statement(policy, 'HttpApiDomain').Resource as string;
-        const matched = hostnames.filter((row) => iamMatches(glob, gatewayArn(`/domainnames/${row.host}`)));
-        const own = hostnames.filter((row) => row.product === product && row.stack === env);
-        expect(own).toHaveLength(kinds.length);
-        expect(matched.map((row) => row.host).sort()).toEqual(own.map((row) => row.host).sort());
-      }
-    }
+  );
+
+  test('residual: a sub-zone of the apex whose label ends with the product suffix matches', async () => {
+    const apex = 'pebbletech.my';
+    const staging = JSON.parse(
+      find((await roleFor('staging', { apex })).resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy
+    );
+    const prod = JSON.parse(
+      find((await roleFor('prod', { apex })).resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy
+    );
+    expect(
+      iamMatches(
+        statement(staging, 'HttpApiDomain').Resource,
+        gatewayArn(`/domainnames/api-x-stg.foo-basefresh-stg.${apex}`)
+      )
+    ).toBe(true);
+    expect(
+      iamMatches(statement(prod, 'HttpApiDomain').Resource, gatewayArn(`/domainnames/api-x.foo-basefresh.${apex}`))
+    ).toBe(true);
   });
 
   test.each([
@@ -384,4 +407,11 @@ describe('DeployRole', () => {
   test('refuses a product id that is not one DNS label', async () => {
     await expect(roleFor('staging', { product: 'other-basefresh' })).rejects.toThrow(/one DNS label/);
   });
+
+  test.each(['', 'pebbletech.my.', '.pebbletech.my', 'Pebbletech.my', 'pebbletech..my', 'pebble_tech.my'])(
+    'refuses an apex that is not a zone name: %s',
+    async (apex) => {
+      await expect(roleFor('staging', { apex })).rejects.toThrow(/zone name/);
+    }
+  );
 });
