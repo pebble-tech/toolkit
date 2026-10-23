@@ -209,6 +209,12 @@ describe('the OIDC provider', () => {
     }
   );
 
+  test.each(['stg', 'prd'] as const)('the committed %s stack file holds the account id only encrypted', (stack) => {
+    const config = parse(readFileSync(new URL(`../Pulumi.${stack}.yaml`, import.meta.url), 'utf8')).config;
+    const accountId = config['pebble-aws-bootstrap:accountId'] ?? { secure: 'not set yet' };
+    expect(accountId).toEqual({ secure: expect.any(String) });
+  });
+
   test('without the flag the provider is created, not imported', async () => {
     const { resources } = await run({ ...stg, importOidcProvider: false });
     expect(ofType(resources, 'aws:iam/openIdConnectProvider:OpenIdConnectProvider')[0]!.importId).toBe('');
