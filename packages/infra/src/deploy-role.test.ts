@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { DeployRole, type DeployRoleArgs, StageError } from './index.js';
+import { DeployRole, type DeployRoleArgs, Stage, StageError } from './index.js';
 import { runProgram } from './testing.js';
 
 const OIDC = 'arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com';
@@ -20,6 +20,37 @@ async function roleFor(env: DeployRoleArgs['env'], extra: Partial<DeployRoleArgs
 
 const find = (resources: { type: string }[], type: string) => resources.find((r) => r.type === type) as any;
 const statement = (policy: any, sid: string) => policy.Statement.find((s: any) => s.Sid === sid);
+const asList = (value: unknown): unknown[] => (Array.isArray(value) ? value : [value]);
+const gatewayArn = (path: string) => `arn:aws:apigateway:ap-southeast-1::${path}`;
+
+function iamMatches(pattern: string, value: string): boolean {
+  return new RegExp(
+    '^' +
+      pattern
+        .split('*')
+        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('.*') +
+      '$'
+  ).test(value);
+}
+
+/** StringLike / StringLikeIfExists against the policy document. Not the IAM simulator. */
+function allows(policy: { Statement: any[] }, action: string, resource: string, context: Record<string, string> = {}) {
+  const matching = policy.Statement.filter(
+    (s) =>
+      asList(s.Action).some((item) => iamMatches(String(item), action)) &&
+      asList(s.Resource).some((item) => iamMatches(String(item), resource)) &&
+      Object.entries(s.Condition ?? {}).every(([op, entries]) => {
+        if (op !== 'StringLike' && op !== 'StringLikeIfExists') throw new Error(`unsupported operator ${op}`);
+        return Object.entries(entries as Record<string, string>).every(([key, value]) =>
+          context[key] === undefined
+            ? op.endsWith('IfExists')
+            : asList(value).some((pattern) => iamMatches(String(pattern), context[key]!))
+        );
+      })
+  );
+  return matching.some((s) => s.Effect === 'Allow') && !matching.some((s) => s.Effect === 'Deny');
+}
 
 describe('DeployRole', () => {
   test('creates the boundary policy, the role and its inline policy', async () => {
@@ -179,7 +210,12 @@ describe('DeployRole', () => {
         Effect: 'Allow',
         Action: verbs,
         Resource: 'arn:aws:apigateway:*::/apis/*',
-        Condition: { StringLikeIfExists: { 'apigateway:Resource/ApiName': apiName } },
+        Condition: {
+          StringLikeIfExists: {
+            'apigateway:Resource/ApiName': apiName,
+            'apigateway:Request/ApiName': apiName,
+          },
+        },
       });
       expect(statement(policy, 'HttpApiDomainCreate')).toEqual({
         Sid: 'HttpApiDomainCreate',
@@ -193,12 +229,65 @@ describe('DeployRole', () => {
         Action: ['apigateway:GET', 'apigateway:POST', 'apigateway:PUT', 'apigateway:PATCH', 'apigateway:DELETE'],
         Resource: domainArn,
       });
-      expect(statement(policy, 'HttpApiTags')).toMatchObject({
-        Resource: 'arn:aws:apigateway:*::/tags/*',
-        Action: verbs,
-      });
+      expect(statement(policy, 'HttpApiTags')).toBeUndefined();
     }
   );
+
+  test.each(['staging', 'prod'] as const)('rename-refusal: %s cannot rename its API to other-prod-api', async (env) => {
+    const { resources } = await roleFor(env);
+    const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
+    const own = { 'apigateway:Resource/ApiName': `basefresh-${env}-api` };
+    expect(
+      allows(policy, 'apigateway:PATCH', gatewayArn('/apis/own-id'), {
+        ...own,
+        'apigateway:Request/ApiName': 'other-prod-api',
+      })
+    ).toBe(false);
+    expect(allows(policy, 'apigateway:PATCH', gatewayArn('/apis/own-id'), own)).toBe(true);
+    expect(
+      allows(policy, 'apigateway:PATCH', gatewayArn('/apis/own-id'), {
+        ...own,
+        'apigateway:Request/ApiName': `basefresh-${env}-renamed`,
+      })
+    ).toBe(true);
+  });
+
+  test.each(['staging', 'prod'] as const)('%s cannot tag or untag through /tags', async (env) => {
+    const { resources } = await roleFor(env);
+    const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
+    const tags = gatewayArn('/tags/' + encodeURIComponent(gatewayArn('/apis/foreign-id')));
+    expect([allows(policy, 'apigateway:POST', tags), allows(policy, 'apigateway:DELETE', tags)]).toEqual([
+      false,
+      false,
+    ]);
+  });
+
+  test('hostname globs match only the product and env that produced them', async () => {
+    const products = ['basefresh', 'basefreshstg', 'otherbasefresh'] as const;
+    const kinds = ['api', 'uploads', 'app'] as const;
+    const stacks = ['pr-7', 'staging', 'prod'] as const;
+    const hostnames: { product: string; stack: string; host: string }[] = [];
+    for (const product of products) {
+      for (const stack of stacks) {
+        const { result } = await runProgram({ project: product, stack }, () => {
+          const stage = new Stage('stage', { product });
+          return kinds.map((kind) => stage.hostname(kind, 'pebbletech.my'));
+        });
+        for (const host of result) hostnames.push({ product, stack, host });
+      }
+    }
+    for (const product of products) {
+      for (const env of ['staging', 'prod'] as const) {
+        const { resources } = await roleFor(env, { product });
+        const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
+        const glob = statement(policy, 'HttpApiDomain').Resource as string;
+        const matched = hostnames.filter((row) => iamMatches(glob, gatewayArn(`/domainnames/${row.host}`)));
+        const own = hostnames.filter((row) => row.product === product && row.stack === env);
+        expect(own).toHaveLength(kinds.length);
+        expect(matched.map((row) => row.host).sort()).toEqual(own.map((row) => row.host).sort());
+      }
+    }
+  });
 
   test.each([
     ['preview', 'preview', 'pebble-stg-pulumi-state', ['basefresh/preview'], 'pebble-stg-pulumi-preview'],
@@ -289,6 +378,10 @@ describe('DeployRole', () => {
   });
 
   test('refuses a pebble product', async () => {
-    await expect(roleFor('staging', { product: 'pebble-tools' })).rejects.toThrow(StageError);
+    await expect(roleFor('staging', { product: 'pebblefresh' })).rejects.toThrow(StageError);
+  });
+
+  test('refuses a product id that is not one DNS label', async () => {
+    await expect(roleFor('staging', { product: 'other-basefresh' })).rejects.toThrow(/one DNS label/);
   });
 });

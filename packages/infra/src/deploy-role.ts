@@ -149,9 +149,9 @@ export class DeployRole extends pulumi.ComponentResource {
           Condition: { StringLike: { 'apigateway:Request/ApiName': apiName } },
         },
         {
-          // Resource/ApiName exists on the API (update and delete) and is absent on routes, integrations and stages.
-          // IfExists lets those sub-resources through. Residual: an edit under another API's id still succeeds;
-          // creating or deleting that API does not.
+          // Resource/ApiName is on the API and absent on routes, integrations and stages, so IfExists lets those
+          // through. Request/ApiName is present on UpdateApi when the request sets Name, so a rename stays inside
+          // <product>-<env>-*. Residual: an edit under another API's id still succeeds.
           Sid: 'HttpApi',
           Effect: 'Allow',
           Action: [
@@ -164,7 +164,12 @@ export class DeployRole extends pulumi.ComponentResource {
             'apigateway:UntagResource',
           ],
           Resource: 'arn:aws:apigateway:*::/apis/*',
-          Condition: { StringLikeIfExists: { 'apigateway:Resource/ApiName': apiName } },
+          Condition: {
+            StringLikeIfExists: {
+              'apigateway:Resource/ApiName': apiName,
+              'apigateway:Request/ApiName': apiName,
+            },
+          },
         },
         {
           Sid: 'HttpApiDomainCreate',
@@ -179,20 +184,8 @@ export class DeployRole extends pulumi.ComponentResource {
           Action: ['apigateway:GET', 'apigateway:POST', 'apigateway:PUT', 'apigateway:PATCH', 'apigateway:DELETE'],
           Resource: domainNames,
         },
-        {
-          Sid: 'HttpApiTags',
-          Effect: 'Allow',
-          Action: [
-            'apigateway:GET',
-            'apigateway:POST',
-            'apigateway:PUT',
-            'apigateway:PATCH',
-            'apigateway:DELETE',
-            'apigateway:TagResource',
-            'apigateway:UntagResource',
-          ],
-          Resource: 'arn:aws:apigateway:*::/tags/*',
-        },
+        // No /tags/* grant. The API Gateway V2 reference does not list aws:ResourceTag/${TagKey} for
+        // TagResource or UntagResource. CreateApi still sends tags; a later tag update is denied.
       ];
       return [
         {
