@@ -2,7 +2,7 @@ import * as postgresql from '@pulumi/postgresql';
 import * as pulumi from '@pulumi/pulumi';
 import * as random from '@pulumi/random';
 
-import { DatabaseNameError, NamespaceError, OwnershipError } from './errors.js';
+import { DatabaseNameError, OwnershipError } from './errors.js';
 import type { Stage } from './stage.js';
 
 const IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/;
@@ -22,8 +22,6 @@ export interface DatabaseArgs {
    * component always connects on the direct port 5432 with `sslmode=verify-full`, whatever the URL says.
    */
   adminUrl: pulumi.Input<string>;
-  /** Database name; defaults to `stage.databaseName()` (`<product>_stg`, `<product>_prd`, `<product>_pr_<n>`). */
-  name?: string;
   /**
    * The role that owns the database. Required on staging and prod, where runtimes reach the database through the
    * pooler and the pooler only accepts PlanetScale-made roles. On a preview, leave it out: the component creates a
@@ -82,15 +80,12 @@ export class Database extends pulumi.ComponentResource {
 
   constructor(name: string, args: DatabaseArgs, opts?: pulumi.ComponentResourceOptions) {
     const { stage } = args;
-    const databaseName = args.name ?? stage.databaseName();
+    // The name is the stage's, never the caller's: a preview cannot name staging's database on the shared cluster.
+    stage.requireKind('a database', ['preview', 'staging', 'prod']);
+    const databaseName = stage.databaseName();
     if (!IDENTIFIER.test(databaseName)) {
       throw new DatabaseNameError(`database name "${databaseName}" must match ${IDENTIFIER}`);
     }
-    const productPrefix = `${stage.product.replaceAll('-', '_')}_`;
-    if (!databaseName.startsWith(productPrefix)) {
-      throw new NamespaceError(`database "${databaseName}" must start with "${productPrefix}"`);
-    }
-    stage.requireKind('a database', ['preview', 'staging', 'prod']);
     if (!stage.isPreview && !args.owner) {
       throw new OwnershipError(
         `${stage.env} needs an existing owner role: runtimes use the pooler, which only knows PlanetScale-made roles`

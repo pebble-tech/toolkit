@@ -1,15 +1,15 @@
 import * as pulumi from '@pulumi/pulumi';
 import { describe, expect, test } from 'vitest';
 
-import { Database, DatabaseNameError, NamespaceError, OwnershipError, Stage } from './index.js';
+import { Database, DatabaseNameError, OwnershipError, Stage } from './index.js';
 import { runProgram, valueOf } from './testing.js';
 
 const ADMIN_URL = 'postgresql://postgres.abc123:admin-pw@sin.pg.psdb.cloud:6432/postgres?sslmode=require';
 const OWNER = { role: 'basefresh_app', password: 'owner-pw' };
 
-async function databaseIn(stack: string, args: { name?: string; owner?: typeof OWNER } = {}) {
-  return runProgram({ project: 'basefresh', stack }, async () => {
-    const stage = new Stage('stage', { product: 'basefresh' });
+async function databaseIn(stack: string, args: { owner?: typeof OWNER } = {}, product = 'basefresh') {
+  return runProgram({ project: product, stack }, async () => {
+    const stage = new Stage('stage', { product });
     const database = new Database('db', { stage, adminUrl: ADMIN_URL, ...args });
     return {
       database,
@@ -128,16 +128,20 @@ describe('Database', () => {
     expect(resources.filter((r) => r.protect || r.retainOnDelete)).toEqual([]);
   });
 
-  test.each(['Basefresh_stg', 'basefresh-stg', '1basefresh', `basefresh_${'x'.repeat(60)}`])(
-    'refuses the database name %s',
+  test('refuses a product id whose database name would pass 63 characters', async () => {
+    await expect(databaseIn('staging', { owner: OWNER }, `basefresh-${'x'.repeat(60)}`)).rejects.toThrow(
+      DatabaseNameError
+    );
+  });
+
+  test.each(['basefresh_stg', 'basefresh_prd'])(
+    "a preview cannot name another stage's database: %s is ignored and the name is derived",
     async (name) => {
-      await expect(databaseIn('staging', { name, owner: OWNER })).rejects.toThrow(DatabaseNameError);
+      const { resources } = await databaseIn('pr-7', { name } as never);
+      const databases = resources.filter((r) => r.type === 'postgresql:index/database:Database');
+      expect(databases.map((r) => r.inputs.name)).toEqual(['basefresh_pr_7']);
     }
   );
-
-  test("refuses a database outside the product's prefix", async () => {
-    await expect(databaseIn('staging', { name: 'other_stg', owner: OWNER })).rejects.toThrow(NamespaceError);
-  });
 
   test('refuses staging and prod without an existing owner role', async () => {
     await expect(databaseIn('staging')).rejects.toThrow(OwnershipError);
