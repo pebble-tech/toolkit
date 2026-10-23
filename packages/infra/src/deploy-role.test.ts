@@ -76,24 +76,37 @@ describe('DeployRole', () => {
     ]);
   });
 
-  test('roles can be created, changed and passed only inside the namespace and only with the boundary', async () => {
+  test('roles are created and changed only with the boundary; PassRole is gated on the service alone', async () => {
     const { resources } = await roleFor('staging');
     const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
     const boundary = 'arn:aws:iam::123456789012:policy/basefresh-staging-boundary';
+    const glob = 'arn:aws:iam::*:role/basefresh-staging-*';
     expect(statement(policy, 'RolesOnlyWithBoundary')).toMatchObject({
-      Action: expect.arrayContaining(['iam:CreateRole', 'iam:PutRolePolicy']),
-      Resource: 'arn:aws:iam::*:role/basefresh-staging-*',
+      Action: expect.arrayContaining(['iam:CreateRole', 'iam:PutRolePolicy', 'iam:PutRolePermissionsBoundary']),
+      Resource: glob,
       Condition: { StringEquals: { 'iam:PermissionsBoundary': boundary } },
     });
-    expect(statement(policy, 'AttachOnlyBasicExecution').Condition).toEqual({
-      StringEquals: { 'iam:PermissionsBoundary': boundary },
-      ArnEquals: { 'iam:PolicyARN': 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole' },
-    });
-    expect(statement(policy, 'PassRolesToLambda')).toMatchObject({
-      Resource: 'arn:aws:iam::*:role/basefresh-staging-*',
+    expect(statement(policy, 'AttachOnlyBasicExecution')).toMatchObject({
+      Action: 'iam:AttachRolePolicy',
+      Resource: glob,
       Condition: {
-        StringEquals: { 'iam:PassedToService': 'lambda.amazonaws.com', 'iam:PermissionsBoundary': boundary },
+        StringEquals: { 'iam:PermissionsBoundary': boundary },
+        ArnEquals: { 'iam:PolicyARN': 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole' },
       },
+    });
+    // iam:PermissionsBoundary is not in PassRole's request context; a condition on it would deny every Lambda deploy.
+    expect(statement(policy, 'PassRolesToLambda')).toEqual({
+      Sid: 'PassRolesToLambda',
+      Effect: 'Allow',
+      Action: 'iam:PassRole',
+      Resource: glob,
+      Condition: { StringEquals: { 'iam:PassedToService': 'lambda.amazonaws.com' } },
+    });
+    expect(statement(policy, 'NeverDropBoundary')).toEqual({
+      Sid: 'NeverDropBoundary',
+      Effect: 'Deny',
+      Action: 'iam:DeleteRolePermissionsBoundary',
+      Resource: '*',
     });
     expect(statement(policy, 'NeverTouchSelfOrBoundary')).toEqual({
       Sid: 'NeverTouchSelfOrBoundary',

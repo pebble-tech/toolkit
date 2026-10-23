@@ -43,6 +43,11 @@ Known limit of `DeployRole`: HTTP API ids are random, so its API Gateway stateme
 domain in the account, not only the product's. Lambda, IAM, logs, certificates and state are scoped to the product
 and env.
 
+`DeployRole` gates `iam:PassRole` on `iam:PassedToService` alone (PassRole has no boundary condition key); the boundary
+is enforced where roles are written: `CreateRole`, `AttachRolePolicy`, `PutRolePolicy` and
+`PutRolePermissionsBoundary` on `role/<product>-<env>-*` require the env's boundary, and `DeleteRolePermissionsBoundary`
+is denied.
+
 ## Use it
 
 ```sh
