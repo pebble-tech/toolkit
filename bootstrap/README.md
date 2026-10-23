@@ -19,8 +19,8 @@ Nothing in it belongs to a product.
   use it.
 - The key alias and bucket names come from `@pebbletech/infra` (`stateKeyAlias`, `stateBucketName`), the same
   functions `DeployRole` uses. A test fails if the two ever disagree.
-- Every resource is protected and retained: `pulumi destroy` refuses, and removing a resource from the program leaves
-  it in AWS.
+- Every resource is protected and retained: `pulumi destroy`, or a change that would delete or replace one, fails;
+  after `pulumi state unprotect` a delete still leaves the resource in AWS and only drops it from the state.
 - The program pins the AWS provider to the stack's `accountId`, so credentials for the wrong account fail before
   anything changes.
 
