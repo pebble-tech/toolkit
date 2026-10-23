@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { NamespaceError, OwnershipError, Stage, StageError } from './index.js';
+import { NamespaceError, OwnershipError, Stage, StageError, deployState, stateKeyAlias } from './index.js';
 import { runProgram } from './testing.js';
 
 const stageIn = async (stack: string, product = 'basefresh') => {
@@ -90,5 +90,15 @@ describe('Stage', () => {
     expect(stage.name()).toBe('basefresh-shared');
     expect(() => stage.databaseName()).toThrow(OwnershipError);
     expect(() => stage.hostname('app', 'pebbletech.my')).toThrow(OwnershipError);
+  });
+});
+
+describe('state keys', () => {
+  test('a shared stack uses the staging key, since the staging deploy role applies it', () => {
+    expect(stateKeyAlias('shared')).toBe('alias/pebble-stg-pulumi-staging');
+    expect(deployState('basefresh', 'staging')).toMatchObject({
+      paths: ['basefresh/staging', 'basefresh/shared'],
+      kmsAlias: stateKeyAlias('shared'),
+    });
   });
 });
