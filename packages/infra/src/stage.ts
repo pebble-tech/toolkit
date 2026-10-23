@@ -46,13 +46,36 @@ export interface DeployState {
   kmsAlias: string;
 }
 
+/** The AWS account a deploy env runs in: previews and staging in `stg`, prod in `prd`. */
+export type DeployAccount = 'stg' | 'prd';
+
+/** Whose state a KMS key encrypts: a deploy env, or `shared`, which its applier, the staging deploy role, encrypts. */
+export type StateKey = DeployEnv | 'shared';
+
+export function deployAccount(env: DeployEnv): DeployAccount {
+  return env === 'prod' ? 'prd' : 'stg';
+}
+
+/** The account's Pulumi state bucket: `pebble-<stg|prd>-pulumi-state`. */
+export function stateBucketName(account: DeployAccount): string {
+  return `pebble-${account}-pulumi-state`;
+}
+
+/**
+ * `alias/pebble-<stg|prd>-pulumi-<env>`, one key per deploy env, created by the shared bootstrap. `shared` has no role
+ * of its own: the staging deploy role applies it, so it uses the staging key.
+ */
+export function stateKeyAlias(key: StateKey): string {
+  const env = key === 'shared' ? 'staging' : key;
+  return `alias/pebble-${deployAccount(env)}-pulumi-${env}`;
+}
+
 /** State location for a product and deploy env: `pebble-<stg|prd>-pulumi-state/<product>/<env>`. */
 export function deployState(product: string, env: DeployEnv): DeployState {
-  const account = env === 'prod' ? 'prd' : 'stg';
   return {
-    bucket: `pebble-${account}-pulumi-state`,
+    bucket: stateBucketName(deployAccount(env)),
     paths: env === 'staging' ? [`${product}/staging`, `${product}/shared`] : [`${product}/${env}`],
-    kmsAlias: `alias/pebble-${account}-pulumi-${env}`,
+    kmsAlias: stateKeyAlias(env),
   };
 }
 

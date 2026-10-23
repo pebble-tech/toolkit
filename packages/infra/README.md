@@ -29,7 +29,9 @@ Hostnames and database names keep base-app's `stg`/`prd` suffixes; resource name
 ## Ownership
 
 - `shared`: the Vercel project and its custom environments. Apply it before staging and prod; they read
-  `projectId` and `customEnvironmentIds` through a `StackReference`.
+  `projectId` and `customEnvironmentIds` through a `StackReference`. It has no deploy role of its own: the staging
+  role applies it, so its state lives at `<product>/shared` in `pebble-stg-pulumi-state` and its secrets use the
+  staging key (`stateKeyAlias('shared')` is `alias/pebble-stg-pulumi-staging`).
 - `pr-<n>`: a database and its role. Previews pass env to `vercel deploy`.
 - `staging`, `prod`: database, API, Worker, web env vars and domain.
 - `infra/bootstrap` (a separate project, applied by hand with SSO): one `DeployRole` per env (`preview`, `staging`,
