@@ -35,6 +35,9 @@ permission covers every HTTP API in the account (API ids are random); the rest i
 [packages/infra/README.md](packages/infra/README.md) has the components, the naming table and the precompile setup;
 [examples/basefresh](examples/basefresh) is a whole product program with tests.
 
+Each AWS account's shared bootstrap (GitHub OIDC provider, state bucket, state KMS keys) is the Pulumi program in
+[bootstrap/](bootstrap/README.md), applied by hand once per account.
+
 ## Develop
 
 Node 24 and the pnpm pinned in `packageManager` (`corepack enable`, or `corepack pnpm`).
