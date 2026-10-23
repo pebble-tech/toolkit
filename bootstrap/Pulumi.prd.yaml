@@ -1,0 +1,5 @@
+config:
+  aws:region: ap-southeast-1
+  # The GitHub OIDC provider already exists in this account (SST's bootstrap made it): the first `pulumi up` adopts it.
+  pebble-aws-bootstrap:oidc:
+    import: true

@@ -1,0 +1,22 @@
+{
+  "name": "@pebbletech/bootstrap",
+  "version": "0.0.0",
+  "private": true,
+  "description": "pebble-aws-bootstrap: the GitHub OIDC provider, Pulumi state bucket and state KMS keys of each AWS account, applied by hand",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "rm -rf dist && tsc --project tsconfig.build.json"
+  },
+  "dependencies": {
+    "@pebbletech/infra": "workspace:*",
+    "@pulumi/aws": "7.51.1",
+    "@pulumi/pulumi": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "yaml": "2.9.1"
+  }
+}
