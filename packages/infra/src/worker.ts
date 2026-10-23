@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
+import { OwnershipError } from './errors.js';
 import { assertNoSecretsInPlainText } from './secrets.js';
 import type { Stage } from './stage.js';
 
@@ -11,10 +12,10 @@ export interface WorkerBucket {
   /** The binding name the script reads, e.g. `UPLOADS`. */
   binding: string;
   /**
-   * Adopt an existing R2 bucket by name instead of creating `<product>-<env>-<kind>`: the cutover path for a bucket
-   * another tool created (SST's generated name on prod). Maps to Pulumi's `import` option on the bucket only.
+   * Prod only: adopt the existing bucket named `<product>-prod-<kind>` (Pulumi's `import` option) instead of creating
+   * it. The name is the stage's, never the caller's, so no stack can bind another stage's bucket.
    */
-  importBucket?: string;
+  adoptExisting?: boolean;
 }
 
 export interface WorkerArgs {
@@ -55,6 +56,9 @@ export class Worker extends pulumi.ComponentResource {
     const vars = args.vars ?? {};
     const secrets = args.secrets ?? {};
     assertNoSecretsInPlainText(`Worker ${name}`, vars, args.plainTextAllowed);
+    if (args.bucket?.adoptExisting && !stage.isProd) {
+      throw new OwnershipError(`Worker ${name}: only prod adopts an existing bucket (this is ${stage.env})`);
+    }
     const content = readFileSync(args.script);
     super('pebbletech:index:Worker', name, {}, opts);
 
@@ -65,11 +69,11 @@ export class Worker extends pulumi.ComponentResource {
 
     let bucket: cloudflare.R2Bucket | undefined;
     if (args.bucket) {
-      const bucketName = args.bucket.importBucket ?? stage.name(kind);
+      const bucketName = stage.name(kind);
       bucket = new cloudflare.R2Bucket(
         `${name}-bucket`,
         { accountId: args.accountId, name: bucketName },
-        child(args.bucket.importBucket ? { import: `${args.accountId}/${bucketName}/default` } : {})
+        child(args.bucket.adoptExisting ? { import: `${args.accountId}/${bucketName}/default` } : {})
       );
       bindings.push({ type: 'r2_bucket', name: args.bucket.binding, bucketName: bucket.name });
     }

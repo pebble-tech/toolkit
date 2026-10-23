@@ -73,19 +73,37 @@ describe('Worker', () => {
     expect(worker.secretInputs).toEqual(['bindings']);
   });
 
-  test('importBucket adopts the named bucket through the import option, and only then', async () => {
+  test('adoptExisting on prod imports the stage-named bucket, and only then', async () => {
     const adopted = await workerIn('prod', {
       hostname: 'uploads-basefresh.pebbletech.my',
-      bucket: { binding: 'UploadsBucket', importBucket: 'base-app-uploadsbucket-abc' },
+      bucket: { binding: 'UploadsBucket', adoptExisting: true },
     });
     const bucket = byType(adopted.resources, 'cloudflare:index/r2Bucket:R2Bucket')[0];
     expect([bucket.inputs.name, bucket.importId]).toEqual([
-      'base-app-uploadsbucket-abc',
-      'account-1/base-app-uploadsbucket-abc/default',
+      'basefresh-prod-uploads',
+      'account-1/basefresh-prod-uploads/default',
     ]);
     const created = await workerIn('prod', { hostname: 'uploads-basefresh.pebbletech.my' });
     const fresh = byType(created.resources, 'cloudflare:index/r2Bucket:R2Bucket')[0];
     expect([fresh.inputs.name, fresh.importId]).toEqual(['basefresh-prod-uploads', '']);
+  });
+
+  test("a preview cannot adopt another bucket by name (the reviewer's probe)", async () => {
+    const { resources } = await workerIn('pr-7', {
+      hostname: 'uploads-basefresh-pr-7.pebbletech.my',
+      bucket: { binding: 'UploadsBucket', importBucket: 'prod-legacy-bucket' },
+    } as never);
+    const bucket = byType(resources, 'cloudflare:index/r2Bucket:R2Bucket')[0];
+    expect([bucket.inputs.name, bucket.importId]).toEqual(['basefresh-pr-7-uploads', '']);
+  });
+
+  test.each([
+    ['pr-7', 'uploads-basefresh-pr-7.pebbletech.my'],
+    ['staging', 'uploads-basefresh-stg.pebbletech.my'],
+  ])('%s refuses to adopt an existing bucket', async (stack, hostname) => {
+    await expect(
+      workerIn(stack, { hostname, bucket: { binding: 'UploadsBucket', adoptExisting: true } })
+    ).rejects.toThrow(OwnershipError);
   });
 
   test('on prod every child is protected and retained', async () => {
