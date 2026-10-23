@@ -4,14 +4,7 @@ import { describe, expect, test } from 'vitest';
 import { bootstrap } from './bootstrap.js';
 
 const run = (env: 'preview' | 'staging' | 'prod') =>
-  runProgram({ project: 'basefresh-bootstrap', stack: env }, () =>
-    bootstrap({
-      env,
-      oidcProviderArn: 'arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com',
-      stateBucket: 'pebble-stg-pulumi-state',
-      kmsKeyArn: 'arn:aws:kms:ap-southeast-1:123456789012:key/abc',
-    })
-  );
+  runProgram({ project: 'basefresh-bootstrap', stack: env }, () => bootstrap(env));
 
 describe('basefresh bootstrap', () => {
   test.each(['preview', 'staging', 'prod'] as const)('%s creates its deploy role, policy and boundary', async (env) => {

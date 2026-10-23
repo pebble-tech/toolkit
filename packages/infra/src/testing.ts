@@ -90,6 +90,11 @@ export const defaultMocks: pulumi.runtime.Mocks = {
         return { name: REGION, region: REGION };
       case 'aws:index/getPartition:getPartition':
         return { partition: 'aws', dnsSuffix: 'amazonaws.com' };
+      case 'aws:kms/getAlias:getAlias': {
+        const alias = String(args.inputs.name).replace(/^alias\//, '');
+        const key = `arn:aws:kms:${REGION}:${ACCOUNT}:key/${alias}`;
+        return { arn: `arn:aws:kms:${REGION}:${ACCOUNT}:alias/${alias}`, name: args.inputs.name, targetKeyArn: key };
+      }
       case 'vercel:index/getDomainConfig:getDomainConfig':
         return { ...args.inputs, recommendedCname: 'cname.vercel-dns.com', recommendedIpv4s: [], misconfigured: false };
       default:

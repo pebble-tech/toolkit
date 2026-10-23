@@ -1,38 +1,32 @@
 import * as aws from '@pulumi/aws';
 import * as pulumi from '@pulumi/pulumi';
 
-import { assertProduct, boundaryPolicyName, type DeployEnv, type PermissionsBoundaryArn } from './stage.js';
+import {
+  assertProduct,
+  boundaryPolicyName,
+  type DeployEnv,
+  deployState,
+  githubEnvironment,
+  type PermissionsBoundaryArn,
+} from './stage.js';
 
 const BASIC_EXECUTION = 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole';
-const GITHUB_ENVIRONMENT: Record<DeployEnv, string> = { preview: 'preview', staging: 'staging', prod: 'production' };
 
 export interface DeployRoleArgs {
   product: string;
   /** The stacks this role deploys: `preview` covers every `pr-<n>` stack. */
   env: DeployEnv;
-  github: {
-    org: string;
-    repo: string;
-    /** GitHub environments allowed to assume the role; default `preview`, `staging` or `production` by env. */
-    environments?: string[];
-  };
-  /** The account's GitHub OIDC provider (shared bootstrap). */
-  oidcProviderArn: pulumi.Input<string>;
-  state: {
-    /** Pulumi state bucket name. */
-    bucket: string;
-    /** Key prefixes this role may read and write; default `<product>/<env>`. Staging adds `<product>/shared`. */
-    paths?: string[];
-    /** KMS key that encrypts this role's stack secrets. */
-    kmsKeyArn: pulumi.Input<string>;
-  };
+  /** The product's repository. The trusted GitHub environment comes from `env` (`preview`, `staging`, `production`). */
+  github: { org: string; repo: string };
 }
 
 type Statement = Record<string, unknown>;
 
 /**
  * The role a product's GitHub workflow assumes for one env, plus the permissions boundary every role it creates must
- * carry. Applied by hand once per product and env from the product's `infra/bootstrap` stack.
+ * carry. Applied by hand once per product and env from the product's `infra/bootstrap` stack. Everything that ties it
+ * to an env (trusted GitHub environment, OIDC provider, state bucket and paths, KMS key) is derived from `product` and
+ * `env`, so a role cannot be pointed at another env's state or tokens.
  */
 export class DeployRole extends pulumi.ComponentResource {
   readonly roleArn: pulumi.Output<string>;
@@ -80,9 +74,11 @@ export class DeployRole extends pulumi.ComponentResource {
       child()
     );
 
-    const subs = (args.github.environments ?? [GITHUB_ENVIRONMENT[env]]).map(
-      (environment) => `repo:${args.github.org}/${args.github.repo}:environment:${environment}`
-    );
+    const { accountId } = aws.getCallerIdentityOutput({}, { parent: this });
+    const oidcProviderArn = pulumi.interpolate`arn:aws:iam::${accountId}:oidc-provider/token.actions.githubusercontent.com`;
+    const state = deployState(product, env);
+    const kmsKeyArn = aws.kms.getAliasOutput({ name: state.kmsAlias }, { parent: this }).targetKeyArn;
+    const subs = [`repo:${args.github.org}/${args.github.repo}:environment:${githubEnvironment(env)}`];
     const role = new aws.iam.Role(
       `${name}-role`,
       {
@@ -93,7 +89,7 @@ export class DeployRole extends pulumi.ComponentResource {
           Statement: [
             {
               Effect: 'Allow',
-              Principal: { Federated: args.oidcProviderArn },
+              Principal: { Federated: oidcProviderArn },
               Action: 'sts:AssumeRoleWithWebIdentity',
               Condition: {
                 StringEquals: {
@@ -109,7 +105,7 @@ export class DeployRole extends pulumi.ComponentResource {
       child()
     );
 
-    const paths = args.state.paths ?? [`${product}/${env}`];
+    const { bucket, paths } = state;
     const roles = `arn:aws:iam::*:role/${scope}`;
     // Stage tags carry the stack's env (`pr-7` on a preview).
     const tagged = (prefix: 'aws:RequestTag' | 'aws:ResourceTag') => ({
@@ -258,14 +254,14 @@ export class DeployRole extends pulumi.ComponentResource {
         Sid: 'StateList',
         Effect: 'Allow',
         Action: 's3:ListBucket',
-        Resource: `arn:aws:s3:::${args.state.bucket}`,
+        Resource: `arn:aws:s3:::${bucket}`,
         Condition: { StringLike: { 's3:prefix': paths.flatMap((path) => [path, `${path}/*`]) } },
       },
       {
         Sid: 'StateObjects',
         Effect: 'Allow',
         Action: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
-        Resource: paths.map((path) => `arn:aws:s3:::${args.state.bucket}/${path}/*`),
+        Resource: paths.map((path) => `arn:aws:s3:::${bucket}/${path}/*`),
       },
       {
         Sid: 'StateSecrets',
@@ -281,7 +277,7 @@ export class DeployRole extends pulumi.ComponentResource {
         role: role.name,
         name: 'deploy',
         policy: pulumi
-          .all([boundary.arn, args.state.kmsKeyArn])
+          .all([boundary.arn, kmsKeyArn])
           .apply(([boundaryArn, kmsKeyArn]) =>
             JSON.stringify({ Version: '2012-10-17', Statement: statements(boundaryArn, kmsKeyArn) })
           ),

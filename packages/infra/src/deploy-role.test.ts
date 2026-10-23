@@ -4,7 +4,6 @@ import { DeployRole, type DeployRoleArgs, StageError } from './index.js';
 import { runProgram } from './testing.js';
 
 const OIDC = 'arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com';
-const KMS = 'arn:aws:kms:ap-southeast-1:123456789012:key/abc';
 
 async function roleFor(env: DeployRoleArgs['env'], extra: Partial<DeployRoleArgs> = {}) {
   return runProgram(
@@ -14,8 +13,6 @@ async function roleFor(env: DeployRoleArgs['env'], extra: Partial<DeployRoleArgs
         product: 'basefresh',
         env,
         github: { org: 'pebble-tech', repo: 'basefresh' },
-        oidcProviderArn: OIDC,
-        state: { bucket: 'pebble-stg-pulumi-state', kmsKeyArn: KMS },
         ...extra,
       })
   );
@@ -134,28 +131,66 @@ describe('DeployRole', () => {
     expect(statement(policy, 'CertificatesChangeOwn').Condition.StringLike['aws:ResourceTag/env']).toBe('pr-*');
   });
 
-  test('state access is limited to its paths in the bucket and its KMS key', async () => {
+  test.each([
+    ['preview', 'preview', 'pebble-stg-pulumi-state', ['basefresh/preview'], 'pebble-stg-pulumi-preview'],
+    [
+      'staging',
+      'staging',
+      'pebble-stg-pulumi-state',
+      ['basefresh/staging', 'basefresh/shared'],
+      'pebble-stg-pulumi-staging',
+    ],
+    ['prod', 'production', 'pebble-prd-pulumi-state', ['basefresh/prod'], 'pebble-prd-pulumi-prod'],
+  ] as const)(
+    '%s derives its GitHub environment, state bucket, paths and KMS key from the env',
+    async (env, environment, bucket, paths, keyAlias) => {
+      const { resources } = await roleFor(env);
+      const trust = JSON.parse(find(resources, 'aws:iam/role:Role').inputs.assumeRolePolicy).Statement[0];
+      const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
+      expect({
+        federated: trust.Principal.Federated,
+        subs: trust.Condition.StringEquals['token.actions.githubusercontent.com:sub'],
+        list: statement(policy, 'StateList').Resource,
+        prefixes: statement(policy, 'StateList').Condition.StringLike['s3:prefix'],
+        objects: statement(policy, 'StateObjects').Resource,
+        key: statement(policy, 'StateSecrets').Resource,
+      }).toEqual({
+        federated: OIDC,
+        subs: [`repo:pebble-tech/basefresh:environment:${environment}`],
+        list: `arn:aws:s3:::${bucket}`,
+        prefixes: paths.flatMap((path) => [path, `${path}/*`]),
+        objects: paths.map((path) => `arn:aws:s3:::${bucket}/${path}/*`),
+        key: `arn:aws:kms:ap-southeast-1:123456789012:key/${keyAlias}`,
+      });
+    }
+  );
+
+  test("a staging role cannot be given another env's trust, state paths, bucket or key (the reviewer's probe)", async () => {
     const { resources } = await roleFor('staging', {
+      github: { org: 'pebble-tech', repo: 'basefresh', environments: ['preview', 'production'] },
+      oidcProviderArn: 'arn:aws:iam::123456789012:oidc-provider/elsewhere',
       state: {
-        bucket: 'pebble-stg-pulumi-state',
-        paths: ['basefresh/staging', 'basefresh/shared'],
-        kmsKeyArn: KMS,
+        bucket: 'pebble-prd-pulumi-state',
+        paths: ['basefresh/prod', 'basefresh/preview'],
+        kmsKeyArn: 'arn:aws:kms:ap-southeast-1:123456789012:key/prod',
       },
-    });
+    } as never);
+    const trust = JSON.parse(find(resources, 'aws:iam/role:Role').inputs.assumeRolePolicy).Statement[0];
     const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
-    expect(statement(policy, 'StateList')).toMatchObject({
-      Resource: 'arn:aws:s3:::pebble-stg-pulumi-state',
-      Condition: {
-        StringLike: {
-          's3:prefix': ['basefresh/staging', 'basefresh/staging/*', 'basefresh/shared', 'basefresh/shared/*'],
-        },
-      },
-    });
-    expect(statement(policy, 'StateObjects').Resource).toEqual([
-      'arn:aws:s3:::pebble-stg-pulumi-state/basefresh/staging/*',
-      'arn:aws:s3:::pebble-stg-pulumi-state/basefresh/shared/*',
+    expect([
+      trust.Principal.Federated,
+      trust.Condition.StringEquals['token.actions.githubusercontent.com:sub'],
+      statement(policy, 'StateObjects').Resource,
+      statement(policy, 'StateSecrets').Resource,
+    ]).toEqual([
+      OIDC,
+      ['repo:pebble-tech/basefresh:environment:staging'],
+      [
+        'arn:aws:s3:::pebble-stg-pulumi-state/basefresh/staging/*',
+        'arn:aws:s3:::pebble-stg-pulumi-state/basefresh/shared/*',
+      ],
+      'arn:aws:kms:ap-southeast-1:123456789012:key/pebble-stg-pulumi-staging',
     ]);
-    expect(statement(policy, 'StateSecrets').Resource).toBe(KMS);
   });
 
   test('no statement grants a wildcard action on a wildcard resource', async () => {

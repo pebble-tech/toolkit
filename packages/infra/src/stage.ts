@@ -38,6 +38,29 @@ export function boundaryPolicyName(product: string, env: DeployEnv): string {
   return `${product}-${env}-boundary`;
 }
 
+/** Where a deploy env's Pulumi state lives and which key encrypts its secrets (the shared bootstrap creates both). */
+export interface DeployState {
+  bucket: string;
+  /** Key prefixes in the bucket; staging also owns `<product>/shared`, since its role applies the shared stack. */
+  paths: string[];
+  kmsAlias: string;
+}
+
+/** State location for a product and deploy env: `pebble-<stg|prd>-pulumi-state/<product>/<env>`. */
+export function deployState(product: string, env: DeployEnv): DeployState {
+  const account = env === 'prod' ? 'prd' : 'stg';
+  return {
+    bucket: `pebble-${account}-pulumi-state`,
+    paths: env === 'staging' ? [`${product}/staging`, `${product}/shared`] : [`${product}/${env}`],
+    kmsAlias: `alias/pebble-${account}-pulumi-${env}`,
+  };
+}
+
+/** The GitHub environment whose OIDC tokens a deploy env's role trusts. */
+export function githubEnvironment(env: DeployEnv): string {
+  return env === 'prod' ? 'production' : env;
+}
+
 const SLUG = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const PREVIEW = /^pr-([1-9][0-9]*)$/;
 

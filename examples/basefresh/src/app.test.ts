@@ -157,12 +157,7 @@ describe('basefresh program', () => {
     "%s: the deploy role's IAM scope covers every role, function and log group the stack creates",
     async (env) => {
       const { resources: roleResources } = await runProgram({ project: 'basefresh-bootstrap', stack: env }, () =>
-        bootstrap({
-          env,
-          oidcProviderArn: 'arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com',
-          stateBucket: 'pebble-stg-pulumi-state',
-          kmsKeyArn: 'arn:aws:kms:ap-southeast-1:123456789012:key/abc',
-        })
+        bootstrap(env)
       );
       const policy = JSON.parse(
         roleResources.find((r) => r.type === 'aws:iam/rolePolicy:RolePolicy')!.inputs.policy
