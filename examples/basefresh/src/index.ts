@@ -12,7 +12,6 @@ export const outputs = basefresh({
   cloudflareAccountId: config.require('cloudflareAccountId'),
   pgAdminUrl: config.requireSecret('pgAdminUrl'),
   ...(ownerRole ? { pgOwner: { role: ownerRole, password: config.requireSecret('pgOwnerPassword') } } : {}),
-  sharedStack: config.get('sharedStack') ?? 'organization/basefresh/shared',
   authSecret: config.getSecret('authSecret') ?? '',
   bundles: { api: 'bundles/api', uploads: 'bundles/uploads/server.js' },
 });

@@ -1,5 +1,6 @@
 import { ApiFunction, Database, Stage, VercelProject, Worker } from '@pebbletech/infra';
 import * as pulumi from '@pulumi/pulumi';
+import * as vercel from '@pulumiverse/vercel';
 
 /** What a basefresh stack needs from outside the program: config and secrets in a real run, fixtures in tests. */
 export interface BasefreshInputs {
@@ -10,8 +11,6 @@ export interface BasefreshInputs {
   pgAdminUrl: pulumi.Input<string>;
   /** Staging and prod: the PlanetScale-made role that owns the database, and its password (secret). */
   pgOwner?: { role: string; password: pulumi.Input<string> };
-  /** `organization/basefresh/shared` on a self-managed backend. */
-  sharedStack: string;
   authSecret: pulumi.Input<string>;
   /** Built by the product (esbuild); paths relative to the project directory. */
   bundles: { api: string; uploads: string };
@@ -46,7 +45,9 @@ export function basefresh(inputs: BasefreshInputs): Record<string, pulumi.Input<
     return { databaseName: database.databaseName, databaseUrl: database.directUrl };
   }
 
-  const shared = new pulumi.StackReference('shared', { name: inputs.sharedStack });
+  // shared's state is another backend, and prod's state is in another account, so look the project up by name.
+  // shared must already exist. The name is the one VercelProject creates there: `<product>-web`.
+  const project = vercel.getProjectOutput({ name: `${stage.product}-web` });
   const database = new Database('db', { stage, adminUrl: inputs.pgAdminUrl, owner: inputs.pgOwner });
   const runtimeUrl = database.pooledUrl!;
   const webUrl = `https://${stage.hostname('app', inputs.apex)}`;
@@ -70,11 +71,14 @@ export function basefresh(inputs: BasefreshInputs): Record<string, pulumi.Input<
     vars: { UPLOAD_ALLOWED_ORIGINS: webUrl, NODE_ENV: 'production' },
     secrets: { DATABASE_URL: runtimeUrl, BETTER_AUTH_SECRET: inputs.authSecret },
   });
-  const customEnvironmentIds = shared.requireOutput('customEnvironmentIds') as pulumi.Output<Record<string, string>>;
   const web = new VercelProject('web', {
     stage,
-    projectId: shared.requireOutput('projectId') as pulumi.Output<string>,
-    ...(stage.isProd ? {} : { customEnvironmentId: customEnvironmentIds.apply((ids) => ids.staging!) }),
+    projectId: project.id,
+    ...(stage.isProd
+      ? {}
+      : {
+          customEnvironmentId: vercel.getCustomEnvironmentOutput({ projectId: project.id, name: 'staging' }).id,
+        }),
     vars: { APP_BASE_URL: webUrl, UPLOADS_BASE_URL: uploads.url, NODE_ENV: 'production' },
     secrets: { DATABASE_URL: runtimeUrl, BETTER_AUTH_SECRET: inputs.authSecret },
     domain: { hostname: stage.hostname('app', inputs.apex), zoneId: inputs.cloudflareZoneId },

@@ -13,26 +13,24 @@ const inputs = (stack: string): BasefreshInputs => ({
   cloudflareAccountId: 'account-1',
   pgAdminUrl: 'postgresql://postgres.abc123:admin@sin.pg.psdb.cloud:5432/postgres',
   ...(stack.startsWith('pr-') || stack === 'shared' ? {} : { pgOwner: { role: 'basefresh_app', password: 'owner' } }),
-  sharedStack: 'organization/basefresh/shared',
   authSecret: 'auth-secret',
   bundles: { api: join(root, 'bundles/api'), uploads: join(root, 'bundles/uploads/server.js') },
 });
 
-// The shared stack's outputs, as a StackReference reads them.
+// What Vercel answers when staging and prod look the shared project up by name.
 const mocks: pulumi.runtime.Mocks = {
   ...defaultMocks,
-  newResource(args) {
-    if (args.type === 'pulumi:pulumi:StackReference') {
-      return {
-        id: args.inputs.name,
-        state: {
-          name: args.inputs.name,
-          outputs: { projectId: 'prj_basefresh', customEnvironmentIds: { staging: 'env_staging' } },
-          secretOutputNames: [],
-        },
-      };
+  call(args) {
+    if (args.token === 'vercel:index/getProject:getProject') {
+      const id = args.inputs.name === 'basefresh-web' ? 'prj_basefresh' : 'prj_other';
+      return { ...args.inputs, id };
     }
-    return defaultMocks.newResource(args);
+    if (args.token === 'vercel:index/getCustomEnvironment:getCustomEnvironment') {
+      const id =
+        args.inputs.projectId === 'prj_basefresh' && args.inputs.name === 'staging' ? 'env_staging' : 'env_other';
+      return { ...args.inputs, id };
+    }
+    return defaultMocks.call(args);
   },
 };
 
