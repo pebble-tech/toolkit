@@ -170,6 +170,7 @@ describe('ApiFunction', () => {
     ['an Output of an empty string', pulumi.output('')],
     ['an Output of a role ARN', pulumi.output('arn:aws:iam::123456789012:role/x')],
     ["another account's policy", 'arn:aws:iam::999999999999:policy/wide-open'],
+    ['the right boundary name in another account', 'arn:aws:iam::999999999999:policy/basefresh-staging-boundary'],
     ['another policy in this account', 'arn:aws:iam::123456789012:policy/wide-open'],
     ["another env's boundary", 'arn:aws:iam::123456789012:policy/basefresh-prod-boundary'],
     ["another product's boundary", pulumi.output('arn:aws:iam::123456789012:policy/other-staging-boundary')],
