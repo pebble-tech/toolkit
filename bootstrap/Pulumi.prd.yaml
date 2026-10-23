@@ -3,4 +3,8 @@ config:
   # SST's bootstrap made the GitHub OIDC provider in this account: the first `pulumi up` adopts it. README step 5
   # turns this off once it is adopted.
   pebble-aws-bootstrap:oidc:
-    import: true
+    import: false
+  pebble-aws-bootstrap:accountId:
+    secure: v1:UMAfFqPQG6RRLSya:ZLH4snnoT69Lpj8e/3ZPtBOpVrrnk5lG1Qihlg==
+secretsprovider: awskms://alias/pebble-prd-pulumi-prod?region=ap-southeast-1
+encryptedkey: AQICAHggNE64TGXjWv0bNtd0mqGI0eTtwNWuO/SEsqhCLZE3EwFoyp9SUJCZ2W3VLsigIKhIAAAAfjB8BgkqhkiG9w0BBwagbzBtAgEAMGgGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMUQzQlZa3OXhDhY7uAgEQgDvKrEAOyJBuh0+EjiURQKugnUfsZAieqMibInLspYtLvlgNAnhQ8tVXAI3LCbSm3hOCMLANv5//J+jycw==
