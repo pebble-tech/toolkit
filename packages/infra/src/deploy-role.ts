@@ -159,6 +159,8 @@ export class DeployRole extends pulumi.ComponentResource {
       // `-<product>[-stg]` matches too.
       const domainSuffix = env === 'staging' ? 'stg' : '';
       const domainNames = `arn:aws:apigateway:*::/domainnames/*-${product}${domainSuffix ? `-${domainSuffix}` : ''}.${apex}`;
+      // The domain glob ends at the apex, so it does not cover Create/Get/Update/DeleteApiMapping.
+      const domainResources = [domainNames, `${domainNames}/apimappings`, `${domainNames}/apimappings/*`];
       const apiName = `${product}-${env}-*`;
       const httpApi: Statement[] = [
         {
@@ -198,11 +200,12 @@ export class DeployRole extends pulumi.ComponentResource {
           Resource: 'arn:aws:apigateway:*::/domainnames',
         },
         {
-          // POST is CreateApiMapping (`/domainnames/<name>/apimappings`). The ARN glob limits it to this stage's hostnames.
+          // POST on `/apimappings` is CreateApiMapping; GET, PATCH and DELETE on `/apimappings/*` are the read,
+          // update and delete. The same actions also cover the domain name itself.
           Sid: 'HttpApiDomain',
           Effect: 'Allow',
           Action: ['apigateway:GET', 'apigateway:POST', 'apigateway:PUT', 'apigateway:PATCH', 'apigateway:DELETE'],
-          Resource: domainNames,
+          Resource: domainResources,
         },
         // No /tags/* grant. The API Gateway V2 reference does not list aws:ResourceTag/${TagKey} for
         // TagResource or UntagResource. CreateApi still sends tags; a later tag update is denied.

@@ -228,7 +228,7 @@ describe('DeployRole', () => {
         Sid: 'HttpApiDomain',
         Effect: 'Allow',
         Action: ['apigateway:GET', 'apigateway:POST', 'apigateway:PUT', 'apigateway:PATCH', 'apigateway:DELETE'],
-        Resource: domainArn,
+        Resource: [domainArn, `${domainArn}/apimappings`, `${domainArn}/apimappings/*`],
       });
       expect(statement(policy, 'HttpApiTags')).toBeUndefined();
     }
@@ -283,11 +283,26 @@ describe('DeployRole', () => {
         for (const env of ['staging', 'prod'] as const) {
           const { resources } = await roleFor(env, { product, apex });
           const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
-          const glob = statement(policy, 'HttpApiDomain').Resource as string;
-          const matched = hostnames.filter((row) => iamMatches(glob, gatewayArn(`/domainnames/${row.host}`)));
+          const patterns = asList(statement(policy, 'HttpApiDomain').Resource).map(String);
+          const matched = hostnames.filter((row) =>
+            patterns.some((pattern) => iamMatches(pattern, gatewayArn(`/domainnames/${row.host}`)))
+          );
           const own = hostnames.filter((row) => row.product === product && row.stack === env);
           expect(own).toHaveLength(kinds.length);
           expect(matched.map((row) => row.host).sort()).toEqual(own.map((row) => row.host).sort());
+          for (const host of own.map((row) => row.host)) {
+            const mapping = gatewayArn(`/domainnames/${host}/apimappings`);
+            expect([
+              allows(policy, 'apigateway:POST', mapping),
+              allows(policy, 'apigateway:GET', `${mapping}/mapping-id`),
+              allows(policy, 'apigateway:PATCH', `${mapping}/mapping-id`),
+              allows(policy, 'apigateway:DELETE', `${mapping}/mapping-id`),
+            ]).toEqual([true, true, true, true]);
+          }
+          const foreign = hostnames.find((row) => row.product !== product && row.stack === env)!;
+          expect(
+            allows(policy, 'apigateway:DELETE', gatewayArn(`/domainnames/${foreign.host}/apimappings/mapping-id`))
+          ).toBe(false);
         }
       }
     }
@@ -301,15 +316,10 @@ describe('DeployRole', () => {
     const prod = JSON.parse(
       find((await roleFor('prod', { apex })).resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy
     );
-    expect(
-      iamMatches(
-        statement(staging, 'HttpApiDomain').Resource,
-        gatewayArn(`/domainnames/api-x-stg.foo-basefresh-stg.${apex}`)
-      )
-    ).toBe(true);
-    expect(
-      iamMatches(statement(prod, 'HttpApiDomain').Resource, gatewayArn(`/domainnames/api-x.foo-basefresh.${apex}`))
-    ).toBe(true);
+    const matches = (policy: { Statement: unknown[] }, arn: string) =>
+      asList(statement(policy, 'HttpApiDomain').Resource).some((pattern) => iamMatches(String(pattern), arn));
+    expect(matches(staging, gatewayArn(`/domainnames/api-x-stg.foo-basefresh-stg.${apex}`))).toBe(true);
+    expect(matches(prod, gatewayArn(`/domainnames/api-x.foo-basefresh.${apex}`))).toBe(true);
   });
 
   test.each([
