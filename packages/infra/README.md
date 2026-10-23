@@ -10,7 +10,7 @@ pinning a version; the guardrails are defaults it cannot turn off.
 | `Database` | an explicit Postgres provider on port 5432 with `sslmode=verify-full`, the database, its owner (a generated login role on previews), the `public` revoke; `directUrl` and `pooledUrl` as secrets | staging/prod without an existing owner role; a derived name longer than 63 characters. The name is always `stage.databaseName()` |
 | `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; a boundary other than the stage's own `<product>-<env>-boundary` in the current account (a typed `PermissionsBoundaryArn` from `Stage` or `DeployRole`, checked when it resolves, so `pulumi preview` fails). Timeouts above 29 s are clamped |
 | `Worker` | Workers script from a prebuilt module, R2 bucket `<product>-<env>-<kind>` (on prod, `adoptExisting` imports that same name instead of creating it), plain and secret bindings, custom domain | a secret-looking name in `vars` unless listed in `plainTextAllowed`; `adoptExisting` outside prod |
-| `DeployRole` | the GitHub OIDC role for one product and env, its inline policy, and the boundary policy its roles must carry. Takes only `product`, `env` and the repo: the trusted GitHub environment, the account's OIDC provider, the state bucket and paths (`pebble-<stg\|prd>-pulumi-state/<product>/<env>`, plus `<product>/shared` for staging) and the KMS key (`alias/pebble-<stg\|prd>-pulumi-<env>`) are derived | a `pebble` product |
+| `DeployRole` | the GitHub OIDC role for one product and env, its inline policy, and the boundary policy its roles must carry. `preview` allows the state bucket and the KMS key only. `staging` and `prod` also allow Lambda, API Gateway, ACM, logs and IAM inside `<product>-<env>`. Takes only `product`, `env` and the repo: the trusted GitHub environment, the account's OIDC provider, the state bucket and paths (`pebble-<stg\|prd>-pulumi-state/<product>/<env>`, plus `<product>/shared` for staging) and the KMS key (`alias/pebble-<stg\|prd>-pulumi-<env>`) are derived | a `pebble` product |
 
 Every component refuses a hostname or name outside its stage (`NamespaceError`), and every refusal is a
 `GuardrailError` subclass. On `prod` (and `shared`, which owns production's Vercel project) every child resource gets
@@ -28,22 +28,39 @@ Hostnames and database names keep base-app's `stg`/`prd` suffixes; resource name
 
 ## Ownership
 
-- `shared`: the Vercel project and its custom environments. Apply it before staging and prod; they read
-  `projectId` and `customEnvironmentIds` through a `StackReference`. It has no deploy role of its own: the staging
-  role applies it, so its state lives at `<product>/shared` in `pebble-stg-pulumi-state` and its secrets use the
-  staging key (`stateKeyAlias('shared')` is `alias/pebble-stg-pulumi-staging`).
+- `shared`: the Vercel project and its custom environments. Apply it before `staging` and `prod`. It has no deploy role
+  of its own. The staging role applies it, so its state lives at `<product>/shared` in `pebble-stg-pulumi-state` and
+  its secrets use the staging key (`stateKeyAlias('shared')` is `alias/pebble-stg-pulumi-staging`).
 - `pr-<n>`: a database and its role. Previews pass env to `vercel deploy`.
 - `staging`, `prod`: database, API, Worker, web env vars and domain.
 - `infra/bootstrap` (a separate project, applied by hand with SSO): one `DeployRole` per env (`preview`, `staging`,
   `prod`). `ApiFunction` defaults its boundary to `<product>-<env>-boundary` in the current account, the policy the
   deploy role created.
 
+`staging` and `prod` look the shared project up by name. The state of `shared` is a second backend, and prod's state
+is in another account. `shared` must already exist. The name is the project that stack created (`<product>-web`,
+unless it set another name). `staging` passes `customEnvironmentId` into `VercelProject`. `prod` omits it and targets
+`production`.
+
+```ts
+import * as vercel from '@pulumiverse/vercel';
+
+const project = vercel.getProjectOutput({ name: `${stage.product}-web` });
+const customEnvironmentId = stage.isProd
+  ? undefined
+  : vercel.getCustomEnvironmentOutput({ projectId: project.id, name: 'staging' }).id;
+```
+
 Tearing down `shared` or `prod` takes an explicit step: every child there is protected, so run
 `pulumi state unprotect --all -s <stack>` before `pulumi destroy -s <stack>`.
 
-Known limit of `DeployRole`: HTTP API ids are random, so its API Gateway statement covers every HTTP API and custom
-domain in the account, not only the product's. Lambda, IAM, logs, certificates and state are scoped to the product
-and env.
+Known limit of `DeployRole`: routes, integrations and stages carry no API name key. A `staging` or `prod` role can edit
+those sub-resources under another HTTP API's id. It cannot create that API unless `apigateway:Request/ApiName` matches
+`<product>-<env>-*`. It cannot delete that API unless `apigateway:Resource/ApiName` matches the same pattern.
+Custom-domain reads, updates, deletes and `CreateApiMapping` must match the stage hostname
+(`*-<product>-stg.*` on staging, `*-<product>.*` on prod). `POST` on `/domainnames` has no name condition.
+
+The `preview` role's policy contains the state-bucket statements and the KMS key statement only.
 
 `DeployRole` gates `iam:PassRole` on `iam:PassedToService` alone (PassRole has no boundary condition key); the boundary
 is enforced where roles are written: `CreateRole`, `AttachRolePolicy`, `PutRolePolicy` and
