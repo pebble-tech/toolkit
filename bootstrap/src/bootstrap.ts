@@ -1,4 +1,4 @@
-import { deployAccount, stateBucketName, stateKeyAlias, type DeployAccount, type StateKey } from '@pebbletech/infra';
+import { deployAccount, stateBucketName, stateKeyAlias, type DeployAccount, type DeployEnv } from '@pebbletech/infra';
 import * as aws from '@pulumi/aws';
 import * as pulumi from '@pulumi/pulumi';
 
@@ -23,10 +23,9 @@ export interface BootstrapSettings {
   importOidcProvider: boolean;
 }
 
-/** Every state key the bootstrap creates in an account: one per deploy env there, plus `shared` in stg. */
-export function stateKeys(account: DeployAccount): StateKey[] {
-  const envs = (['preview', 'staging', 'prod'] as const).filter((env) => deployAccount(env) === account);
-  return account === 'stg' ? [...envs, 'shared'] : envs;
+/** Every state key the bootstrap creates in an account: one per deploy env there. */
+export function stateKeys(account: DeployAccount): DeployEnv[] {
+  return (['preview', 'staging', 'prod'] as const).filter((env) => deployAccount(env) === account);
 }
 
 /** Checks the stack name and config the entry point read; throws on anything the program cannot run with. */
@@ -60,7 +59,7 @@ function accountAdmin(accountId: string) {
 }
 
 export interface StateKeyArgs {
-  key: StateKey;
+  key: DeployEnv;
   accountId: string;
 }
 

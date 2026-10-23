@@ -58,17 +58,15 @@ const aliases = (resources: Registration[]) =>
     .sort();
 
 describe('pebble-aws-bootstrap', () => {
-  test('stg creates the OIDC provider, the state bucket and the preview, staging and shared keys', async () => {
+  test('stg creates the OIDC provider, the state bucket and the preview and staging keys', async () => {
     const { resources } = await run(stg);
     expect(resources.map((r) => `${r.type} ${physical(r)}`).sort()).toEqual([
       'aws:iam/openIdConnectProvider:OpenIdConnectProvider https://token.actions.githubusercontent.com',
       'aws:kms/alias:Alias alias/pebble-stg-pulumi-preview',
-      'aws:kms/alias:Alias alias/pebble-stg-pulumi-shared',
       'aws:kms/alias:Alias alias/pebble-stg-pulumi-staging',
       'aws:kms/alias:Alias alias/pebble-stg-pulumi-state',
       'aws:kms/key:Key state-key',
       'aws:kms/key:Key state-preview-key',
-      'aws:kms/key:Key state-shared-key',
       'aws:kms/key:Key state-staging-key',
       'aws:s3/bucket:Bucket pebble-stg-pulumi-state',
       'aws:s3/bucketLifecycleConfiguration:BucketLifecycleConfiguration pebble-stg-pulumi-state',
@@ -77,7 +75,6 @@ describe('pebble-aws-bootstrap', () => {
       'aws:s3/bucketVersioning:BucketVersioning pebble-stg-pulumi-state',
       'pebbletech:bootstrap:PulumiStateBucket state',
       'pebbletech:bootstrap:PulumiStateKey state-preview',
-      'pebbletech:bootstrap:PulumiStateKey state-shared',
       'pebbletech:bootstrap:PulumiStateKey state-staging',
       'pulumi:providers:aws aws',
     ]);
@@ -240,15 +237,15 @@ describe('names shared with DeployRole', () => {
 
   // The account each deploy env runs in (contract: previews and staging in pbt-stg, prod in pbt-prd).
   test.each([
-    { account: 'stg', envs: ['preview', 'staging'], also: ['alias/pebble-stg-pulumi-shared'] },
-    { account: 'prd', envs: ['prod'], also: [] },
-  ] as const)('$account has exactly the aliases and bucket its deploy roles use', async ({ account, envs, also }) => {
+    { account: 'stg', envs: ['preview', 'staging'] },
+    { account: 'prd', envs: ['prod'] },
+  ] as const)('$account has exactly the aliases and bucket its deploy roles use', async ({ account, envs }) => {
     // One run at a time: the Pulumi runtime is global to the process.
     const derived = [];
     for (const env of envs) derived.push(await deployRoleNames(env));
     const { resources } = await run(account === 'stg' ? stg : prd);
 
-    expect(aliases(resources)).toEqual([...derived.flatMap((d) => d.aliases), ...also].sort());
+    expect(aliases(resources)).toEqual(derived.flatMap((d) => d.aliases).sort());
     expect(new Set(derived.map((d) => d.bucket))).toEqual(
       new Set(ofType(resources, 'aws:s3/bucket:Bucket').map(physical))
     );
