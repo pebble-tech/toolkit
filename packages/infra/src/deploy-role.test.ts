@@ -137,12 +137,68 @@ describe('DeployRole', () => {
     });
   });
 
-  test('a preview role covers every pr-<n> stack and nothing else', async () => {
+  test('a preview role allows only its state bucket and KMS key, and still publishes the boundary', async () => {
     const { resources } = await roleFor('preview');
     const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
-    expect(statement(policy, 'Lambda').Resource).toBe('arn:aws:lambda:*:*:function:basefresh-pr-*');
-    expect(statement(policy, 'CertificatesChangeOwn').Condition.StringLike['aws:ResourceTag/env']).toBe('pr-*');
+    expect(policy.Statement.map((s: { Sid: string }) => s.Sid)).toEqual(['StateList', 'StateObjects', 'StateSecrets']);
+    expect(find(resources, 'aws:iam/policy:Policy').inputs.name).toBe('basefresh-preview-boundary');
+    expect(find(resources, 'pebbletech:index:DeployRole').outputs.boundaryArn).toBe(
+      'arn:aws:iam::123456789012:policy/basefresh-preview-boundary'
+    );
+    expect(find(resources, 'pebbletech:index:DeployRole').outputs.roleArn).toBe(
+      'arn:aws:iam::123456789012:role/basefresh-preview-deploy'
+    );
   });
+
+  test.each([
+    ['staging', 'basefresh-staging-*', 'arn:aws:apigateway:*::/domainnames/*-basefresh-stg.*'],
+    ['prod', 'basefresh-prod-*', 'arn:aws:apigateway:*::/domainnames/*-basefresh.*'],
+  ] as const)(
+    '%s creates an HTTP API only under its name, and reads domains only under its hostname',
+    async (env, apiName, domainArn) => {
+      const { resources } = await roleFor(env);
+      const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
+      const verbs = [
+        'apigateway:GET',
+        'apigateway:POST',
+        'apigateway:PUT',
+        'apigateway:PATCH',
+        'apigateway:DELETE',
+        'apigateway:TagResource',
+        'apigateway:UntagResource',
+      ];
+      expect(statement(policy, 'HttpApiCreate')).toEqual({
+        Sid: 'HttpApiCreate',
+        Effect: 'Allow',
+        Action: 'apigateway:POST',
+        Resource: 'arn:aws:apigateway:*::/apis',
+        Condition: { StringLike: { 'apigateway:Request/ApiName': apiName } },
+      });
+      expect(statement(policy, 'HttpApi')).toEqual({
+        Sid: 'HttpApi',
+        Effect: 'Allow',
+        Action: verbs,
+        Resource: 'arn:aws:apigateway:*::/apis/*',
+        Condition: { StringLikeIfExists: { 'apigateway:Resource/ApiName': apiName } },
+      });
+      expect(statement(policy, 'HttpApiDomainCreate')).toEqual({
+        Sid: 'HttpApiDomainCreate',
+        Effect: 'Allow',
+        Action: 'apigateway:POST',
+        Resource: 'arn:aws:apigateway:*::/domainnames',
+      });
+      expect(statement(policy, 'HttpApiDomain')).toEqual({
+        Sid: 'HttpApiDomain',
+        Effect: 'Allow',
+        Action: ['apigateway:GET', 'apigateway:POST', 'apigateway:PUT', 'apigateway:PATCH', 'apigateway:DELETE'],
+        Resource: domainArn,
+      });
+      expect(statement(policy, 'HttpApiTags')).toMatchObject({
+        Resource: 'arn:aws:apigateway:*::/tags/*',
+        Action: verbs,
+      });
+    }
+  );
 
   test.each([
     ['preview', 'preview', 'pebble-stg-pulumi-state', ['basefresh/preview'], 'pebble-stg-pulumi-preview'],
