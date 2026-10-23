@@ -20,9 +20,14 @@ function packedFiles(): string[] {
   return report.files.map((file) => file.path).sort();
 }
 
-test('the packed tarball holds the compiled modules, README, LICENSE and package.json, and no tests', () => {
-  const modules = readdirSync(join(packageDir, 'src'))
-    .filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))
-    .flatMap((file) => [`dist/${file.replace(/\.ts$/, '.d.ts')}`, `dist/${file.replace(/\.ts$/, '.js')}`]);
-  expect(packedFiles()).toEqual(['LICENSE', 'README.md', 'package.json', ...modules].sort());
-});
+// prepack rebuilds dist/ with tsc first, which can pass vitest's 5 s default on a loaded machine.
+test(
+  'the packed tarball holds the compiled modules, README, LICENSE and package.json, and no tests',
+  { timeout: 60_000 },
+  () => {
+    const modules = readdirSync(join(packageDir, 'src'))
+      .filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))
+      .flatMap((file) => [`dist/${file.replace(/\.ts$/, '.d.ts')}`, `dist/${file.replace(/\.ts$/, '.js')}`]);
+    expect(packedFiles()).toEqual(['LICENSE', 'README.md', 'package.json', ...modules].sort());
+  }
+);
