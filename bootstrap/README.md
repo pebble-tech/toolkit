@@ -76,7 +76,7 @@ Run every command from `bootstrap/`, in one shell.
 
    Expect one `import` (`github-actions`, the OIDC provider) and only `create` for the rest: the AWS provider, the bucket
    and its four settings, the bucket key, and the preview and staging keys with their aliases. No update, no
-   replace, no delete. If it is anything else, stop (see [When the preview is not what you expect](#when-the-preview-is-not-what-you-expect)).
+   replace, no delete, no warning. If it is anything else, stop (see [When the preview is not what you expect](#when-the-preview-is-not-what-you-expect)).
 
 4. Apply:
 
@@ -90,15 +90,17 @@ Run every command from `bootstrap/`, in one shell.
    pulumi up
    ```
 
-   Expect no changes: the provider is now in the stack's state, and the import option matches it. Then turn the
-   import off, since there is nothing left to adopt, and check again:
+   Expect no changes. The provider is in the stack's state under the same ID the import option names, so Pulumi
+   manages it like any other resource and does not import it again. Pulumi's docs say to remove the `import` option
+   once the resource is imported, so turn the flag off and check again:
 
    ```sh
    pulumi config set --path oidc.import false
    pulumi preview
    ```
 
-   Expect no changes again.
+   Expect no changes again. Both values of `oidc.import` are valid in a committed stack file; the tests check that
+   the program imports exactly when the flag is on.
 
 6. Move the stack's state into the bucket it created, and its secrets (the account id) to the staging key:
 
@@ -176,10 +178,12 @@ Rebuild first (`corepack pnpm build` at the root) if the program changed.
   per account. Set `pulumi config set --path oidc.import true` and preview again.
 - **The import fails because the provider does not exist** (a fresh account such as pbt-dev): set
   `pulumi config set --path oidc.import false` and the program creates it.
-- **`inputs to import do not match the existing resource`**: the existing provider differs from the program's URL,
-  audience (`sts.amazonaws.com`) or thumbprints. Compare with
+- **A warning on `github-actions` in the preview that its inputs differ from the existing resource**: the existing
+  provider differs from the program's URL, audience (`sts.amazonaws.com`) or thumbprints. Pulumi lets the preview
+  through with that warning, but `pulumi up` fails the import with an error. Compare with
   `aws iam get-open-id-connect-provider --open-id-connect-provider-arn arn:aws:iam::<account>:oidc-provider/token.actions.githubusercontent.com`.
-  Tags are ignored on purpose; anything else needs a decision before the import.
+  Tags are ignored on purpose (Pulumi copies ignored properties from the existing resource before it compares);
+  anything else needs a decision before the import.
 - **`AWS account ID not allowed`**: the credentials belong to another account than the stack's `accountId`. Check
   `AWS_PROFILE`.
 - **A `create` for the bucket fails with `BucketAlreadyExists`**: bucket names are global; someone owns

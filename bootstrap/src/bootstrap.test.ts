@@ -195,12 +195,14 @@ describe('the OIDC provider', () => {
     });
   };
 
+  // README step 5 turns oidc.import off once the provider is adopted, and step 8 commits that: both states are valid.
   test.each(['stg', 'prd'] as const)(
-    'the committed %s stack adopts the existing provider by its ARN',
+    'the committed %s stack imports the provider exactly when its oidc.import flag is on',
     async (stack) => {
-      const { resources } = await run(committed(stack));
+      const args = committed(stack);
+      const { resources } = await run(args);
       const provider = ofType(resources, 'aws:iam/openIdConnectProvider:OpenIdConnectProvider')[0]!;
-      expect(provider.importId).toBe(OIDC_ARN);
+      expect(provider.importId).toBe(args.importOidcProvider ? OIDC_ARN : '');
       expect(provider.inputs).toMatchObject({
         url: 'https://token.actions.githubusercontent.com',
         clientIdLists: ['sts.amazonaws.com'],
@@ -208,6 +210,11 @@ describe('the OIDC provider', () => {
       });
     }
   );
+
+  test('with the flag the existing provider is adopted by its ARN', async () => {
+    const { resources } = await run({ ...stg, importOidcProvider: true });
+    expect(ofType(resources, 'aws:iam/openIdConnectProvider:OpenIdConnectProvider')[0]!.importId).toBe(OIDC_ARN);
+  });
 
   test.each(['stg', 'prd'] as const)('the committed %s stack file holds the account id only encrypted', (stack) => {
     const config = parse(readFileSync(new URL(`../Pulumi.${stack}.yaml`, import.meta.url), 'utf8')).config;
