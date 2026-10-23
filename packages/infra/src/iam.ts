@@ -2,30 +2,30 @@ import * as aws from '@pulumi/aws';
 import * as pulumi from '@pulumi/pulumi';
 
 import { PermissionsBoundaryError } from './errors.js';
-import type { Stage } from './stage.js';
+import { boundaryPolicyName, type PermissionsBoundaryArn, type Stage } from './stage.js';
 
-const POLICY_ARN = /^arn:aws[a-z-]*:iam::\d{12}:policy\/.+/;
+const POLICY_ARN = /^arn:aws[a-z-]*:iam::(\d{12}):policy\/([^/]+)$/;
 
-/** Which deploy role serves a stage: one `preview` role covers every `pr-<n>` stack. */
-export type DeployEnv = 'preview' | 'staging' | 'prod';
-
-/** Name of the permissions boundary policy a stage's roles carry; `DeployRole` creates it. */
-export function boundaryPolicyName(product: string, env: DeployEnv): string {
-  return `${product}-${env}-boundary`;
-}
-
-/** The stage's boundary ARN in the account the AWS provider points at. */
-export function defaultBoundaryArn(stage: Stage, parent: pulumi.Resource): pulumi.Output<string> {
-  const env: DeployEnv = stage.isPreview ? 'preview' : stage.isProd ? 'prod' : 'staging';
+/**
+ * The boundary as it reaches IAM: the policy `<product>-<deploy env>-boundary` in the account the AWS provider points
+ * at, and nothing else. Checked inside `apply`, so an Output of anything else fails `pulumi preview`.
+ */
+function checkedBoundary(
+  stage: Stage,
+  boundary: PermissionsBoundaryArn,
+  parent: pulumi.Resource | undefined
+): pulumi.Output<string> {
+  const expected = boundaryPolicyName(stage.product, stage.deployEnv);
   const { accountId } = aws.getCallerIdentityOutput({}, { parent });
-  return pulumi.interpolate`arn:aws:iam::${accountId}:policy/${boundaryPolicyName(stage.product, env)}`;
-}
-
-/** Throws PermissionsBoundaryError unless the boundary is given and, when known now, an IAM policy ARN. */
-export function assertBoundary(boundary: pulumi.Input<string> | undefined): asserts boundary is pulumi.Input<string> {
-  if (typeof boundary === 'string' ? !POLICY_ARN.test(boundary) : boundary === undefined || boundary === null) {
-    throw new PermissionsBoundaryError(`an IAM role needs a permissions boundary policy ARN (got "${boundary}")`);
-  }
+  return pulumi.all([boundary as pulumi.Output<unknown>, accountId]).apply(([arn, account]) => {
+    const match = typeof arn === 'string' ? POLICY_ARN.exec(arn) : null;
+    if (!match || match[1] !== account || match[2] !== expected) {
+      throw new PermissionsBoundaryError(
+        `permissions boundary must be arn:aws:iam::${account}:policy/${expected} (got ${JSON.stringify(arn)})`
+      );
+    }
+    return arn as string;
+  });
 }
 
 export interface BoundedRoleArgs {
@@ -33,12 +33,17 @@ export interface BoundedRoleArgs {
   roleName: string;
   /** The AWS service that assumes the role, e.g. `lambda.amazonaws.com`. */
   service: string;
-  permissionsBoundary: pulumi.Input<string>;
+  /** Defaults to `stage.permissionsBoundaryArn()`; anything else must resolve to that same ARN. */
+  permissionsBoundary?: PermissionsBoundaryArn;
 }
 
-/** The only way this package creates a workload role: boundary required, name inside the stage namespace. */
+/** The only way this package creates a workload role: the stage's boundary, a name inside the stage namespace. */
 export function boundedRole(name: string, args: BoundedRoleArgs, opts: pulumi.CustomResourceOptions): aws.iam.Role {
-  assertBoundary(args.permissionsBoundary);
+  const boundary = checkedBoundary(
+    args.stage,
+    args.permissionsBoundary === undefined ? args.stage.permissionsBoundaryArn() : args.permissionsBoundary,
+    opts.parent
+  );
   return new aws.iam.Role(
     name,
     {
@@ -47,7 +52,7 @@ export function boundedRole(name: string, args: BoundedRoleArgs, opts: pulumi.Cu
         Version: '2012-10-17',
         Statement: [{ Effect: 'Allow', Principal: { Service: args.service }, Action: 'sts:AssumeRole' }],
       }),
-      permissionsBoundary: args.permissionsBoundary,
+      permissionsBoundary: boundary,
       tags: args.stage.tags,
     },
     opts

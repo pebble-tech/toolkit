@@ -1,3 +1,4 @@
+import * as pulumi from '@pulumi/pulumi';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -161,14 +162,37 @@ describe('ApiFunction', () => {
     ).rejects.toThrow(NamespaceError);
   });
 
-  test.each([null, '', 'not-an-arn', 'arn:aws:iam::123456789012:role/x'])(
-    'refuses the permissions boundary "%s"',
-    async (permissionsBoundary) => {
-      await expect(apiIn('staging', { permissionsBoundary: permissionsBoundary as string })).rejects.toThrow(
-        PermissionsBoundaryError
-      );
-    }
-  );
+  test.each([
+    ['null', null],
+    ['an empty string', ''],
+    ['a non-ARN', 'not-an-arn'],
+    ['a role ARN', 'arn:aws:iam::123456789012:role/x'],
+    ['an Output of an empty string', pulumi.output('')],
+    ['an Output of a role ARN', pulumi.output('arn:aws:iam::123456789012:role/x')],
+    ["another account's policy", 'arn:aws:iam::999999999999:policy/wide-open'],
+    ['another policy in this account', 'arn:aws:iam::123456789012:policy/wide-open'],
+    ["another env's boundary", 'arn:aws:iam::123456789012:policy/basefresh-prod-boundary'],
+    ["another product's boundary", pulumi.output('arn:aws:iam::123456789012:policy/other-staging-boundary')],
+  ])('refuses %s as the permissions boundary', async (_label, permissionsBoundary) => {
+    await expect(apiIn('staging', { permissionsBoundary: permissionsBoundary as never })).rejects.toThrow(
+      PermissionsBoundaryError
+    );
+  });
+
+  test("accepts the stage's own boundary passed explicitly", async () => {
+    const { resources } = await runProgram({ project: 'basefresh', stack: 'staging' }, () => {
+      const stage = new Stage('stage', { product: 'basefresh' });
+      return new ApiFunction('api', {
+        stage,
+        code,
+        domain: domainFor(stage),
+        permissionsBoundary: stage.permissionsBoundaryArn(),
+      } as never);
+    });
+    expect(resources.find((r) => r.type === 'aws:iam/role:Role')!.inputs.permissionsBoundary).toBe(
+      'arn:aws:iam::123456789012:policy/basefresh-staging-boundary'
+    );
+  });
 
   test('refuses the shared stack', async () => {
     await expect(

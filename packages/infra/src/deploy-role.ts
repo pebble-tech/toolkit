@@ -1,8 +1,7 @@
 import * as aws from '@pulumi/aws';
 import * as pulumi from '@pulumi/pulumi';
 
-import { boundaryPolicyName, type DeployEnv } from './iam.js';
-import { assertProduct } from './stage.js';
+import { assertProduct, boundaryPolicyName, type DeployEnv, type PermissionsBoundaryArn } from './stage.js';
 
 const BASIC_EXECUTION = 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole';
 const GITHUB_ENVIRONMENT: Record<DeployEnv, string> = { preview: 'preview', staging: 'staging', prod: 'production' };
@@ -38,7 +37,7 @@ type Statement = Record<string, unknown>;
 export class DeployRole extends pulumi.ComponentResource {
   readonly roleArn: pulumi.Output<string>;
   readonly roleName: string;
-  readonly boundaryArn: pulumi.Output<string>;
+  readonly boundaryArn: PermissionsBoundaryArn;
   readonly boundaryName: string;
 
   constructor(name: string, args: DeployRoleArgs, opts?: pulumi.ComponentResourceOptions) {
@@ -289,7 +288,7 @@ export class DeployRole extends pulumi.ComponentResource {
 
     this.roleArn = role.arn;
     this.roleName = roleName;
-    this.boundaryArn = boundary.arn;
+    this.boundaryArn = boundary.arn as PermissionsBoundaryArn;
     this.boundaryName = boundaryName;
     this.registerOutputs({ roleArn: this.roleArn, roleName, boundaryArn: this.boundaryArn, boundaryName });
   }

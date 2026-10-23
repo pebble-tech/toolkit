@@ -3,8 +3,8 @@ import * as cloudflare from '@pulumi/cloudflare';
 import * as pulumi from '@pulumi/pulumi';
 
 import { MissingDomainError } from './errors.js';
-import { assertBoundary, boundedRole, defaultBoundaryArn } from './iam.js';
-import type { Stage } from './stage.js';
+import { boundedRole } from './iam.js';
+import type { PermissionsBoundaryArn, Stage } from './stage.js';
 
 /** HTTP API integrations give up at 30 s; the function must finish first. */
 export const MAX_API_TIMEOUT_SECONDS = 29;
@@ -31,8 +31,11 @@ export interface ApiFunctionArgs {
   logRetentionDays?: number;
   /** Required: the API is reachable only through it. */
   domain: ApiDomain;
-  /** Defaults to the stage's boundary policy, `<product>-<env>-boundary`, in the current account. */
-  permissionsBoundary?: pulumi.Input<string>;
+  /**
+   * Defaults to `stage.permissionsBoundaryArn()`. Passing `DeployRole.boundaryArn` is allowed; it must resolve to
+   * the same policy, `<product>-<deploy env>-boundary` in the current account, or the program fails.
+   */
+  permissionsBoundary?: PermissionsBoundaryArn;
   /** Name part after `<product>-<env>-`, default `api`. */
   kind?: string;
 }
@@ -57,7 +60,6 @@ export class ApiFunction extends pulumi.ComponentResource {
     }
     stage.requireKind('an API function', ['preview', 'staging', 'prod']);
     stage.assertOwnsHostname(args.domain.hostname);
-    if (args.permissionsBoundary !== undefined) assertBoundary(args.permissionsBoundary);
     super('pebbletech:index:ApiFunction', name, {}, opts);
 
     const child = (extra?: pulumi.CustomResourceOptions) => stage.childOptions(this, extra);
@@ -71,7 +73,7 @@ export class ApiFunction extends pulumi.ComponentResource {
         stage,
         roleName: functionName,
         service: 'lambda.amazonaws.com',
-        permissionsBoundary: args.permissionsBoundary ?? defaultBoundaryArn(stage, this),
+        ...(args.permissionsBoundary === undefined ? {} : { permissionsBoundary: args.permissionsBoundary }),
       },
       child()
     );

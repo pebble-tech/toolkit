@@ -1,3 +1,4 @@
+import * as aws from '@pulumi/aws';
 import * as pulumi from '@pulumi/pulumi';
 
 import { NamespaceError, OwnershipError, StageError } from './errors.js';
@@ -19,6 +20,22 @@ export interface StageArgs {
 export interface RemovalPolicy {
   protect: boolean;
   retainOnDelete: boolean;
+}
+
+/** Which deploy role serves a stage: one `preview` role covers every `pr-<n>` stack. */
+export type DeployEnv = 'preview' | 'staging' | 'prod';
+
+declare const boundaryBrand: unique symbol;
+
+/**
+ * A permissions boundary ARN. Only `Stage.permissionsBoundaryArn()` and `DeployRole.boundaryArn` produce one; a
+ * plain string does not type-check, and any other value is refused when it resolves.
+ */
+export type PermissionsBoundaryArn = pulumi.Output<string> & { readonly [boundaryBrand]: true };
+
+/** Name of the permissions boundary policy a deploy env's roles carry; `DeployRole` creates it. */
+export function boundaryPolicyName(product: string, env: DeployEnv): string {
+  return `${product}-${env}-boundary`;
 }
 
 const SLUG = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
@@ -124,6 +141,19 @@ export class Stage extends pulumi.ComponentResource {
     this.requireKind('a database', ['preview', 'staging', 'prod']);
     const suffix = this.isProd ? 'prd' : this.kind === 'staging' ? 'stg' : `pr_${this.pr}`;
     return `${this.product.replaceAll('-', '_')}_${suffix}`;
+  }
+
+  /** The deploy role that serves this stage. `shared` has none of its own (staging's role applies it). */
+  get deployEnv(): DeployEnv {
+    this.requireKind('an IAM role', ['preview', 'staging', 'prod']);
+    return this.isPreview ? 'preview' : this.isProd ? 'prod' : 'staging';
+  }
+
+  /** `arn:aws:iam::<account>:policy/<product>-<deploy env>-boundary` in the account the AWS provider points at. */
+  permissionsBoundaryArn(): PermissionsBoundaryArn {
+    const { accountId } = aws.getCallerIdentityOutput({}, { parent: this });
+    const name = boundaryPolicyName(this.product, this.deployEnv);
+    return pulumi.interpolate`arn:aws:iam::${accountId}:policy/${name}` as PermissionsBoundaryArn;
   }
 
   /** Throws OwnershipError when `what` may not be created in this stage. */

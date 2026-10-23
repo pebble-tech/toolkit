@@ -149,6 +149,7 @@ export interface RunOptions {
 
 /**
  * Sets mocks for `project`/`stack`, runs `program`, waits for every registration to finish, and returns them.
+ * Rejects with the program's first unhandled rejection, as `pulumi preview` would fail with it.
  * Runs must not overlap: Pulumi's runtime is global to the process.
  */
 export async function runProgram<T>(
@@ -191,12 +192,27 @@ export async function runProgram<T>(
     registerOutputs(request, callback);
   };
 
+  // Pulumi's language host fails the program on an unhandled rejection, e.g. a guardrail thrown inside an apply.
+  // Collect them for the run instead of letting the test runner report each one, and fail the run with the first.
+  const rejections: unknown[] = [];
+  const listeners = process.listeners('unhandledRejection');
+  const collect = (reason: unknown) => rejections.push(reason);
+  process.removeAllListeners('unhandledRejection');
+  process.on('unhandledRejection', collect);
+  let outcome: { result: T } | { error: unknown };
   try {
-    return { result: await program(), resources };
-  } finally {
-    // Also on a throw: registrations already started must finish against this monitor, not the next run's.
-    await pulumi.runtime.disconnect();
+    outcome = { result: await program() };
+  } catch (error) {
+    outcome = { error };
   }
+  // Also on a throw: registrations already started must finish against this monitor, not the next run's.
+  await pulumi.runtime.disconnect();
+  await new Promise((resolve) => setImmediate(resolve));
+  process.off('unhandledRejection', collect);
+  for (const listener of listeners) process.on('unhandledRejection', listener);
+  if ('error' in outcome) throw outcome.error;
+  if (rejections.length > 0) throw rejections[0];
+  return { result: outcome.result, resources };
 }
 
 /** Resolves an Output's value the way an `apply` would see it. Test-only: a real program uses apply. */

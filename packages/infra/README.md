@@ -8,7 +8,7 @@ pinning a version; the guardrails are defaults it cannot turn off.
 | `Stage` | nothing; parses the stack name and names, tags and protects everything else | a product id starting with `pebble` or containing `pr`/`staging`/`prod`/`shared` as a segment; any stack other than `pr-<n>`, `staging`, `prod`, `shared` |
 | `VercelProject` | `shared`: the project (no Git connection, private source, Vercel Authentication on previews), custom environments, the protection bypass. `staging`/`prod`: env vars (secrets `sensitive`), the domain bound to the stage's environment, an unproxied Cloudflare CNAME | previews; the project outside `shared`; env vars or domains on `shared`; a secret-looking name in `vars` |
 | `Database` | an explicit Postgres provider on port 5432 with `sslmode=verify-full`, the database, its owner (a generated login role on previews), the `public` revoke; `directUrl` and `pooledUrl` as secrets | staging/prod without an existing owner role; a derived name longer than 63 characters. The name is always `stage.databaseName()` |
-| `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; an empty or malformed boundary. Timeouts above 29 s are clamped |
+| `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; a boundary other than the stage's own `<product>-<env>-boundary` in the current account (a typed `PermissionsBoundaryArn` from `Stage` or `DeployRole`, checked when it resolves, so `pulumi preview` fails). Timeouts above 29 s are clamped |
 | `Worker` | Workers script from a prebuilt module, R2 bucket `<product>-<env>-<kind>` (on prod, `adoptExisting` imports that same name instead of creating it), plain and secret bindings, custom domain | a secret-looking name in `vars` unless listed in `plainTextAllowed`; `adoptExisting` outside prod |
 | `DeployRole` | the GitHub OIDC role for one product and env, its inline policy, and the boundary policy its roles must carry | a `pebble` product |
 
@@ -83,7 +83,8 @@ from the product's own build; the components never bundle.
 ## Test a program
 
 `@pebbletech/infra/testing` runs a program against Pulumi's mocks and returns every registered resource with the
-options the engine would see (`protect`, `retainOnDelete`, import id, parent):
+options the engine would see (`protect`, `retainOnDelete`, import id, parent). It rejects with the program's first
+unhandled rejection, such as a guardrail thrown inside an `apply`, as `pulumi preview` would fail:
 
 ```ts
 import { runProgram } from '@pebbletech/infra/testing';
