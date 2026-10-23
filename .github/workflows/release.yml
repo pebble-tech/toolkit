@@ -48,8 +48,5 @@ jobs:
           publish-script: pnpm release
           pr-title: 'chore: version packages'
           commit-message: 'chore: version packages'
-        env:
-          # setup-node's registry-url writes an .npmrc that reads this. The first publish of each package uses the
-          # token; once trusted publishing is configured on npm for every package, delete this env block and the
-          # NPM_TOKEN secret, and id-token: write is what npm trusts.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # No npm token: every package has a trusted publisher on npm for this repository and workflow, so the
+        # publish authenticates with the job's OIDC id-token (permissions.id-token: write above).
