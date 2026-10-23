@@ -13,6 +13,3 @@ catalog:
 
 overrides:
   '@types/node': 'catalog:'
-# Published 2026-10-21; inside pnpm's default one-day minimumReleaseAge when this was added. Remove once it ages out.
-minimumReleaseAgeExclude:
-  - '@pulumi/pulumi@3.271.0'
