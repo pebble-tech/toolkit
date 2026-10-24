@@ -1,4 +1,4 @@
-import { ApiFunction, Database, Stage, VercelProject, Worker } from '@pebbletech/infra';
+import { ApiFunction, Database, Operators, Stage, VercelProject, Worker } from '@pebbletech/infra';
 import * as pulumi from '@pulumi/pulumi';
 import * as vercel from '@pulumiverse/vercel';
 
@@ -9,16 +9,19 @@ export interface BasefreshInputs {
   cloudflareAccountId: string;
   /** Admin URL of the Postgres cluster for this stage (secret). */
   pgAdminUrl: pulumi.Input<string>;
-  /** Staging and prod: the PlanetScale-made role that owns the database, and its password (secret). */
-  pgOwner?: { role: string; password: pulumi.Input<string> };
+  /** Staging and prod: the PlanetScale-made role runtimes connect as through the pooler, and its password (secret). */
+  pgRuntime?: { role: string; password: pulumi.Input<string> };
+  /** `shared`, `prod`: the PlanetScale role names in that cluster's `pebble_operators` group (config, may be empty). */
+  operators?: string[];
   authSecret: pulumi.Input<string>;
   /** Built by the product (esbuild); paths relative to the project directory. */
   bundles: { api: string; uploads: string };
 }
 
 /**
- * basefresh's whole `infra/` program. `shared` owns the Vercel project; `pr-<n>` owns a database only; `staging` and
- * `prod` own a database, the API, the uploads Worker and the web env and domain.
+ * basefresh's whole `infra/` program. `shared` owns the Vercel project and the staging cluster's operators group;
+ * `pr-<n>` owns a database only; `staging` and `prod` own a database, the API, the uploads Worker and the web env and
+ * domain, and `prod` also owns the production cluster's operators group.
  */
 export function basefresh(inputs: BasefreshInputs): Record<string, pulumi.Input<unknown>> {
   const stage = new Stage('stage', { product: 'basefresh' });
@@ -33,6 +36,8 @@ export function basefresh(inputs: BasefreshInputs): Record<string, pulumi.Input<
         devCommand: 'cd ../.. && pnpm dev:web',
       },
     });
+    // One Operators per cluster: `shared` for the staging cluster, `prod` for the production cluster.
+    new Operators('operators', { stage, adminUrl: inputs.pgAdminUrl, members: inputs.operators ?? [] });
     return {
       projectId: web.projectId,
       customEnvironmentIds: web.customEnvironmentIds,
@@ -48,7 +53,9 @@ export function basefresh(inputs: BasefreshInputs): Record<string, pulumi.Input<
   // shared's state is another backend, and prod's state is in another account, so look the project up by name.
   // shared must already exist. The name is the one VercelProject creates there: `<product>-web`.
   const project = vercel.getProjectOutput({ name: `${stage.product}-web` });
-  const database = new Database('db', { stage, adminUrl: inputs.pgAdminUrl, owner: inputs.pgOwner });
+  // The production cluster's operators group, before the Database that grants its owner to it.
+  if (stage.isProd) new Operators('operators', { stage, adminUrl: inputs.pgAdminUrl, members: inputs.operators ?? [] });
+  const database = new Database('db', { stage, adminUrl: inputs.pgAdminUrl, runtime: inputs.pgRuntime });
   const runtimeUrl = database.pooledUrl!;
   const webUrl = `https://${stage.hostname('app', inputs.apex)}`;
 

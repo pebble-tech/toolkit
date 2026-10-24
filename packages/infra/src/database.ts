@@ -8,8 +8,8 @@ import type { Stage } from './stage.js';
 const IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/;
 const DIRECT_PORT = 5432;
 
-export interface DatabaseOwner {
-  /** An existing role, made by PlanetScale so the pooler knows it. */
+export interface DatabaseRuntime {
+  /** An existing role, made by PlanetScale so the pooler knows it. It is granted rights; it never owns anything. */
   role: string;
   /** That role's password, as a secret. */
   password: pulumi.Input<string>;
@@ -23,11 +23,12 @@ export interface DatabaseArgs {
    */
   adminUrl: pulumi.Input<string>;
   /**
-   * The role that owns the database. Required on staging and prod, where runtimes reach the database through the
-   * pooler and the pooler only accepts PlanetScale-made roles. On a preview, leave it out: the component creates a
-   * login role named after the database with a generated password.
+   * The role runtimes use. Required on staging and prod, where runtimes reach the database through the pooler and the
+   * pooler only accepts PlanetScale-made roles. It gets CONNECT, USAGE on `public`, DML on every table and sequence, and
+   * the same on tables and sequences the owner creates later. Refused on a preview, whose generated role is both owner
+   * and runtime.
    */
-  owner?: DatabaseOwner;
+  runtime?: DatabaseRuntime;
   /** The pooler endpoint; defaults to the admin host on port 6432. */
   pooler?: { host?: string; port?: number };
 }
@@ -66,16 +67,95 @@ function connectionUrl(admin: ParsedUrl, role: string, password: string, databas
   return url.toString();
 }
 
+/** DML for the runtime role, on what exists now and on what the owner creates later. */
+const TABLE_PRIVILEGES = ['SELECT', 'INSERT', 'UPDATE', 'DELETE'];
+const SEQUENCE_PRIVILEGES = ['USAGE', 'SELECT', 'UPDATE'];
+const SCHEMA = 'public';
+
 /**
- * A database in an existing Postgres cluster (PlanetScale), with its owner and grants. Outputs connection URLs as
- * secrets. Retained and protected on prod.
+ * The cluster's operators group (NOLOGIN). Every database's owner role is granted to it, so a member can connect to,
+ * change and drop every toolkit-managed database on the cluster. `Operators` creates it and its members, once per
+ * cluster. A constant, never an argument.
+ */
+export const OPERATORS_GROUP = 'pebble_operators';
+
+/**
+ * postgresql 3.18.2 reads a role membership back without its grantor. On PostgreSQL 16+ the admin also holds an
+ * implicit ADMIN OPTION membership in every role it creates, so a refresh can read `withAdminOption: true` and replace
+ * the grant, and the replacement's delete revokes the new grant.
+ */
+export const KEEP_MEMBERSHIP = { ignoreChanges: ['withAdminOption'] };
+
+/** The admin's Postgres provider: direct port 5432, `sslmode=verify-full`, never superuser, whatever the URL says. */
+export function adminProvider(name: string, adminUrl: pulumi.Input<string>, parent: pulumi.Resource) {
+  const admin = pulumi.secret(pulumi.output(adminUrl).apply(parseAdminUrl));
+  const provider = new postgresql.Provider(
+    `${name}-admin`,
+    {
+      host: admin.host,
+      port: DIRECT_PORT,
+      username: admin.user,
+      databaseUsername: admin.user.apply((user) => splitUser(user).role),
+      password: admin.password,
+      database: admin.database,
+      sslmode: 'verify-full',
+      superuser: false,
+    },
+    // Not protected: a provider is configuration, not a cloud resource, and a protected one blocks a config change.
+    { parent }
+  );
+  return { admin, provider };
+}
+
+/** Each running program's one `Operators` and the group it registered, keyed by its resource monitor (one per run). */
+const operatorsInProgram = new WeakMap<object, { name: string; group?: postgresql.Role }>();
+const programKey = () => pulumi.runtime.getMonitor() as object | undefined;
+
+/**
+ * Records `name` as this program's `Operators`. Refuses a second one: two would each manage the same memberships, and
+ * dropping a name from one list would revoke a membership the other still declares.
+ */
+export function claimOperators(name: string): (group: postgresql.Role) => void {
+  const key = programKey();
+  const first = key && operatorsInProgram.get(key);
+  if (first) {
+    throw new OwnershipError(
+      `one Operators per program: "${first.name}" already manages ${OPERATORS_GROUP}, so "${name}" cannot`
+    );
+  }
+  const entry: { name: string; group?: postgresql.Role } = { name };
+  if (key) operatorsInProgram.set(key, entry);
+  return (group) => {
+    entry.group = group;
+  };
+}
+
+/** The `pebble_operators` role this program's `Operators` registered, if any. `Database` grants to it by name. */
+export function operatorsGroup(): postgresql.Role | undefined {
+  const key = programKey();
+  return key ? operatorsInProgram.get(key)?.group : undefined;
+}
+
+/** Every string property name `args` carries: own (enumerable or not) and inherited, short of `Object.prototype`. */
+function propertyNames(args: object): string[] {
+  const names = new Set<string>();
+  for (let level: object | null = args; level && level !== Object.prototype; level = Object.getPrototypeOf(level)) {
+    for (const key of Reflect.ownKeys(level)) if (typeof key === 'string') names.add(key);
+  }
+  return [...names];
+}
+
+/**
+ * A database in an existing Postgres cluster (PlanetScale), owned by a login role the component creates, with grants
+ * for the runtime role on staging and prod. Outputs connection URLs as secrets. Retained and protected on prod.
  */
 export class Database extends pulumi.ComponentResource {
   readonly databaseName: string;
+  /** `<databaseName>_owner` on staging and prod, `<databaseName>` on a preview. Never caller-supplied. */
   readonly ownerRole: string;
-  /** Direct connection (port 5432): migrations, seeds, and previews. */
+  /** Direct connection (port 5432) as the owner: migrations, seeds, and previews. */
   readonly directUrl: pulumi.Output<string>;
-  /** Pooled connection, only when the owner is a PlanetScale-made role (the pooler knows no other). */
+  /** Pooled connection as the runtime role, on staging and prod only (the pooler knows no SQL-made role). */
   readonly pooledUrl: pulumi.Output<string> | undefined;
 
   constructor(name: string, args: DatabaseArgs, opts?: pulumi.ComponentResourceOptions) {
@@ -86,62 +166,56 @@ export class Database extends pulumi.ComponentResource {
     if (!IDENTIFIER.test(databaseName)) {
       throw new DatabaseNameError(`database name "${databaseName}" must match ${IDENTIFIER}`);
     }
-    if (!stage.isPreview && !args.owner) {
+    // The owner is always the component's own role, so the admin can create, alter and drop the database by itself.
+    const ownerArgs = propertyNames(args).filter((key) => /^owner/i.test(key));
+    if (ownerArgs.length > 0) {
       throw new OwnershipError(
-        `${stage.env} needs an existing owner role: runtimes use the pooler, which only knows PlanetScale-made roles`
+        `Database takes no owner (${ownerArgs.join(', ')}): it creates the owner role itself. ` +
+          'Since @pebbletech/infra 0.3.0 the PlanetScale-made role is passed as `runtime`'
       );
     }
-    if (args.owner && !IDENTIFIER.test(args.owner.role)) {
-      throw new DatabaseNameError(`owner role "${args.owner.role}" must match ${IDENTIFIER}`);
+    const ownerRole = stage.isPreview ? databaseName : `${databaseName}_owner`;
+    if (!IDENTIFIER.test(ownerRole)) {
+      throw new DatabaseNameError(`owner role "${ownerRole}" must match ${IDENTIFIER}`);
+    }
+    const { runtime } = args;
+    if (stage.isPreview && runtime) {
+      throw new OwnershipError('a preview takes no runtime role: its generated role is both owner and runtime');
+    }
+    if (!stage.isPreview && !runtime) {
+      throw new OwnershipError(
+        `${stage.env} needs an existing runtime role: runtimes use the pooler, which only knows PlanetScale-made roles`
+      );
+    }
+    if (runtime && !IDENTIFIER.test(runtime.role)) {
+      throw new DatabaseNameError(`runtime role "${runtime.role}" must match ${IDENTIFIER}`);
+    }
+    if (runtime && [ownerRole, OPERATORS_GROUP].includes(runtime.role)) {
+      throw new OwnershipError(`the runtime role cannot be ${runtime.role}: it would hold the owner's rights`);
     }
     super('pebbletech:index:Database', name, {}, opts);
 
-    const admin = pulumi.secret(pulumi.output(args.adminUrl).apply(parseAdminUrl));
-    const provider = new postgresql.Provider(
-      `${name}-admin`,
-      {
-        host: admin.host,
-        port: DIRECT_PORT,
-        username: admin.user,
-        databaseUsername: admin.user.apply((user) => splitUser(user).role),
-        password: admin.password,
-        database: admin.database,
-        sslmode: 'verify-full',
-        superuser: false,
-      },
-      // Not protected: a provider is configuration, not a cloud resource, and a protected one blocks a config change.
-      { parent: this }
-    );
+    const { admin, provider } = adminProvider(name, args.adminUrl, this);
     const withProvider = (extra?: pulumi.CustomResourceOptions) => stage.childOptions(this, { ...extra, provider });
 
-    let ownerRole: string;
-    let ownerPassword: pulumi.Output<string>;
-    let ownerReady: pulumi.Resource[];
-    if (args.owner) {
-      ownerRole = args.owner.role;
-      ownerPassword = pulumi.secret(args.owner.password);
-      ownerReady = [];
-    } else {
-      ownerRole = databaseName;
-      const password = new random.RandomPassword(
-        `${name}-owner-password`,
-        { length: 32, special: false },
-        stage.childOptions(this)
-      );
-      const role = new postgresql.Role(
-        `${name}-owner`,
-        { name: ownerRole, login: true, password: password.result },
-        withProvider()
-      );
-      ownerPassword = password.result;
-      ownerReady = [role];
-    }
+    const password = new random.RandomPassword(
+      `${name}-owner-password`,
+      { length: 32, special: false },
+      stage.childOptions(this)
+    );
+    const owner = new postgresql.Role(
+      `${name}-owner`,
+      { name: ownerRole, login: true, password: password.result },
+      withProvider()
+    );
+    const ownerPassword = password.result;
 
-    // Postgres 16+: a non-superuser can make a role the owner of a database only if it may SET ROLE to it.
+    // Postgres 16+: a non-superuser can make a role the owner of a database only if it may SET ROLE to it. The admin
+    // may grant this membership because it created the owner role (PlanetScale-made roles only `pscale_admin` can).
     const membership = new postgresql.GrantRole(
       `${name}-admin-member`,
       { role: admin.user.apply((user) => splitUser(user).role), grantRole: ownerRole },
-      withProvider({ dependsOn: ownerReady })
+      withProvider({ dependsOn: [owner], ...KEEP_MEMBERSHIP })
     );
     const database = new postgresql.Database(
       name,
@@ -154,6 +228,46 @@ export class Database extends pulumi.ComponentResource {
       withProvider()
     );
 
+    if (runtime) {
+      const grant = (kind: string, args: Omit<postgresql.GrantArgs, 'database' | 'role'>) =>
+        new postgresql.Grant(
+          `${name}-runtime-${kind}`,
+          { database: database.name, role: runtime.role, ...args },
+          withProvider()
+        );
+      grant('connect', { objectType: 'database', privileges: ['CONNECT'] });
+      grant('schema', { objectType: 'schema', schema: SCHEMA, privileges: ['USAGE'] });
+      grant('tables', { objectType: 'table', schema: SCHEMA, privileges: TABLE_PRIVILEGES });
+      grant('sequences', { objectType: 'sequence', schema: SCHEMA, privileges: SEQUENCE_PRIVILEGES });
+      // Tables and sequences the owner creates later (migrations run as the owner).
+      for (const [kind, privileges] of [
+        ['table', TABLE_PRIVILEGES],
+        ['sequence', SEQUENCE_PRIVILEGES],
+      ] as const) {
+        new postgresql.DefaultPrivileges(
+          `${name}-runtime-default-${kind}s`,
+          {
+            database: database.name,
+            owner: ownerRole,
+            role: runtime.role,
+            schema: SCHEMA,
+            objectType: kind,
+            privileges,
+          },
+          withProvider()
+        );
+      }
+    }
+
+    // On PostgreSQL 16+ a plain GRANT gives INHERIT TRUE (the group's default) and SET TRUE. The group must exist:
+    // `Operators` creates it, earlier in this stack (then this grant waits for it) or in the cluster's operators stack.
+    const group = operatorsGroup();
+    new postgresql.GrantRole(
+      `${name}-operators`,
+      { role: OPERATORS_GROUP, grantRole: ownerRole },
+      withProvider({ dependsOn: [owner, ...(group ? [group] : [])], ...KEEP_MEMBERSHIP })
+    );
+
     this.databaseName = databaseName;
     this.ownerRole = ownerRole;
     this.directUrl = pulumi.secret(
@@ -161,12 +275,12 @@ export class Database extends pulumi.ComponentResource {
         .all([admin, ownerPassword, database.name])
         .apply(([a, password, db]) => connectionUrl(a, ownerRole, password, db, a.host, DIRECT_PORT))
     );
-    this.pooledUrl = args.owner
+    this.pooledUrl = runtime
       ? pulumi.secret(
           pulumi
-            .all([admin, ownerPassword, database.name])
+            .all([admin, runtime.password, database.name])
             .apply(([a, password, db]) =>
-              connectionUrl(a, ownerRole, password, db, args.pooler?.host ?? a.host, args.pooler?.port ?? 6432)
+              connectionUrl(a, runtime.role, password, db, args.pooler?.host ?? a.host, args.pooler?.port ?? 6432)
             )
         )
       : undefined;
