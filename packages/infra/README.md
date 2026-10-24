@@ -11,7 +11,7 @@ pinning a version; the guardrails are defaults it cannot turn off.
 | `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; a boundary other than the stage's own `<product>-<env>-boundary` in the current account (a typed `PermissionsBoundaryArn` from `Stage` or `DeployRole`, checked when it resolves, so `pulumi preview` fails). Timeouts above 29 s are clamped |
 | `Worker` | Workers script from a prebuilt module, R2 bucket `<product>-<env>-<kind>` (on prod, `adoptExisting` imports that same name instead of creating it), plain and secret bindings, custom domain | a secret-looking name in `vars` unless listed in `plainTextAllowed`; `adoptExisting` outside prod |
 | `DeployRole` | the GitHub OIDC role for one product and env, its inline policy, and the boundary policy its roles must carry. `preview` allows the state bucket and the KMS key only. `staging` and `prod` also allow Lambda, API Gateway, ACM, logs and IAM inside `<product>-<env>`. Takes `product`, `env`, the repo and the apex (the zone name): the trusted GitHub environment, the account's OIDC provider, the state bucket and paths (`pebble-<stg\|prd>-pulumi-state/<product>/<env>`, plus `<product>/shared` for staging) and the KMS key (`alias/pebble-<stg\|prd>-pulumi-<env>`) are derived | a product id that is not one DNS label, a `pebble` product, or an apex that is not lowercase labels with no leading or trailing dot |
-| `Operators` | the cluster's `pebble_operators` group (kept on destroy) and one membership grant per name in `members`, through the same admin provider as `Database`. See [Operators](#operators) | `pr-<n>` and `staging` (one stack per cluster owns the group: `shared` or `prod`); an empty or repeated member name |
+| `Operators` | the cluster's `pebble_operators` group (kept on destroy) and one membership grant per name in `members`, through the same admin provider as `Database`. See [Operators](#operators) | `pr-<n>` and `staging` (one stack per cluster owns the group: `shared` or `prod`); a second `Operators` in the same program; an empty or repeated member name |
 
 Every component refuses a hostname or name outside its stage (`NamespaceError`), and every refusal is a
 `GuardrailError` subclass. On `prod` (and `shared`, which owns production's Vercel project) every child resource gets
@@ -67,9 +67,10 @@ const db = new Database('db', {
 ## Operators
 
 Membership of `pebble_operators` is code. `Operators` creates the group and grants it to each name in `members`;
-removing a name revokes that membership on the next apply. One stack per cluster applies it: `shared` on the staging
-cluster, `prod` on the production cluster. Apply it before any other stack on a fresh cluster, and in `prod` construct
-it before `Database`: a `Database` on a cluster without the group fails at its `db-operators` grant with
+removing a name revokes that membership on the next apply. Use one `Operators` per cluster: in `shared` for the staging
+cluster and in `prod` for the production cluster. A program takes one; a second is refused, naming the first, because
+two lists would manage the same memberships. Apply it before any other stack on a fresh cluster, and in `prod`
+construct it before `Database`: a `Database` on a cluster without the group fails at its `db-operators` grant with
 `role "pebble_operators" does not exist`.
 
 ```ts
