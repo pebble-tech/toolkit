@@ -76,7 +76,6 @@ describe('Operators', () => {
     const { resources } = await runProgram({ project: 'basefresh', stack: 'prod' }, () => {
       const stage = new Stage('stage', { product: 'basefresh' });
       new Operators('operators', { stage, adminUrl: ADMIN_URL, members: ['pscale_api_alice'] });
-      new Operators('more', { stage, adminUrl: ADMIN_URL, members: ['pscale_api_bob'] });
       new Database('db', { stage, adminUrl: ADMIN_URL, runtime: { role: 'basefresh_app', password: 'pw' } });
     });
     const roles = resources.filter(
@@ -84,5 +83,16 @@ describe('Operators', () => {
     );
     expect(roles.map((r) => r.name)).toEqual(['operators-group']);
     expect(grants(resources).find((r) => r.name === 'db-operators')!.dependencies).toContain(roles[0]!.urn);
+  });
+
+  test('refuses a second Operators in one program, naming the first', async () => {
+    const program = runProgram({ project: 'basefresh', stack: 'prod' }, () => {
+      const stage = new Stage('stage', { product: 'basefresh' });
+      new Operators('operators', { stage, adminUrl: ADMIN_URL, members: ['pscale_api_alice', 'pscale_api_bob'] });
+      new Operators('more', { stage, adminUrl: ADMIN_URL, members: ['pscale_api_bob'] });
+    });
+    await expect(program).rejects.toThrow(
+      'one Operators per program: "operators" already manages pebble_operators, so "more" cannot'
+    );
   });
 });

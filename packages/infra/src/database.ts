@@ -107,22 +107,42 @@ export function adminProvider(name: string, adminUrl: pulumi.Input<string>, pare
   return { admin, provider };
 }
 
-/** The operators group each running program has created, keyed by its resource monitor (one per run). */
-const operatorsGroups = new WeakMap<object, postgresql.Role>();
+/** Each running program's one `Operators` and the group it registered, keyed by its resource monitor (one per run). */
+const operatorsInProgram = new WeakMap<object, { name: string; group?: postgresql.Role }>();
+const programKey = () => pulumi.runtime.getMonitor() as object | undefined;
 
 /**
- * The `pebble_operators` role for this program: created by the first `Operators` that asks, and returned to every
- * later caller, so a stack never registers it twice. `Database` only looks: it grants to the group by name.
+ * Records `name` as this program's `Operators`. Refuses a second one: two would each manage the same memberships, and
+ * dropping a name from one list would revoke a membership the other still declares.
  */
-export function operatorsGroup(create?: () => postgresql.Role): postgresql.Role | undefined {
-  const key = pulumi.runtime.getMonitor() as object | undefined;
-  if (!key) return create?.();
-  let group = operatorsGroups.get(key);
-  if (!group && create) {
-    group = create();
-    operatorsGroups.set(key, group);
+export function claimOperators(name: string): (group: postgresql.Role) => void {
+  const key = programKey();
+  const first = key && operatorsInProgram.get(key);
+  if (first) {
+    throw new OwnershipError(
+      `one Operators per program: "${first.name}" already manages ${OPERATORS_GROUP}, so "${name}" cannot`
+    );
   }
-  return group;
+  const entry: { name: string; group?: postgresql.Role } = { name };
+  if (key) operatorsInProgram.set(key, entry);
+  return (group) => {
+    entry.group = group;
+  };
+}
+
+/** The `pebble_operators` role this program's `Operators` registered, if any. `Database` grants to it by name. */
+export function operatorsGroup(): postgresql.Role | undefined {
+  const key = programKey();
+  return key ? operatorsInProgram.get(key)?.group : undefined;
+}
+
+/** Every string property name `args` carries: own (enumerable or not) and inherited, short of `Object.prototype`. */
+function propertyNames(args: object): string[] {
+  const names = new Set<string>();
+  for (let level: object | null = args; level && level !== Object.prototype; level = Object.getPrototypeOf(level)) {
+    for (const key of Reflect.ownKeys(level)) if (typeof key === 'string') names.add(key);
+  }
+  return [...names];
 }
 
 /**
@@ -147,7 +167,7 @@ export class Database extends pulumi.ComponentResource {
       throw new DatabaseNameError(`database name "${databaseName}" must match ${IDENTIFIER}`);
     }
     // The owner is always the component's own role, so the admin can create, alter and drop the database by itself.
-    const ownerArgs = Object.keys(args).filter((key) => /^owner/i.test(key));
+    const ownerArgs = propertyNames(args).filter((key) => /^owner/i.test(key));
     if (ownerArgs.length > 0) {
       throw new OwnershipError(
         `Database takes no owner (${ownerArgs.join(', ')}): it creates the owner role itself. ` +

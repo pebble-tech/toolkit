@@ -287,6 +287,26 @@ describe('Database', () => {
     await expect(databaseIn('pr-7', extra as never)).rejects.toThrow(OwnershipError);
   });
 
+  test.each([
+    [
+      'a non-enumerable own property',
+      'ownerRole',
+      (valid: DatabaseArgs) => Object.defineProperty({ ...valid }, 'ownerRole', { value: 'chosen' }),
+    ],
+    [
+      'an inherited property',
+      'ownerPassword',
+      (valid: DatabaseArgs) => Object.assign(Object.create({ ownerPassword: 'chosen' }), valid),
+    ],
+  ])('refuses an owner argument passed as %s', async (_, key, shape) => {
+    const program = () =>
+      runProgram({ project: 'basefresh', stack: 'staging' }, () => {
+        const stage = new Stage('stage', { product: 'basefresh' });
+        new Database('db', shape({ stage, adminUrl: ADMIN_URL, runtime: RUNTIME }));
+      });
+    await expect(program()).rejects.toThrow(`Database takes no owner (${key})`);
+  });
+
   test.each(['basefresh_stg_owner', 'pebble_operators'])(
     'refuses a runtime role that would hold the owner rights: %s',
     async (role) => {

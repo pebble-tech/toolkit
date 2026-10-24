@@ -1,7 +1,7 @@
 import * as postgresql from '@pulumi/postgresql';
 import * as pulumi from '@pulumi/pulumi';
 
-import { KEEP_MEMBERSHIP, OPERATORS_GROUP, adminProvider, operatorsGroup } from './database.js';
+import { KEEP_MEMBERSHIP, OPERATORS_GROUP, adminProvider, claimOperators } from './database.js';
 import { OwnershipError } from './errors.js';
 import type { Stage } from './stage.js';
 
@@ -18,8 +18,9 @@ export interface OperatorsArgs {
 }
 
 /**
- * The cluster's `pebble_operators` group and its members, as code. One stack per cluster applies it: `shared` on the
- * staging cluster, `prod` on the production cluster. Every `Database` grants its owner role to the group.
+ * The cluster's `pebble_operators` group and its members, as code. One `Operators` per cluster, and one per program:
+ * in `shared` for the staging cluster, in `prod` for the production cluster. Every `Database` grants its owner role to
+ * the group; construct `Operators` first.
  */
 export class Operators extends pulumi.ComponentResource {
   readonly group = OPERATORS_GROUP;
@@ -33,20 +34,19 @@ export class Operators extends pulumi.ComponentResource {
     }
     const duplicate = members.find((member, index) => members.indexOf(member) !== index);
     if (duplicate) throw new OwnershipError(`operator member ${duplicate} is listed twice`);
+    const registerGroup = claimOperators(name);
     super('pebbletech:index:Operators', name, {}, opts);
 
     const { provider } = adminProvider(name, args.adminUrl, this);
     // Kept when this stack goes: other stacks' databases are granted to it, and dropping it drops their memberships.
     // `roles` (what the group is a member of) is every database's owner, granted by each `Database`: a refresh reads
     // them back, and without ignoreChanges the next apply would revoke them all.
-    const group = operatorsGroup(
-      () =>
-        new postgresql.Role(
-          `${name}-group`,
-          { name: OPERATORS_GROUP, login: false },
-          stage.childOptions(this, { provider, retainOnDelete: true, ignoreChanges: ['roles'] })
-        )
-    )!;
+    const group = new postgresql.Role(
+      `${name}-group`,
+      { name: OPERATORS_GROUP, login: false },
+      stage.childOptions(this, { provider, retainOnDelete: true, ignoreChanges: ['roles'] })
+    );
+    registerGroup(group);
     // Not protected, unlike the stage's other children: removing a member from the list must revoke the grant.
     for (const member of members) {
       new postgresql.GrantRole(
