@@ -1,6 +1,6 @@
 /**
  * Run a Pulumi program against a fake engine and get back every resource it registered, with the options the SDK
- * sent (protect, retainOnDelete, import id, parent). For product tests of an `infra/` program; no cloud calls.
+ * sent (protect, retainOnDelete, import id, ignoreChanges, parent). For product tests of an `infra/` program; no cloud calls.
  */
 import * as pulumi from '@pulumi/pulumi';
 
@@ -15,6 +15,8 @@ export interface Registration {
   retainOnDelete: boolean;
   /** The `import` option: an existing cloud resource this one adopts. */
   importId: string;
+  /** The `ignoreChanges` option: input properties the engine leaves out of its diff. */
+  ignoreChanges: string[];
   /** Inputs as the provider would receive them, secrets unwrapped. */
   inputs: Record<string, any>;
   /** Top-level input keys whose value is, or contains, a secret. */
@@ -177,6 +179,7 @@ export async function runProgram<T>(
       protect: request.getProtect() ?? false,
       retainOnDelete: request.getRetainondelete() ?? false,
       importId: request.getImportid(),
+      ignoreChanges: request.getIgnorechangesList(),
       ...unwrapInputs(pulumi.runtime.deserializeProperties(request.getObject())),
     };
     register(request, (error, response) => {
