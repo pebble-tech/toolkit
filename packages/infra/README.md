@@ -47,14 +47,19 @@ argument: `owner` (renamed to `runtime` in 0.3.0), `ownerRole` and `ownerPasswor
 
 `pebble_operators` is one group per cluster, shared by every product and stack on it; it is a constant, not an
 argument. Membership gives connect, change and drop on every toolkit-managed database on that cluster, present and
-future. The admin creates it once per cluster, before the first `pulumi up` there, and adds or removes people with
-it (it may, because it created the group):
+future. The admin creates it once per cluster, before the first `pulumi up` there, and grants it to the first operator
+with the admin option; that operator then adds and removes people without the admin:
 
 ```sql
-CREATE ROLE pebble_operators NOLOGIN;                  -- once per cluster, as the admin
-GRANT pebble_operators TO <your PlanetScale role>;     -- join
-REVOKE pebble_operators FROM <your PlanetScale role>;  -- leave
+CREATE ROLE pebble_operators NOLOGIN;                                 -- once per cluster, as the admin
+GRANT pebble_operators TO "<first operator's role>" WITH ADMIN OPTION; -- once, as the admin
+GRANT pebble_operators TO "<their role>";                             -- join, by an operator with the admin option
+REVOKE pebble_operators FROM "<their role>";                          -- leave, by an operator with the admin option
 ```
+
+The admin (`ci-admin`) is needed only to create the group and for that first grant, because it created the group. On PostgreSQL 16+
+a `REVOKE` removes only a membership the revoking role granted: for one granted by another operator it prints a
+warning and leaves the membership in place, so the operator who granted it revokes it.
 
 No stack creates the group: postgresql 3.18.2 has no way to read a role it does not manage, and `CREATE ROLE` fails
 when the role exists, so two stacks on one cluster cannot both own it. A stack on a cluster without it fails at the
