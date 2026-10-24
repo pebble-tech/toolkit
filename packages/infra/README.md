@@ -7,7 +7,7 @@ pinning a version; the guardrails are defaults it cannot turn off.
 |---|---|---|
 | `Stage` | nothing; parses the stack name and names, tags and protects everything else | a product id that is not one DNS label, starts with `pebble`, or is `pr`/`staging`/`prod`/`shared`; a kind that is not one DNS label; any stack other than `pr-<n>`, `staging`, `prod`, `shared` |
 | `VercelProject` | `shared`: the project (no Git connection, private source, Vercel Authentication on previews), custom environments, the protection bypass. `staging`/`prod`: env vars (secrets `sensitive`), the domain bound to the stage's environment, an unproxied Cloudflare CNAME | previews; the project outside `shared`; env vars or domains on `shared`; a secret-looking name in `vars` |
-| `Database` | an explicit Postgres provider on port 5432 with `sslmode=verify-full`, the database, its owner (a generated login role on previews), the `public` revoke; `directUrl` and `pooledUrl` as secrets | staging/prod without an existing owner role; a derived name longer than 63 characters. The name is always `stage.databaseName()` |
+| `Database` | an explicit Postgres provider on port 5432 with `sslmode=verify-full`, the owner login role, the database owned by it, the owner's grant to `pebble_operators`, the `public` revoke, and on staging/prod the runtime role's grants; `directUrl` (owner) and `pooledUrl` (runtime) as secrets. See [Database](#database) | any `owner*` argument; staging/prod without `runtime`; `runtime` on a preview; a runtime role that is the owner or the operators group; a database or owner name longer than 63 characters. The names are always derived from `stage.databaseName()` |
 | `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; a boundary other than the stage's own `<product>-<env>-boundary` in the current account (a typed `PermissionsBoundaryArn` from `Stage` or `DeployRole`, checked when it resolves, so `pulumi preview` fails). Timeouts above 29 s are clamped |
 | `Worker` | Workers script from a prebuilt module, R2 bucket `<product>-<env>-<kind>` (on prod, `adoptExisting` imports that same name instead of creating it), plain and secret bindings, custom domain | a secret-looking name in `vars` unless listed in `plainTextAllowed`; `adoptExisting` outside prod |
 | `DeployRole` | the GitHub OIDC role for one product and env, its inline policy, and the boundary policy its roles must carry. `preview` allows the state bucket and the KMS key only. `staging` and `prod` also allow Lambda, API Gateway, ACM, logs and IAM inside `<product>-<env>`. Takes `product`, `env`, the repo and the apex (the zone name): the trusted GitHub environment, the account's OIDC provider, the state bucket and paths (`pebble-<stg\|prd>-pulumi-state/<product>/<env>`, plus `<product>/shared` for staging) and the KMS key (`alias/pebble-<stg\|prd>-pulumi-<env>`) are derived | a product id that is not one DNS label, a `pebble` product, or an apex that is not lowercase labels with no leading or trailing dot |
@@ -28,13 +28,60 @@ Hostnames and database names keep base-app's `stg`/`prd` suffixes; resource name
 
 A product id is one DNS label (`^[a-z][a-z0-9]{1,}$`, no hyphen), and a kind passed to `Stage.name` or `hostname` is one label too.
 
+## Database
+
+The database is always owned by a login role the component creates, so the admin can create, alter and drop it with no
+help from PlanetScale: on PlanetScale Postgres only `pscale_admin` can grant membership in a PlanetScale-made role, so
+the admin could not act as such a role to make it an owner. The PlanetScale-made role is passed as `runtime`, is
+granted what runtimes need, and owns nothing.
+
+| Role | Made by | `pr-<n>` | `staging`, `prod` |
+|---|---|---|---|
+| owner: `<database>` on a preview, `<database>_owner` on staging and prod | the component, with a generated password; no CREATEDB, CREATEROLE or SUPERUSER | owns the database; `directUrl` | owns the database; `directUrl` (port 5432) for migrations and the seed |
+| runtime: `runtime.role` | PlanetScale (`pscale`), passed in with its password | none: the owner is also the runtime | CONNECT; USAGE on `public`; SELECT, INSERT, UPDATE, DELETE on all tables; USAGE, SELECT, UPDATE on all sequences; the same on tables and sequences the owner creates later; owns nothing; `pooledUrl` (pooler, port 6432) |
+| admin: the `adminUrl` user | you, with CREATEDB and CREATEROLE | member of the owner | member of the owner |
+| operators: `pebble_operators` (`OPERATORS_GROUP`), NOLOGIN | the admin, once per cluster | member of the owner | member of the owner |
+
+PUBLIC's CONNECT on the database is revoked on every stage. A role name or password for the owner is never an
+argument: `owner` (renamed to `runtime` in 0.3.0), `ownerRole` and `ownerPassword` are refused.
+
+`pebble_operators` is one group per cluster, shared by every product and stack on it; it is a constant, not an
+argument. Membership gives connect, change and drop on every toolkit-managed database on that cluster, present and
+future. The admin creates it once per cluster, before the first `pulumi up` there, and adds or removes people with
+it (it may, because it created the group):
+
+```sql
+CREATE ROLE pebble_operators NOLOGIN;                  -- once per cluster, as the admin
+GRANT pebble_operators TO <your PlanetScale role>;     -- join
+REVOKE pebble_operators FROM <your PlanetScale role>;  -- leave
+```
+
+No stack creates the group: postgresql 3.18.2 has no way to read a role it does not manage, and `CREATE ROLE` fails
+when the role exists, so two stacks on one cluster cannot both own it. A stack on a cluster without it fails at the
+`db-operators` grant with `role "pebble_operators" does not exist`.
+
+Both memberships in the owner ignore `withAdminOption`: postgresql 3.18.2 reads a membership without its grantor, and
+on PostgreSQL 16+ the admin's implicit ADMIN OPTION row in a role it created would otherwise make `pulumi up --refresh`
+replace the grant and revoke it. Consumers need no transformation for this.
+
+```ts
+const db = new Database('db', {
+  stage,
+  adminUrl: config.requireSecret('pgAdminUrl'),
+  ...(stage.isPreview
+    ? {}
+    : { runtime: { role: config.require('pgRuntimeRole'), password: config.requireSecret('pgRuntimePassword') } }),
+});
+```
+
 ## Ownership
 
 - `shared`: the Vercel project and its custom environments. Apply it before `staging` and `prod`. It has no deploy role
   of its own. The staging role applies it, so its state lives at `<product>/shared` in `pebble-stg-pulumi-state` and
   its secrets use the staging key (`stateKeyAlias('shared')` is `alias/pebble-stg-pulumi-staging`).
-- `pr-<n>`: a database and its role. Previews pass env to `vercel deploy`.
-- `staging`, `prod`: database, API, Worker, web env vars and domain.
+- `pr-<n>`: a database and its owner role. Previews pass env to `vercel deploy`.
+- `staging`, `prod`: database, its owner role and the runtime role's grants (the runtime role itself is PlanetScale's), API,
+  Worker, web env vars and domain.
 - `infra/bootstrap` (a separate project, applied by hand with SSO): one `DeployRole` per env (`preview`, `staging`,
   `prod`). `ApiFunction` defaults its boundary to `<product>-<env>-boundary` in the current account, the policy the
   deploy role created.
