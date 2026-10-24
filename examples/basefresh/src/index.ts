@@ -4,14 +4,14 @@ import * as pulumi from '@pulumi/pulumi';
 import { basefresh } from './app.js';
 
 const config = new pulumi.Config();
-const ownerRole = config.get('pgOwnerRole');
+const runtimeRole = config.get('pgRuntimeRole');
 
 export const outputs = basefresh({
   apex: config.require('apex'),
   cloudflareZoneId: config.require('cloudflareZoneId'),
   cloudflareAccountId: config.require('cloudflareAccountId'),
   pgAdminUrl: config.requireSecret('pgAdminUrl'),
-  ...(ownerRole ? { pgOwner: { role: ownerRole, password: config.requireSecret('pgOwnerPassword') } } : {}),
+  ...(runtimeRole ? { pgRuntime: { role: runtimeRole, password: config.requireSecret('pgRuntimePassword') } } : {}),
   authSecret: config.getSecret('authSecret') ?? '',
   bundles: { api: 'bundles/api', uploads: 'bundles/uploads/server.js' },
 });

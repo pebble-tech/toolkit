@@ -12,7 +12,9 @@ const inputs = (stack: string): BasefreshInputs => ({
   cloudflareZoneId: 'zone-1',
   cloudflareAccountId: 'account-1',
   pgAdminUrl: 'postgresql://postgres.abc123:admin@sin.pg.psdb.cloud:5432/postgres',
-  ...(stack.startsWith('pr-') || stack === 'shared' ? {} : { pgOwner: { role: 'basefresh_app', password: 'owner' } }),
+  ...(stack.startsWith('pr-') || stack === 'shared'
+    ? {}
+    : { pgRuntime: { role: 'basefresh_app', password: 'runtime' } }),
   authSecret: 'auth-secret',
   bundles: { api: join(root, 'bundles/api'), uploads: join(root, 'bundles/uploads/server.js') },
 });
@@ -50,9 +52,18 @@ function summary(resources: Registration[]): string[] {
 const DATABASE_STAGE = (db: string) => [
   'pebbletech:index:Database db',
   'postgresql:index/database:Database db ' + db,
+  'postgresql:index/defaultPrivileges:DefaultPrivileges db-runtime-default-sequences',
+  'postgresql:index/defaultPrivileges:DefaultPrivileges db-runtime-default-tables',
   'postgresql:index/grant:Grant db-revoke-public',
+  'postgresql:index/grant:Grant db-runtime-connect',
+  'postgresql:index/grant:Grant db-runtime-schema',
+  'postgresql:index/grant:Grant db-runtime-sequences',
+  'postgresql:index/grant:Grant db-runtime-tables',
   'postgresql:index/grantRole:GrantRole db-admin-member',
+  'postgresql:index/grantRole:GrantRole db-operators',
+  `postgresql:index/role:Role db-owner ${db}_owner`,
   'pulumi:providers:postgresql db-admin',
+  'random:index/randomPassword:RandomPassword db-owner-password',
 ];
 
 const RUNTIME = (env: string, suffix: string) => {
@@ -111,6 +122,7 @@ describe('basefresh program', () => {
       'postgresql:index/database:Database db basefresh_pr_7',
       'postgresql:index/grant:Grant db-revoke-public',
       'postgresql:index/grantRole:GrantRole db-admin-member',
+      'postgresql:index/grantRole:GrantRole db-operators',
       'postgresql:index/role:Role db-owner basefresh_pr_7',
       'pulumi:providers:postgresql db-admin',
       'random:index/randomPassword:RandomPassword db-owner-password',

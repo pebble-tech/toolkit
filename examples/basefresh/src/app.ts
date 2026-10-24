@@ -9,8 +9,8 @@ export interface BasefreshInputs {
   cloudflareAccountId: string;
   /** Admin URL of the Postgres cluster for this stage (secret). */
   pgAdminUrl: pulumi.Input<string>;
-  /** Staging and prod: the PlanetScale-made role that owns the database, and its password (secret). */
-  pgOwner?: { role: string; password: pulumi.Input<string> };
+  /** Staging and prod: the PlanetScale-made role runtimes connect as through the pooler, and its password (secret). */
+  pgRuntime?: { role: string; password: pulumi.Input<string> };
   authSecret: pulumi.Input<string>;
   /** Built by the product (esbuild); paths relative to the project directory. */
   bundles: { api: string; uploads: string };
@@ -48,7 +48,7 @@ export function basefresh(inputs: BasefreshInputs): Record<string, pulumi.Input<
   // shared's state is another backend, and prod's state is in another account, so look the project up by name.
   // shared must already exist. The name is the one VercelProject creates there: `<product>-web`.
   const project = vercel.getProjectOutput({ name: `${stage.product}-web` });
-  const database = new Database('db', { stage, adminUrl: inputs.pgAdminUrl, owner: inputs.pgOwner });
+  const database = new Database('db', { stage, adminUrl: inputs.pgAdminUrl, runtime: inputs.pgRuntime });
   const runtimeUrl = database.pooledUrl!;
   const webUrl = `https://${stage.hostname('app', inputs.apex)}`;
 
