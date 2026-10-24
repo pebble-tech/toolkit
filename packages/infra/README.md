@@ -11,6 +11,7 @@ pinning a version; the guardrails are defaults it cannot turn off.
 | `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; a boundary other than the stage's own `<product>-<env>-boundary` in the current account (a typed `PermissionsBoundaryArn` from `Stage` or `DeployRole`, checked when it resolves, so `pulumi preview` fails). Timeouts above 29 s are clamped |
 | `Worker` | Workers script from a prebuilt module, R2 bucket `<product>-<env>-<kind>` (on prod, `adoptExisting` imports that same name instead of creating it), plain and secret bindings, custom domain | a secret-looking name in `vars` unless listed in `plainTextAllowed`; `adoptExisting` outside prod |
 | `DeployRole` | the GitHub OIDC role for one product and env, its inline policy, and the boundary policy its roles must carry. `preview` allows the state bucket and the KMS key only. `staging` and `prod` also allow Lambda, API Gateway, ACM, logs and IAM inside `<product>-<env>`. Takes `product`, `env`, the repo and the apex (the zone name): the trusted GitHub environment, the account's OIDC provider, the state bucket and paths (`pebble-<stg\|prd>-pulumi-state/<product>/<env>`, plus `<product>/shared` for staging) and the KMS key (`alias/pebble-<stg\|prd>-pulumi-<env>`) are derived | a product id that is not one DNS label, a `pebble` product, or an apex that is not lowercase labels with no leading or trailing dot |
+| `Operators` | the cluster's `pebble_operators` group (kept on destroy) and one membership grant per name in `members`, through the same admin provider as `Database`. See [Operators](#operators) | `pr-<n>` and `staging` (one stack per cluster owns the group: `shared` or `prod`); an empty or repeated member name |
 
 Every component refuses a hostname or name outside its stage (`NamespaceError`), and every refusal is a
 `GuardrailError` subclass. On `prod` (and `shared`, which owns production's Vercel project) every child resource gets
@@ -40,30 +41,14 @@ granted what runtimes need, and owns nothing.
 | owner: `<database>` on a preview, `<database>_owner` on staging and prod | the component, with a generated password; no CREATEDB, CREATEROLE or SUPERUSER | owns the database; `directUrl` | owns the database; `directUrl` (port 5432) for migrations and the seed |
 | runtime: `runtime.role` | PlanetScale (`pscale`), passed in with its password | none: the owner is also the runtime | CONNECT; USAGE on `public`; SELECT, INSERT, UPDATE, DELETE on all tables; USAGE, SELECT, UPDATE on all sequences; the same on tables and sequences the owner creates later; owns nothing; `pooledUrl` (pooler, port 6432) |
 | admin: the `adminUrl` user | you, with CREATEDB and CREATEROLE | member of the owner | member of the owner |
-| operators: `pebble_operators` (`OPERATORS_GROUP`), NOLOGIN | the admin, once per cluster | member of the owner | member of the owner |
+| operators: `pebble_operators` (`OPERATORS_GROUP`), NOLOGIN | `Operators`, from one stack per cluster | member of the owner | member of the owner |
 
 PUBLIC's CONNECT on the database is revoked on every stage. A role name or password for the owner is never an
 argument: `owner` (renamed to `runtime` in 0.3.0), `ownerRole` and `ownerPassword` are refused.
 
 `pebble_operators` is one group per cluster, shared by every product and stack on it; it is a constant, not an
 argument. Membership gives connect, change and drop on every toolkit-managed database on that cluster, present and
-future. The admin creates it once per cluster, before the first `pulumi up` there, and grants it to the first operator
-with the admin option; that operator then adds and removes people without the admin:
-
-```sql
-CREATE ROLE pebble_operators NOLOGIN;                                 -- once per cluster, as the admin
-GRANT pebble_operators TO "<first operator's role>" WITH ADMIN OPTION; -- once, as the admin
-GRANT pebble_operators TO "<their role>";                             -- join, by an operator with the admin option
-REVOKE pebble_operators FROM "<their role>";                          -- leave, by an operator with the admin option
-```
-
-The admin (`ci-admin`) is needed only to create the group and for that first grant, because it created the group. On PostgreSQL 16+
-a `REVOKE` removes only a membership the revoking role granted: for one granted by another operator it prints a
-warning and leaves the membership in place, so the operator who granted it revokes it.
-
-No stack creates the group: postgresql 3.18.2 has no way to read a role it does not manage, and `CREATE ROLE` fails
-when the role exists, so two stacks on one cluster cannot both own it. A stack on a cluster without it fails at the
-`db-operators` grant with `role "pebble_operators" does not exist`.
+future. [`Operators`](#operators) creates it and its members.
 
 Both memberships in the owner ignore `withAdminOption`: postgresql 3.18.2 reads a membership without its grantor, and
 on PostgreSQL 16+ the admin's implicit ADMIN OPTION row in a role it created would otherwise make `pulumi up --refresh`
@@ -79,14 +64,47 @@ const db = new Database('db', {
 });
 ```
 
+## Operators
+
+Membership of `pebble_operators` is code. `Operators` creates the group and grants it to each name in `members`;
+removing a name revokes that membership on the next apply. One stack per cluster applies it: `shared` on the staging
+cluster, `prod` on the production cluster. Apply it before any other stack on a fresh cluster, and in `prod` construct
+it before `Database`: a `Database` on a cluster without the group fails at its `db-operators` grant with
+`role "pebble_operators" does not exist`.
+
+```ts
+new Operators('operators', {
+  stage,
+  adminUrl: config.requireSecret('pgAdminUrl'),
+  members: config.getObject<string[]>('operators') ?? [],
+});
+```
+
+`members` are SQL role names (PlanetScale role usernames without the `.<branch>` suffix). Read them from stack config
+(`pulumi config set --path 'operators[0]' <role>`), so the names are not committed in source. The group is kept when
+the stack is destroyed, because other stacks' databases are granted to it. The member grants are not protected, even
+on `shared` and `prod`, so a removal goes through.
+
+Grant by hand only in an emergency: the list does not know about a hand grant, so the next apply neither removes nor
+reports it. The fallback when no stack can run is one line, run as the admin:
+
+```sql
+GRANT pebble_operators TO "<their role>" WITH ADMIN OPTION;  -- that person can then GRANT and REVOKE it too
+```
+
+The admin (`ci-admin`) is needed only for that first grant, because it created the group. On PostgreSQL 16+ a
+`REVOKE` removes only a membership the revoking role granted; for one granted by another role it prints a warning and
+leaves the membership in place.
+
 ## Ownership
 
-- `shared`: the Vercel project and its custom environments. Apply it before `staging` and `prod`. It has no deploy role
+- `shared`: the Vercel project and its custom environments, and the staging cluster's `Operators`. Apply it before
+  `staging`, `prod` and previews. It has no deploy role
   of its own. The staging role applies it, so its state lives at `<product>/shared` in `pebble-stg-pulumi-state` and
   its secrets use the staging key (`stateKeyAlias('shared')` is `alias/pebble-stg-pulumi-staging`).
 - `pr-<n>`: a database and its owner role. Previews pass env to `vercel deploy`.
-- `staging`, `prod`: database, its owner role and the runtime role's grants (the runtime role itself is PlanetScale's), API,
-  Worker, web env vars and domain.
+- `staging`, `prod`: database, its owner role and the runtime role's grants (the runtime role itself is
+  PlanetScale's), API, Worker, web env vars and domain. `prod` also applies the production cluster's `Operators`.
 - `infra/bootstrap` (a separate project, applied by hand with SSO): one `DeployRole` per env (`preview`, `staging`,
   `prod`). `ApiFunction` defaults its boundary to `<product>-<env>-boundary` in the current account, the policy the
   deploy role created.
@@ -157,8 +175,9 @@ from the product's own build; the components never bundle.
 ## Test a program
 
 `@pebbletech/infra/testing` runs a program against Pulumi's mocks and returns every registered resource with the
-options the engine would see (`protect`, `retainOnDelete`, import id, parent). It rejects with the program's first
-unhandled rejection, such as a guardrail thrown inside an `apply`, as `pulumi preview` would fail:
+options the engine would see (`protect`, `retainOnDelete`, import id, `ignoreChanges`, dependencies, parent). It
+rejects with the program's first unhandled rejection, such as a guardrail thrown inside an `apply`, as `pulumi
+preview` would fail:
 
 ```ts
 import { runProgram } from '@pebbletech/infra/testing';
