@@ -28,3 +28,4 @@ export {
   type VercelProjectSettings,
 } from './vercel-project.js';
 export { DeployRole, type DeployRoleArgs } from './deploy-role.js';
+export { Operators, type OperatorsArgs } from './operators.js';

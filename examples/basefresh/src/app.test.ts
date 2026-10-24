@@ -15,6 +15,7 @@ const inputs = (stack: string): BasefreshInputs => ({
   ...(stack.startsWith('pr-') || stack === 'shared'
     ? {}
     : { pgRuntime: { role: 'basefresh_app', password: 'runtime' } }),
+  operators: ['pscale_api_kong'],
   authSecret: 'auth-secret',
   bundles: { api: join(root, 'bundles/api'), uploads: join(root, 'bundles/uploads/server.js') },
 });
@@ -105,8 +106,12 @@ describe('basefresh program', () => {
   test('shared owns the Vercel project, its staging environment and the bypass, nothing else', async () => {
     const { resources, result } = await run('shared');
     expect(summary(resources)).toEqual([
+      'pebbletech:index:Operators operators',
       'pebbletech:index:Stage stage',
       'pebbletech:index:VercelProject web',
+      'postgresql:index/grantRole:GrantRole operators-member-pscale_api_kong',
+      'postgresql:index/role:Role operators-group pebble_operators',
+      'pulumi:providers:postgresql operators-admin',
       'vercel:index/customEnvironment:CustomEnvironment web-staging staging',
       'vercel:index/project:Project web basefresh-web',
       'vercel:index/projectProtectionBypass:ProjectProtectionBypass web-bypass',

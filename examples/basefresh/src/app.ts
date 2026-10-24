@@ -1,4 +1,4 @@
-import { ApiFunction, Database, Stage, VercelProject, Worker } from '@pebbletech/infra';
+import { ApiFunction, Database, Operators, Stage, VercelProject, Worker } from '@pebbletech/infra';
 import * as pulumi from '@pulumi/pulumi';
 import * as vercel from '@pulumiverse/vercel';
 
@@ -11,14 +11,17 @@ export interface BasefreshInputs {
   pgAdminUrl: pulumi.Input<string>;
   /** Staging and prod: the PlanetScale-made role runtimes connect as through the pooler, and its password (secret). */
   pgRuntime?: { role: string; password: pulumi.Input<string> };
+  /** `shared`: the PlanetScale role names in the cluster's `pebble_operators` group (stack config, may be empty). */
+  operators?: string[];
   authSecret: pulumi.Input<string>;
   /** Built by the product (esbuild); paths relative to the project directory. */
   bundles: { api: string; uploads: string };
 }
 
 /**
- * basefresh's whole `infra/` program. `shared` owns the Vercel project; `pr-<n>` owns a database only; `staging` and
- * `prod` own a database, the API, the uploads Worker and the web env and domain.
+ * basefresh's whole `infra/` program. `shared` owns the Vercel project and the staging cluster's operators group;
+ * `pr-<n>` owns a database only; `staging` and `prod` own a database, the API, the uploads Worker and the web env and
+ * domain.
  */
 export function basefresh(inputs: BasefreshInputs): Record<string, pulumi.Input<unknown>> {
   const stage = new Stage('stage', { product: 'basefresh' });
@@ -33,6 +36,8 @@ export function basefresh(inputs: BasefreshInputs): Record<string, pulumi.Input<
         devCommand: 'cd ../.. && pnpm dev:web',
       },
     });
+    // One stack per cluster owns the operators group; on the staging cluster it is `shared`.
+    new Operators('operators', { stage, adminUrl: inputs.pgAdminUrl, members: inputs.operators ?? [] });
     return {
       projectId: web.projectId,
       customEnvironmentIds: web.customEnvironmentIds,

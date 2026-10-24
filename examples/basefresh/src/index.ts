@@ -12,6 +12,7 @@ export const outputs = basefresh({
   cloudflareAccountId: config.require('cloudflareAccountId'),
   pgAdminUrl: config.requireSecret('pgAdminUrl'),
   ...(runtimeRole ? { pgRuntime: { role: runtimeRole, password: config.requireSecret('pgRuntimePassword') } } : {}),
+  operators: config.getObject<string[]>('operators') ?? [],
   authSecret: config.getSecret('authSecret') ?? '',
   bundles: { api: 'bundles/api', uploads: 'bundles/uploads/server.js' },
 });

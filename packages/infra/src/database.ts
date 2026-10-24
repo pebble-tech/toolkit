@@ -74,8 +74,8 @@ const SCHEMA = 'public';
 
 /**
  * The cluster's operators group (NOLOGIN). Every database's owner role is granted to it, so a member can connect to,
- * change and drop every toolkit-managed database on the cluster. It is created once per cluster by the admin; people
- * join it with `GRANT pebble_operators TO <role>`. A constant, never an argument.
+ * change and drop every toolkit-managed database on the cluster. `Operators` creates it and its members, once per
+ * cluster. A constant, never an argument.
  */
 export const OPERATORS_GROUP = 'pebble_operators';
 
@@ -84,7 +84,46 @@ export const OPERATORS_GROUP = 'pebble_operators';
  * implicit ADMIN OPTION membership in every role it creates, so a refresh can read `withAdminOption: true` and replace
  * the grant, and the replacement's delete revokes the new grant.
  */
-const KEEP_MEMBERSHIP = { ignoreChanges: ['withAdminOption'] };
+export const KEEP_MEMBERSHIP = { ignoreChanges: ['withAdminOption'] };
+
+/** The admin's Postgres provider: direct port 5432, `sslmode=verify-full`, never superuser, whatever the URL says. */
+export function adminProvider(name: string, adminUrl: pulumi.Input<string>, parent: pulumi.Resource) {
+  const admin = pulumi.secret(pulumi.output(adminUrl).apply(parseAdminUrl));
+  const provider = new postgresql.Provider(
+    `${name}-admin`,
+    {
+      host: admin.host,
+      port: DIRECT_PORT,
+      username: admin.user,
+      databaseUsername: admin.user.apply((user) => splitUser(user).role),
+      password: admin.password,
+      database: admin.database,
+      sslmode: 'verify-full',
+      superuser: false,
+    },
+    // Not protected: a provider is configuration, not a cloud resource, and a protected one blocks a config change.
+    { parent }
+  );
+  return { admin, provider };
+}
+
+/** The operators group each running program has created, keyed by its resource monitor (one per run). */
+const operatorsGroups = new WeakMap<object, postgresql.Role>();
+
+/**
+ * The `pebble_operators` role for this program: created by the first `Operators` that asks, and returned to every
+ * later caller, so a stack never registers it twice. `Database` only looks: it grants to the group by name.
+ */
+export function operatorsGroup(create?: () => postgresql.Role): postgresql.Role | undefined {
+  const key = pulumi.runtime.getMonitor() as object | undefined;
+  if (!key) return create?.();
+  let group = operatorsGroups.get(key);
+  if (!group && create) {
+    group = create();
+    operatorsGroups.set(key, group);
+  }
+  return group;
+}
 
 /**
  * A database in an existing Postgres cluster (PlanetScale), owned by a login role the component creates, with grants
@@ -136,22 +175,7 @@ export class Database extends pulumi.ComponentResource {
     }
     super('pebbletech:index:Database', name, {}, opts);
 
-    const admin = pulumi.secret(pulumi.output(args.adminUrl).apply(parseAdminUrl));
-    const provider = new postgresql.Provider(
-      `${name}-admin`,
-      {
-        host: admin.host,
-        port: DIRECT_PORT,
-        username: admin.user,
-        databaseUsername: admin.user.apply((user) => splitUser(user).role),
-        password: admin.password,
-        database: admin.database,
-        sslmode: 'verify-full',
-        superuser: false,
-      },
-      // Not protected: a provider is configuration, not a cloud resource, and a protected one blocks a config change.
-      { parent: this }
-    );
+    const { admin, provider } = adminProvider(name, args.adminUrl, this);
     const withProvider = (extra?: pulumi.CustomResourceOptions) => stage.childOptions(this, { ...extra, provider });
 
     const password = new random.RandomPassword(
@@ -215,11 +239,13 @@ export class Database extends pulumi.ComponentResource {
       }
     }
 
-    // On PostgreSQL 16+ a plain GRANT gives INHERIT TRUE (the group's default) and SET TRUE. The group must exist.
+    // On PostgreSQL 16+ a plain GRANT gives INHERIT TRUE (the group's default) and SET TRUE. The group must exist:
+    // `Operators` creates it, earlier in this stack (then this grant waits for it) or in the cluster's operators stack.
+    const group = operatorsGroup();
     new postgresql.GrantRole(
       `${name}-operators`,
       { role: OPERATORS_GROUP, grantRole: ownerRole },
-      withProvider({ dependsOn: [owner], ...KEEP_MEMBERSHIP })
+      withProvider({ dependsOn: [owner, ...(group ? [group] : [])], ...KEEP_MEMBERSHIP })
     );
 
     this.databaseName = databaseName;
