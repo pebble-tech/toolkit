@@ -37,12 +37,14 @@ export class Operators extends pulumi.ComponentResource {
 
     const { provider } = adminProvider(name, args.adminUrl, this);
     // Kept when this stack goes: other stacks' databases are granted to it, and dropping it drops their memberships.
+    // `roles` (what the group is a member of) is every database's owner, granted by each `Database`: a refresh reads
+    // them back, and without ignoreChanges the next apply would revoke them all.
     const group = operatorsGroup(
       () =>
         new postgresql.Role(
           `${name}-group`,
           { name: OPERATORS_GROUP, login: false },
-          stage.childOptions(this, { provider, retainOnDelete: true })
+          stage.childOptions(this, { provider, retainOnDelete: true, ignoreChanges: ['roles'] })
         )
     )!;
     // Not protected, unlike the stage's other children: removing a member from the list must revoke the grant.

@@ -28,7 +28,13 @@ describe('Operators', () => {
       'pulumi:providers:postgresql operators-admin',
     ]);
     const group = children.find((r) => r.name === 'operators-group')!;
-    expect([group.inputs.name, group.inputs.login, group.retainOnDelete]).toEqual(['pebble_operators', false, true]);
+    // ignoreChanges roles: the databases' grants to the group must survive a refresh of this stack.
+    expect([group.inputs.name, group.inputs.login, group.retainOnDelete, group.ignoreChanges]).toEqual([
+      'pebble_operators',
+      false,
+      true,
+      ['roles'],
+    ]);
     expect(
       grants(resources).map((r) => [r.inputs, r.protect, r.retainOnDelete, r.ignoreChanges, r.dependencies])
     ).toEqual([
