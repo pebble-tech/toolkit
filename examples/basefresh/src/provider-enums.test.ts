@@ -1,0 +1,148 @@
+import { defaultMocks, type Registration, runProgram } from '@pebbletech/infra/testing';
+import type * as pulumi from '@pulumi/pulumi';
+import { join } from 'node:path';
+import { describe, expect, test } from 'vitest';
+
+import { basefresh } from './app.js';
+
+/**
+ * Every enum-valued input the toolkit sets, spelled as the provider accepts it. Lists marked `validated` are the
+ * provider's own refusal message for a wrong value (pulumi preview against the real plugin); the SDK's doc comments are
+ * not a source, because the bridge rewrites `snake_case` there (`onlyPreviewDeployments` is refused). Lists marked
+ * `docs` are values the provider passes through unchecked, so only the API or the database catches a wrong one.
+ */
+const ENUMS: Record<string, Record<string, readonly string[]>> = {
+  'vercel:index/project:Project': {
+    // validated, vercel 5.21.1
+    'vercelAuthentication.deploymentType': [
+      'standard_protection_new',
+      'standard_protection',
+      'all_deployments',
+      'only_preview_deployments',
+      'none',
+    ],
+  },
+  'vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable': {
+    'targets[]': ['production', 'preview', 'development'], // validated
+  },
+  'cloudflare:index/dnsRecord:DnsRecord': {
+    // docs (cloudflare 6.23.1 dnsRecord "Available values", subset); not checked before the API call
+    type: ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'OPENPGPKEY', 'PTR', 'TXT', 'CAA', 'CERT', 'DNSKEY', 'DS', 'HTTPS', 'LOC'],
+  },
+  'cloudflare:index/workersScript:WorkersScript': {
+    'bindings[].type': ['r2_bucket', 'plain_text', 'secret_text', 'kv_namespace', 'service', 'json', 'd1', 'queue'], // validated (subset)
+    'compatibilityFlags[]': ['nodejs_compat'], // docs (Workers compatibility flags); not checked before the API call
+  },
+  'aws:lambda/function:Function': {
+    runtime: ['nodejs20.x', 'nodejs22.x', 'nodejs24.x'], // validated (subset)
+    'loggingConfig.logFormat': ['JSON', 'Text'], // validated
+  },
+  'aws:apigatewayv2/api:Api': { protocolType: ['HTTP', 'WEBSOCKET'] }, // validated
+  'aws:apigatewayv2/integration:Integration': {
+    integrationType: ['AWS', 'HTTP', 'MOCK', 'HTTP_PROXY', 'AWS_PROXY'], // validated
+    payloadFormatVersion: ['1.0', '2.0'], // validated
+  },
+  'aws:apigatewayv2/route:Route': { routeKey: ['$default'] }, // docs (HTTP API default route); not checked
+  'aws:apigatewayv2/stage:Stage': { name: ['$default'] }, // docs (HTTP API default stage); not checked
+  'aws:acm/certificate:Certificate': { validationMethod: ['DNS', 'EMAIL', 'HTTP'] }, // validated
+  'aws:apigatewayv2/domainName:DomainName': {
+    'domainNameConfiguration.endpointType': ['REGIONAL'], // docs ("Valid values: REGIONAL"); not checked
+    'domainNameConfiguration.securityPolicy': ['TLS_1_2'], // validated
+  },
+  'pulumi:providers:postgresql': {
+    sslmode: ['disable', 'require', 'verify-ca', 'verify-full'], // docs (lib/pq); not checked before connecting
+  },
+  'postgresql:index/grant:Grant': {
+    // validated (subset)
+    objectType: ['database', 'function', 'procedure', 'routine', 'schema', 'sequence', 'table', 'foreign_data_wrapper'],
+    // docs (PostgreSQL GRANT, subset); checked only when the grant runs
+    'privileges[]': [
+      'SELECT',
+      'INSERT',
+      'UPDATE',
+      'DELETE',
+      'TRUNCATE',
+      'REFERENCES',
+      'TRIGGER',
+      'CREATE',
+      'CONNECT',
+      'USAGE',
+    ],
+  },
+  'postgresql:index/defaultPrivileges:DefaultPrivileges': {
+    objectType: ['table', 'sequence', 'function', 'routine', 'type', 'schema'], // validated
+    'privileges[]': ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'USAGE'], // docs (subset)
+  },
+};
+
+/** Values at a dotted path; `[]` steps into every array element. */
+function valuesAt(value: unknown, path: string): unknown[] {
+  let current: unknown[] = [value];
+  for (const step of path.split('.')) {
+    const key = step.replace(/\[\]$/, '');
+    current = current.flatMap((item) => {
+      const next = (item as Record<string, unknown> | undefined)?.[key];
+      if (next === undefined) return [];
+      return step.endsWith('[]') ? (next as unknown[]) : [next];
+    });
+  }
+  return current;
+}
+
+const root = join(import.meta.dirname, '..');
+const mocks: pulumi.runtime.Mocks = {
+  ...defaultMocks,
+  call(args) {
+    if (args.token === 'vercel:index/getProject:getProject') return { ...args.inputs, id: 'prj_basefresh' };
+    if (args.token === 'vercel:index/getCustomEnvironment:getCustomEnvironment') {
+      return { ...args.inputs, id: 'env_staging' };
+    }
+    return defaultMocks.call(args);
+  },
+};
+
+async function everyStack(): Promise<Registration[]> {
+  const all: Registration[] = [];
+  for (const stack of ['shared', 'pr-7', 'staging', 'prod']) {
+    const { resources } = await runProgram({ project: 'basefresh', stack, mocks }, () =>
+      basefresh({
+        apex: 'pebbletech.my',
+        cloudflareZoneId: 'zone-1',
+        cloudflareAccountId: 'account-1',
+        pgAdminUrl: 'postgresql://postgres.abc123:admin@sin.pg.psdb.cloud:5432/postgres',
+        ...(stack === 'staging' || stack === 'prod' ? { pgRuntime: { role: 'basefresh_app', password: 'pw' } } : {}),
+        operators: ['pscale_api_kong'],
+        authSecret: 'auth-secret',
+        bundles: { api: join(root, 'bundles/api'), uploads: join(root, 'bundles/uploads/server.js') },
+      })
+    );
+    all.push(...resources);
+  }
+  return all;
+}
+
+describe('provider enum inputs', () => {
+  test('every enum-valued input in every stack is spelled as its provider accepts it', async () => {
+    const resources = await everyStack();
+    const offending: string[] = [];
+    const seen = new Set<string>();
+    for (const resource of resources) {
+      for (const [path, allowed] of Object.entries(ENUMS[resource.type] ?? {})) {
+        for (const value of valuesAt(resource.inputs, path)) {
+          seen.add(`${resource.type} ${path}`);
+          if (!allowed.includes(value as string)) offending.push(`${resource.type} ${resource.name} ${path}=${value}`);
+        }
+      }
+    }
+    expect(offending).toEqual([]);
+    // Every row is reached, so a renamed property cannot leave a row checking nothing.
+    const rows = Object.entries(ENUMS).flatMap(([type, paths]) => Object.keys(paths).map((path) => `${type} ${path}`));
+    expect(rows.filter((row) => !seen.has(row))).toEqual([]);
+  });
+
+  test('the Vercel project protects previews with the provider spelling', async () => {
+    const resources = await everyStack();
+    const project = resources.find((r) => r.type === 'vercel:index/project:Project')!;
+    expect(project.inputs.vercelAuthentication).toEqual({ deploymentType: 'only_preview_deployments' });
+  });
+});

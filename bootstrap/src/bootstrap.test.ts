@@ -292,3 +292,32 @@ async function resolveAll(record: Record<string, pulumi.Output<string>>): Promis
     await Promise.all(Object.entries(record).map(async ([key, value]) => [key, await valueOf(value)] as const))
   );
 }
+
+describe('provider enum inputs', () => {
+  // Each list is the AWS provider's (7.51.1) own refusal message for a wrong value, from pulumi preview against the
+  // real plugin; the SDK's doc comments are not a source.
+  const ENUMS: [type: string, value: (r: Registration) => unknown, allowed: string[]][] = [
+    [
+      'aws:s3/bucketServerSideEncryptionConfiguration:BucketServerSideEncryptionConfiguration',
+      (r) => r.inputs.rules[0].applyServerSideEncryptionByDefault.sseAlgorithm,
+      ['AES256', 'aws:fsx', 'aws:backup', 'aws:kms', 'aws:kms:dsse'],
+    ],
+    [
+      'aws:s3/bucketVersioning:BucketVersioning',
+      (r) => r.inputs.versioningConfiguration.status,
+      ['Enabled', 'Suspended', 'Disabled'],
+    ],
+    [
+      'aws:s3/bucketLifecycleConfiguration:BucketLifecycleConfiguration',
+      (r) => r.inputs.rules[0].status,
+      ['Disabled', 'Enabled'],
+    ],
+  ];
+
+  test.each(ENUMS)('%s is spelled as the provider accepts it', async (type, value, allowed) => {
+    const { resources } = await run(stg);
+    const values = resources.filter((r) => r.type === type).map(value);
+    expect(values.length).toBeGreaterThan(0);
+    expect(values.filter((v) => !allowed.includes(v as string))).toEqual([]);
+  });
+});
