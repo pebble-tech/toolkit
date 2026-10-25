@@ -57,7 +57,7 @@ describe('VercelProject on the shared stack', () => {
       name: 'basefresh-web',
       ...PROJECT,
       publicSource: false,
-      vercelAuthentication: { deploymentType: 'onlyPreviewDeployments' },
+      vercelAuthentication: { deploymentType: 'only_preview_deployments' },
     });
   });
 

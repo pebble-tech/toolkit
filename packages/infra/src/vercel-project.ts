@@ -6,8 +6,11 @@ import { NamespaceError, OwnershipError } from './errors.js';
 import { assertNoSecretsInPlainText } from './secrets.js';
 import type { Stage } from './stage.js';
 
-/** Who sees a deployment without logging in to Vercel. `none` is not offered. */
-export type PreviewProtection = 'onlyPreviewDeployments' | 'standardProtectionNew' | 'allDeployments';
+/**
+ * Which deployments need a Vercel login, spelled as the provider validates `vercel_authentication.deployment_type`
+ * (snake case; the SDK's doc comments show camel case, which the provider refuses). `none` is not offered.
+ */
+export type PreviewProtection = 'only_preview_deployments' | 'standard_protection_new' | 'all_deployments';
 
 /** Project settings, owned by the `shared` stack. */
 export interface VercelProjectSettings {
@@ -20,7 +23,7 @@ export interface VercelProjectSettings {
   outputDirectory?: string;
   /** Custom environments to create, by name. Default `['staging']`. */
   customEnvironments?: string[];
-  /** Default `onlyPreviewDeployments`: previews need a Vercel login (or the bypass secret). */
+  /** Default `only_preview_deployments`: previews need a Vercel login (or the bypass secret). */
   protection?: PreviewProtection;
 }
 
@@ -103,7 +106,7 @@ export class VercelProject extends pulumi.ComponentResource {
           devCommand: settings.devCommand,
           outputDirectory: settings.outputDirectory,
           publicSource: false,
-          vercelAuthentication: { deploymentType: settings.protection ?? 'onlyPreviewDeployments' },
+          vercelAuthentication: { deploymentType: settings.protection ?? 'only_preview_deployments' },
         },
         child()
       );
