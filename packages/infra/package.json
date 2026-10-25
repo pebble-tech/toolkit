@@ -1,6 +1,6 @@
 {
   "name": "@pebbletech/infra",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Pulumi components for Pebble product stacks: stage naming, Vercel, Postgres, Lambda, Workers and deploy roles",
   "keywords": [
     "pebbletech",
