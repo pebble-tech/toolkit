@@ -53,6 +53,20 @@ describe('Worker', () => {
     });
   });
 
+  test.each([
+    ['staging', 'uploads-basefresh-stg.pebbletech.my'],
+    ['prod', 'uploads-basefresh.pebbletech.my'],
+  ])(
+    '%s replaces the custom domain delete-first, and nothing else: its hostname is unique',
+    async (stack, hostname) => {
+      expect.assertions(1);
+      const { resources } = await workerIn(stack, { hostname });
+      expect(resources.filter((r) => r.deleteBeforeReplace).map((r) => `${r.type} ${r.name}`)).toEqual([
+        'cloudflare:index/workersCustomDomain:WorkersCustomDomain uploads-domain',
+      ]);
+    }
+  );
+
   test('the script uploads the bundle as a module, with its hash, flags and bindings', async () => {
     const { resources } = await workerIn('staging');
     const worker = byType(resources, 'cloudflare:index/workersScript:WorkersScript')[0];
@@ -106,11 +120,16 @@ describe('Worker', () => {
     ).rejects.toThrow(OwnershipError);
   });
 
-  test('on prod every child is protected and retained', async () => {
+  test('on prod every child is protected, and every child but the custom domain is retained', async () => {
+    expect.assertions(1);
     const { resources } = await workerIn('prod', { hostname: 'uploads-basefresh.pebbletech.my' });
-    const children = resources.filter((r) => r.custom);
-    expect(children).toHaveLength(3);
-    expect(children.filter((r) => !r.protect || !r.retainOnDelete)).toEqual([]);
+    const children = resources.filter((r) => r.custom).sort((a, b) => a.name.localeCompare(b.name));
+    // A retained domain would leave the provider on a delete-first replace and block its replacement's hostname.
+    expect(children.map((r) => [r.name, r.protect, r.retainOnDelete])).toEqual([
+      ['uploads', true, true],
+      ['uploads-bucket', true, true],
+      ['uploads-domain', true, false],
+    ]);
   });
 
   test('outputs are registered', async () => {

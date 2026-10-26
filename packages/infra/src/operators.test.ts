@@ -72,6 +72,21 @@ describe('Operators', () => {
     }
   );
 
+  test('refuses a PlanetScale login username with its .<branch> suffix, saying to drop it', async () => {
+    expect.assertions(1);
+    await expect(operatorsIn('shared', ['pscale_api_alice', 'pscale_api_bob.main'])).rejects.toThrow(
+      'operator member "pscale_api_bob.main" is a login username, not a role: drop the ".main" suffix and list "pscale_api_bob"'
+    );
+  });
+
+  test('a bare role name is granted as given', async () => {
+    expect.assertions(1);
+    const { resources } = await operatorsIn('shared', ['pscale_api_44lpekcp7tl0']);
+    expect(grants(resources).map((r) => r.inputs)).toEqual([
+      { role: 'pscale_api_44lpekcp7tl0', grantRole: 'pebble_operators' },
+    ]);
+  });
+
   test('in a stack with both, the group is registered once and the database grant waits for it', async () => {
     const { resources } = await runProgram({ project: 'basefresh', stack: 'prod' }, () => {
       const stage = new Stage('stage', { product: 'basefresh' });

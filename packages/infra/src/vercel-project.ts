@@ -148,10 +148,14 @@ export class VercelProject extends pulumi.ComponentResource {
       }
       if (args.domain) {
         const { hostname, zoneId } = args.domain;
+        // A hostname is on one project and the provider adds a domain rather than moving it, so a replacement (a new
+        // `projectId`) must remove it from the old project first. The hostname is unserved for the seconds in between.
+        // Never retained, even on prod: a retained domain is only dropped from state, so the delete would not free the
+        // hostname. `protect` still guards it on prod.
         const domain = new vercel.ProjectDomain(
           `${name}-domain`,
           { projectId, teamId, domain: hostname, customEnvironmentId: args.customEnvironmentId },
-          child()
+          { ...child({ deleteBeforeReplace: true }), retainOnDelete: false }
         );
         const config = vercel.getDomainConfigOutput(
           { domain: hostname, projectIdOrName: projectId, teamId },

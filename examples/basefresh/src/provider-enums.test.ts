@@ -116,33 +116,33 @@ async function everyStack(): Promise<Registration[]> {
         bundles: { api: join(root, 'bundles/api'), uploads: join(root, 'bundles/uploads/server.js') },
       })
     );
-    all.push(...resources);
+    all.push(...resources.map((r) => ({ ...r, name: `${stack}/${r.name}` })));
   }
   return all;
 }
 
+const ROWS = Object.entries(ENUMS).flatMap(([type, paths]) =>
+  Object.entries(paths).map(([path, allowed]) => [type, path, allowed] as const)
+);
+
+let registered: Promise<Registration[]> | undefined;
+const resourcesOfEveryStack = () => (registered ??= everyStack());
+
 describe('provider enum inputs', () => {
-  test('every enum-valued input in every stack is spelled as its provider accepts it', async () => {
-    const resources = await everyStack();
-    const offending: string[] = [];
-    const seen = new Set<string>();
-    for (const resource of resources) {
-      for (const [path, allowed] of Object.entries(ENUMS[resource.type] ?? {})) {
-        for (const value of valuesAt(resource.inputs, path)) {
-          seen.add(`${resource.type} ${path}`);
-          if (!allowed.includes(value as string)) offending.push(`${resource.type} ${resource.name} ${path}=${value}`);
-        }
-      }
-    }
-    expect(offending).toEqual([]);
+  // One test per row and one assertion per value, counted: deleting the per-value check fails the count, and deleting
+  // the count leaves the per-value check failing on a misspelled value.
+  test.each(ROWS)('%s %s is spelled as its provider accepts it', async (type, path, allowed) => {
+    const values = (await resourcesOfEveryStack())
+      .filter((r) => r.type === type)
+      .flatMap((r) => valuesAt(r.inputs, path).map((value) => [r.name, value] as const));
+    expect.assertions(values.length + 1);
     // Every row is reached, so a renamed property cannot leave a row checking nothing.
-    const rows = Object.entries(ENUMS).flatMap(([type, paths]) => Object.keys(paths).map((path) => `${type} ${path}`));
-    expect(rows.filter((row) => !seen.has(row))).toEqual([]);
+    expect(values.length).toBeGreaterThan(0);
+    for (const [name, value] of values) expect([name, value]).toEqual([name, expect.toBeOneOf(allowed)]);
   });
 
   test('the Vercel project protects previews with the provider spelling', async () => {
-    const resources = await everyStack();
-    const project = resources.find((r) => r.type === 'vercel:index/project:Project')!;
+    const project = (await resourcesOfEveryStack()).find((r) => r.type === 'vercel:index/project:Project')!;
     expect(project.inputs.vercelAuthentication).toEqual({ deploymentType: 'only_preview_deployments' });
   });
 });

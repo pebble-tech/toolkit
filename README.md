@@ -27,8 +27,9 @@ pnpm add @pebbletech/infra @pulumi/pulumi
 
 A product's `infra/` program builds every stage from one `Stage` (`pr-<n>`, `staging`, `prod`, plus `shared` for the
 Vercel project). Names stay inside `<product>-<env>`, roles carry a permissions boundary, APIs need a custom domain,
-and prod resources are protected and retained; the components refuse anything else. Compile the program with `tsc`
-and run Pulumi with `typescript: false`, since Pulumi's TypeScript peer is `<7`; install with pnpm, because npm
+and prod resources are protected and retained (the Worker and Vercel domains are protected only, so a replacement
+frees the hostname); the components refuse anything else. Compile the program with `tsc` and run Pulumi with
+`typescript: false`, since Pulumi's TypeScript peer is `<7`; install with pnpm, because npm
 refuses that optional peer next to TypeScript 7 without an `overrides` entry or `--legacy-peer-deps`. `shared` and
 `prod` are protected, so their teardown starts with `pulumi state unprotect --all`. A `preview` deploy role can use
 only its state path and KMS key. A staging or prod deploy role can create a custom domain of any name (`POST` on `/domainnames` has no name condition), can edit routes, integrations and stages under another HTTP API's id, and can change a hostname in a sub-zone of its apex whose label ends with `-<product>-stg` or `-<product>` (for example `api-x-stg.foo-basefresh-stg.pebbletech.my`); API Gateway tag updates after creation are denied, and creation-time tags still arrive through `CreateApi`.

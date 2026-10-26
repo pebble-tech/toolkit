@@ -1,6 +1,6 @@
 /**
  * Run a Pulumi program against a fake engine and get back every resource it registered, with the options the SDK
- * sent (protect, retainOnDelete, import id, ignoreChanges, dependencies, parent). For product tests of an `infra/` program; no cloud calls.
+ * sent (protect, retainOnDelete, deleteBeforeReplace, import id, ignoreChanges, dependencies, parent). For product tests of an `infra/` program; no cloud calls.
  */
 import * as pulumi from '@pulumi/pulumi';
 
@@ -13,6 +13,8 @@ export interface Registration {
   custom: boolean;
   protect: boolean;
   retainOnDelete: boolean;
+  /** The `deleteBeforeReplace` option: a replacement deletes this resource before creating the new one. */
+  deleteBeforeReplace: boolean;
   /** The `import` option: an existing cloud resource this one adopts. */
   importId: string;
   /** The `ignoreChanges` option: input properties the engine leaves out of its diff. */
@@ -180,6 +182,7 @@ export async function runProgram<T>(
       custom: request.getCustom(),
       protect: request.getProtect() ?? false,
       retainOnDelete: request.getRetainondelete() ?? false,
+      deleteBeforeReplace: request.getDeletebeforereplace() ?? false,
       importId: request.getImportid(),
       ignoreChanges: request.getIgnorechangesList(),
       dependencies: request.getDependenciesList(),

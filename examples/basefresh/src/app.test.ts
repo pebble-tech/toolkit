@@ -156,11 +156,18 @@ describe('basefresh program', () => {
     expect(resources.find((r) => r.name === 'db-operators')!.dependencies).toContain(group.urn);
   });
 
-  test('prod: everything is protected and retained except operator member grants, so a removal goes through', async () => {
+  test('prod: everything is protected and retained except operator member grants (neither, so a removal goes through) and the two domains (protected, not retained, so a delete-first replace frees the hostname)', async () => {
     const { resources } = await run('prod');
     const exposed = resources.filter((r) => r.custom && !r.type.startsWith('pulumi:providers:'));
-    expect(exposed.filter((r) => !r.protect || !r.retainOnDelete).map((r) => r.name)).toEqual([
-      'operators-member-pscale_api_kong',
+    expect(
+      exposed
+        .filter((r) => !r.protect || !r.retainOnDelete)
+        .map((r) => [r.name, r.protect, r.retainOnDelete])
+        .sort()
+    ).toEqual([
+      ['operators-member-pscale_api_kong', false, false],
+      ['uploads-domain', true, false],
+      ['web-domain', true, false],
     ]);
   });
 

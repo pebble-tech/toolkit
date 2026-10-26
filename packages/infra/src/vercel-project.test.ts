@@ -142,11 +142,29 @@ describe('VercelProject on staging and prod', () => {
     });
   });
 
-  test('on prod every child is protected and retained', async () => {
+  test.each(['staging', 'prod'])(
+    '%s replaces the project domain delete-first, and nothing else: a hostname is on one project',
+    async (stack) => {
+      expect.assertions(1);
+      const { resources } = await vercelIn(stack, stageArgs(stack));
+      expect(resources.filter((r) => r.deleteBeforeReplace).map((r) => `${r.type} ${r.name}`)).toEqual([
+        'vercel:index/projectDomain:ProjectDomain web-domain',
+      ]);
+    }
+  );
+
+  test('on prod every child is protected, and every child but the project domain is retained', async () => {
+    expect.assertions(1);
     const { resources } = await vercelIn('prod', stageArgs('prod'));
-    const children = resources.filter((r) => r.custom);
-    expect(children).toHaveLength(5);
-    expect(children.filter((r) => !r.protect || !r.retainOnDelete)).toEqual([]);
+    const children = resources.filter((r) => r.custom).sort((a, b) => a.name.localeCompare(b.name));
+    // A retained domain would stay on the old project on a delete-first replace and block the new project's claim.
+    expect(children.map((r) => [r.name, r.protect, r.retainOnDelete])).toEqual([
+      ['web-cname', true, true],
+      ['web-domain', true, false],
+      ['web-env-APP_BASE_URL', true, true],
+      ['web-env-BETTER_AUTH_SECRET', true, true],
+      ['web-env-DATABASE_URL', true, true],
+    ]);
   });
 
   test('refuses a secret-looking name as a plain var', async () => {

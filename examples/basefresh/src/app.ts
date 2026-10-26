@@ -36,7 +36,8 @@ export function basefresh(inputs: BasefreshInputs): Record<string, pulumi.Input<
         devCommand: 'cd ../.. && pnpm dev:web',
       },
     });
-    // One Operators per cluster: `shared` for the staging cluster, `prod` for the production cluster.
+    // One Operators per cluster: `shared` for the staging cluster, `prod` for the production cluster. basefresh owns the
+    // group only because it is alone on its cluster; on a cluster another product owns, it constructs no Operators.
     new Operators('operators', { stage, adminUrl: inputs.pgAdminUrl, members: inputs.operators ?? [] });
     return {
       projectId: web.projectId,
