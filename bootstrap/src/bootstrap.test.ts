@@ -314,10 +314,13 @@ describe('provider enum inputs', () => {
     ],
   ];
 
+  // One assertion per value, counted: deleting the per-value check fails the count, and deleting the count leaves the
+  // per-value check failing on a misspelled value.
   test.each(ENUMS)('%s is spelled as the provider accepts it', async (type, value, allowed) => {
     const { resources } = await run(stg);
-    const values = resources.filter((r) => r.type === type).map(value);
+    const values = resources.filter((r) => r.type === type).map((r) => [r.name, value(r)] as const);
+    expect.assertions(values.length + 1);
     expect(values.length).toBeGreaterThan(0);
-    expect(values.filter((v) => !allowed.includes(v as string))).toEqual([]);
+    for (const [name, v] of values) expect([name, v]).toEqual([name, expect.toBeOneOf(allowed)]);
   });
 });
