@@ -120,11 +120,16 @@ describe('Worker', () => {
     ).rejects.toThrow(OwnershipError);
   });
 
-  test('on prod every child is protected and retained', async () => {
+  test('on prod every child is protected, and every child but the custom domain is retained', async () => {
+    expect.assertions(1);
     const { resources } = await workerIn('prod', { hostname: 'uploads-basefresh.pebbletech.my' });
-    const children = resources.filter((r) => r.custom);
-    expect(children).toHaveLength(3);
-    expect(children.filter((r) => !r.protect || !r.retainOnDelete)).toEqual([]);
+    const children = resources.filter((r) => r.custom).sort((a, b) => a.name.localeCompare(b.name));
+    // A retained domain would leave the provider on a delete-first replace and block its replacement's hostname.
+    expect(children.map((r) => [r.name, r.protect, r.retainOnDelete])).toEqual([
+      ['uploads', true, true],
+      ['uploads-bucket', true, true],
+      ['uploads-domain', true, false],
+    ]);
   });
 
   test('outputs are registered', async () => {

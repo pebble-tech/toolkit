@@ -98,10 +98,12 @@ export class Worker extends pulumi.ComponentResource {
     );
     // A hostname has one custom domain, so a replacement (a new `service`, i.e. a renamed script) must delete the old
     // one first; the default create-first fails on the duplicate. The hostname is unserved for the seconds in between.
+    // Never retained, even on prod: a retained domain is only dropped from state, so the delete would not free the
+    // hostname. `protect` still guards it on prod.
     new cloudflare.WorkersCustomDomain(
       `${name}-domain`,
       { accountId: args.accountId, zoneId: args.zoneId, hostname: args.hostname, service: script.scriptName },
-      child({ deleteBeforeReplace: true })
+      { ...child({ deleteBeforeReplace: true }), retainOnDelete: false }
     );
 
     this.scriptName = scriptName;
