@@ -53,10 +53,12 @@ describe('Worker', () => {
     });
   });
 
-  test.each(['staging', 'prod'])(
+  test.each([
+    ['staging', 'uploads-basefresh-stg.pebbletech.my'],
+    ['prod', 'uploads-basefresh.pebbletech.my'],
+  ])(
     '%s replaces the custom domain delete-first, and nothing else: its hostname is unique',
-    async (stack) => {
-      const hostname = stack === 'prod' ? 'uploads-basefresh.pebbletech.my' : 'uploads-basefresh-stg.pebbletech.my';
+    async (stack, hostname) => {
       const { resources } = await workerIn(stack, { hostname });
       expect(resources.filter((r) => r.deleteBeforeReplace).map((r) => `${r.type} ${r.name}`)).toEqual([
         'cloudflare:index/workersCustomDomain:WorkersCustomDomain uploads-domain',
