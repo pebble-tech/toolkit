@@ -142,6 +142,17 @@ describe('VercelProject on staging and prod', () => {
     });
   });
 
+  test.each(['staging', 'prod'])(
+    '%s replaces the project domain delete-first, and nothing else: a hostname is on one project',
+    async (stack) => {
+      expect.assertions(1);
+      const { resources } = await vercelIn(stack, stageArgs(stack));
+      expect(resources.filter((r) => r.deleteBeforeReplace).map((r) => `${r.type} ${r.name}`)).toEqual([
+        'vercel:index/projectDomain:ProjectDomain web-domain',
+      ]);
+    }
+  );
+
   test('on prod every child is protected and retained', async () => {
     const { resources } = await vercelIn('prod', stageArgs('prod'));
     const children = resources.filter((r) => r.custom);
