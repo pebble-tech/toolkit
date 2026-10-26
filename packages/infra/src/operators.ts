@@ -10,7 +10,8 @@ export interface OperatorsArgs {
   /** Admin connection URL for the cluster, as for `Database`. */
   adminUrl: pulumi.Input<string>;
   /**
-   * SQL role names (PlanetScale role usernames, without the `.<branch>` suffix) of the people in `pebble_operators`.
+   * SQL role names of the people in `pebble_operators`: a PlanetScale role's username without its `.<branch>` suffix
+   * (`pscale_api_xxx`, not `pscale_api_xxx.main`). A name with a dot is refused.
    * Read them from stack config so they are not committed. Plain strings: each grant is named after its member, so
    * removing a name revokes exactly that membership on the next apply.
    */
@@ -31,6 +32,15 @@ export class Operators extends pulumi.ComponentResource {
     stage.requireKind('the operators group', ['shared', 'prod']);
     for (const member of members) {
       if (member.trim() === '') throw new OwnershipError('an operator member name cannot be empty');
+      // A PlanetScale login username is `<role>.<branch>`; the role is the part before the dot. Granting the full
+      // username fails only at apply, with `role "<role>.<branch>" does not exist`.
+      const dot = member.indexOf('.');
+      if (dot !== -1) {
+        throw new OwnershipError(
+          `operator member "${member}" is a login username, not a role: ` +
+            `drop the "${member.slice(dot)}" suffix and list "${member.slice(0, dot)}"`
+        );
+      }
     }
     const duplicate = members.find((member, index) => members.indexOf(member) !== index);
     if (duplicate) throw new OwnershipError(`operator member ${duplicate} is listed twice`);
