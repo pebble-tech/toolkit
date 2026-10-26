@@ -11,7 +11,7 @@ pinning a version; the guardrails are defaults it cannot turn off.
 | `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; a boundary other than the stage's own `<product>-<env>-boundary` in the current account (a typed `PermissionsBoundaryArn` from `Stage` or `DeployRole`, checked when it resolves, so `pulumi preview` fails). Timeouts above 29 s are clamped |
 | `Worker` | Workers script from a prebuilt module, R2 bucket `<product>-<env>-<kind>` (on prod, `adoptExisting` imports that same name instead of creating it), plain and secret bindings, custom domain (replaced delete-first, because a hostname has one custom domain: a new script name leaves the hostname unserved for a few seconds during the apply) | a secret-looking name in `vars` unless listed in `plainTextAllowed`; `adoptExisting` outside prod |
 | `DeployRole` | the GitHub OIDC role for one product and env, its inline policy, and the boundary policy its roles must carry. `preview` allows the state bucket and the KMS key only. `staging` and `prod` also allow Lambda, API Gateway, ACM, logs and IAM inside `<product>-<env>`. Takes `product`, `env`, the repo and the apex (the zone name): the trusted GitHub environment, the account's OIDC provider, the state bucket and paths (`pebble-<stg\|prd>-pulumi-state/<product>/<env>`, plus `<product>/shared` for staging) and the KMS key (`alias/pebble-<stg\|prd>-pulumi-<env>`) are derived | a product id that is not one DNS label, a `pebble` product, or an apex that is not lowercase labels with no leading or trailing dot |
-| `Operators` | the cluster's `pebble_operators` group (kept on destroy) and one membership grant per name in `members`, through the same admin provider as `Database`. See [Operators](#operators) | `pr-<n>` and `staging` (one stack per cluster owns the group: `shared` or `prod`); a second `Operators` in the same program; an empty or repeated member name |
+| `Operators` | the cluster's `pebble_operators` group (kept on destroy) and one membership grant per name in `members`, through the same admin provider as `Database`. See [Operators](#operators) | `pr-<n>` and `staging` (one stack per cluster owns the group: `shared` or `prod`); a second `Operators` in the same program; an empty or repeated member name; a member name with a dot (a PlanetScale login username: list the role before the dot) |
 
 Every component refuses a hostname or name outside its stage (`NamespaceError`), and every refusal is a
 `GuardrailError` subclass. On `prod` (and `shared`, which owns production's Vercel project) every child resource gets
@@ -67,9 +67,10 @@ const db = new Database('db', {
 ## Operators
 
 Membership of `pebble_operators` is code. `Operators` creates the group and grants it to each name in `members`;
-removing a name revokes that membership on the next apply. Use one `Operators` per cluster: in `shared` for the staging
-cluster and in `prod` for the production cluster. A program takes one; a second is refused, naming the first, because
-two lists would manage the same memberships. Apply it before any other stack on a fresh cluster, and in `prod`
+removing a name revokes that membership on the next apply. Use one `Operators` per cluster, in the program of the one
+product that owns the group there ([below](#a-second-product-on-a-cluster)): in `shared` for the staging cluster and in
+`prod` for the production cluster. A program takes one; a second is refused, naming the first, because two lists
+would manage the same memberships. Apply it before any other stack on a fresh cluster, and in `prod`
 construct it before `Database`: a `Database` on a cluster without the group fails at its `db-operators` grant with
 `role "pebble_operators" does not exist`.
 
@@ -81,10 +82,22 @@ new Operators('operators', {
 });
 ```
 
-`members` are SQL role names (PlanetScale role usernames without the `.<branch>` suffix). Read them from stack config
+`members` are SQL role names. PlanetScale shows a role's login username as `<role>.<branch>` (for example
+`pscale_api_44lpekcp7tl0.main`); copy the part before the dot (`pscale_api_44lpekcp7tl0`). A name with a dot is
+refused, because the grant would fail at apply with `role "<role>.<branch>" does not exist`. Read them from stack config
 (`pulumi config set --path 'operators[0]' <role>`), so the names are not committed in source. The group is kept when
 the stack is destroyed, because other stacks' databases are granted to it. The member grants are not protected, even
 on `shared` and `prod`, so a removal goes through.
+
+### A second product on a cluster
+
+The group belongs to the cluster, but `Operators` lives in a product's program, so exactly one product's stacks own it
+on each cluster. On `pebble-stg` and `pebble-prd-shared` that product is base-app: its `shared` stack owns the group
+on `pebble-stg` and its `prod` stack on `pebble-prd-shared`, and its list is the cluster's list. A second product on
+either cluster constructs no `Operators` (its `Database` grants its owner to the existing group), and its people are
+added to base-app's list. A second `Operators` on the same cluster would fail at apply creating a group that already
+exists, and if the group were imported instead, removing a name from one list would revoke a membership the other
+list still holds. Moving the group into a per-cluster program that no product owns is planned for 1.0.
 
 Grant by hand only in an emergency: the list does not know about a hand grant, so the next apply neither removes nor
 reports it. The fallback when no stack can run is one line, run as the admin:
@@ -99,13 +112,15 @@ leaves the membership in place.
 
 ## Ownership
 
-- `shared`: the Vercel project and its custom environments, and the staging cluster's `Operators`. Apply it before
+- `shared`: the Vercel project and its custom environments, and the staging cluster's `Operators` when this product
+  owns the group ([A second product on a cluster](#a-second-product-on-a-cluster)). Apply it before
   `staging`, `prod` and previews. It has no deploy role
   of its own. The staging role applies it, so its state lives at `<product>/shared` in `pebble-stg-pulumi-state` and
   its secrets use the staging key (`stateKeyAlias('shared')` is `alias/pebble-stg-pulumi-staging`).
 - `pr-<n>`: a database and its owner role. Previews pass env to `vercel deploy`.
 - `staging`, `prod`: database, its owner role and the runtime role's grants (the runtime role itself is
-  PlanetScale's), API, Worker, web env vars and domain. `prod` also applies the production cluster's `Operators`.
+  PlanetScale's), API, Worker, web env vars and domain. `prod` also applies the production cluster's `Operators`,
+  under the same rule.
 - `infra/bootstrap` (a separate project, applied by hand with SSO): one `DeployRole` per env (`preview`, `staging`,
   `prod`). `ApiFunction` defaults its boundary to `<product>-<env>-boundary` in the current account, the policy the
   deploy role created.
