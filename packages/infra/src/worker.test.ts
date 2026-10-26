@@ -53,6 +53,17 @@ describe('Worker', () => {
     });
   });
 
+  test.each(['staging', 'prod'])(
+    '%s replaces the custom domain delete-first, and nothing else: its hostname is unique',
+    async (stack) => {
+      const hostname = stack === 'prod' ? 'uploads-basefresh.pebbletech.my' : 'uploads-basefresh-stg.pebbletech.my';
+      const { resources } = await workerIn(stack, { hostname });
+      expect(resources.filter((r) => r.deleteBeforeReplace).map((r) => `${r.type} ${r.name}`)).toEqual([
+        'cloudflare:index/workersCustomDomain:WorkersCustomDomain uploads-domain',
+      ]);
+    }
+  );
+
   test('the script uploads the bundle as a module, with its hash, flags and bindings', async () => {
     const { resources } = await workerIn('staging');
     const worker = byType(resources, 'cloudflare:index/workersScript:WorkersScript')[0];
