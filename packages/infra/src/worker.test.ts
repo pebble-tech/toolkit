@@ -59,6 +59,7 @@ describe('Worker', () => {
   ])(
     '%s replaces the custom domain delete-first, and nothing else: its hostname is unique',
     async (stack, hostname) => {
+      expect.assertions(1);
       const { resources } = await workerIn(stack, { hostname });
       expect(resources.filter((r) => r.deleteBeforeReplace).map((r) => `${r.type} ${r.name}`)).toEqual([
         'cloudflare:index/workersCustomDomain:WorkersCustomDomain uploads-domain',
