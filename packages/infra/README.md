@@ -201,7 +201,7 @@ pnpm --dir infra exec pebble-infra up staging --entries dist/entries.js --clear-
 
 | Command | Does |
 |---|---|
-| `prepare <stack> [--clear-lock] [--entries <module>]` | selects the stack, or creates it with `PULUMI_SECRETS_PROVIDER`; restores its secrets key from the state on a fresh checkout; starts a preview again from nothing when an interrupted run left only its Stage and database. A `pr-<n>` stack needs `--entries`, for `previewDatabase` |
+| `prepare <stack> [--clear-lock] [--entries <module>]` | selects the stack, or creates it with `PULUMI_SECRETS_PROVIDER`; restores its secrets key from the state on a fresh checkout; starts a preview again from nothing when an interrupted run left only its Stage and database. A `pr-<n>` stack needs `--entries`, for `previewDatabase`; `--preview-only` (next row) does not |
 | `prepare <stack> --preview-only` | selects the stack and restores its key; never clears a lock, creates, removes or resets, and refuses a stack that is missing, never updated or has pending operations |
 | `configure <stack> --entries <module>` | writes the stack config from the product's entries module; values go to Pulumi through stdin |
 | `up <stack> --entries <module> [--clear-lock] [--outputs <name>]` | `prepare`, `configure`, `pulumi up` (previews with `--refresh`, tried again twice on a template1 collision), then the outputs to `$GITHUB_OUTPUT` when it is set |
