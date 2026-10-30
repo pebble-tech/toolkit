@@ -363,6 +363,7 @@ describe('up', () => {
       true,
       [
         `::add-mask::${databaseUrl}`,
+        '::add-mask::-----BEGIN-----%0Acert-line-0c9d%0A-----END-----',
         '::add-mask::-----BEGIN-----',
         '::add-mask::cert-line-0c9d',
         '::add-mask::-----END-----',
@@ -403,6 +404,24 @@ describe('up', () => {
     expect([result.code, result.stdout.split('\n').filter((l) => l.startsWith('::add-mask::'))]).toEqual([
       0,
       ['::add-mask::db-url-77', '::add-mask::prj_1'],
+    ]);
+  });
+
+  test('a mask escapes %, CR and LF as @actions/core does, so it matches the value written', async () => {
+    const p = product();
+    const secret = 'p%0Aq\rr%25s';
+    p.plan([{ result: 'ok', outputs: { token: { secret } } }]);
+    const result = await p.run(['up', 'staging', '--entries', 'entries.mjs'], {
+      ...SECRETS,
+      GITHUB_OUTPUT: p.files.output,
+    });
+    const written = readFileSync(p.files.output, 'utf8');
+    const delimiter = /^token<<(ghadelimiter_[0-9a-f-]+)$/m.exec(written)?.[1];
+    // What `core.setSecret('p%0Aq\rr%25s')` (@actions/core 1.11.1) prints.
+    expect([result.code, result.stdout.split('\n').filter((l) => l.startsWith('::add-mask::')), written]).toEqual([
+      0,
+      ['::add-mask::p%250Aq%0Dr%2525s'],
+      `token<<${delimiter}\n${secret}\n${delimiter}\n`,
     ]);
   });
 

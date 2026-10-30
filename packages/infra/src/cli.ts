@@ -161,13 +161,18 @@ async function loadEntries(cwd: string, path: string): Promise<EntriesModule> {
 /** `databaseUrl` → `database_url`: a camelCase output key as a snake_case step output name. */
 const outputName = (key: string) => key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 
+/** Workflow-command data escaped as `@actions/core` escapes it: `%` first, then CR and LF. */
+const commandData = (value: string) => value.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+
 /**
- * Appends the outputs to `$GITHUB_OUTPUT`. Every line of every secret value is masked on stdout first, so the runner
- * hides it before any later step can print it; a value with a line break uses the heredoc form.
+ * Appends the outputs to `$GITHUB_OUTPUT`. Every secret value is masked on stdout first, so the runner hides it before
+ * any later step can print it: the whole value as `core.setSecret` writes it, and each line of a multi-line value on
+ * its own, since the runner masks log lines. A value with a line break uses the heredoc form.
  */
 function writeGithubOutput(outputs: StackOutput[], file: string, stdout: (text: string) => void): void {
-  for (const output of outputs.filter((o) => o.secret)) {
-    for (const line of output.value.split(/\r?\n/)) if (line.trim()) stdout(`::add-mask::${line}\n`);
+  for (const { value } of outputs.filter((o) => o.secret)) {
+    const lines = value.split(/\r?\n/).filter((line) => line.trim() && line !== value);
+    for (const part of [value, ...lines]) if (part.trim()) stdout(`::add-mask::${commandData(part)}\n`);
   }
   const text = outputs
     .map(({ key, value }) => {
