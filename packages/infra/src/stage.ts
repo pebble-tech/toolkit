@@ -1,7 +1,10 @@
 import * as aws from '@pulumi/aws';
 import * as pulumi from '@pulumi/pulumi';
 
-import { NamespaceError, OwnershipError, StageError } from './errors.js';
+import { NamespaceError, OwnershipError } from './errors.js';
+import { assertProduct, databaseName, LABEL, parseEnv } from './names.js';
+
+export { assertProduct };
 
 /** `pr-<n>` for a pull-request preview, `staging`, `prod`, or `shared` for the stack that owns cross-stage resources. */
 export type StageEnv = 'staging' | 'prod' | 'shared' | `pr-${number}`;
@@ -85,32 +88,6 @@ export function githubEnvironment(env: DeployEnv): string {
 }
 
 const SLUG = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
-/** One DNS label. A hyphen would let `*-<product>.*` match another product that ends in `-<product>`. */
-const LABEL = /^[a-z][a-z0-9]{1,}$/;
-const PREVIEW = /^pr-([1-9][0-9]*)$/;
-
-/** Throws StageError unless `product` is one DNS label outside the reserved `pebble` prefix. */
-export function assertProduct(product: string): void {
-  if (!LABEL.test(product)) {
-    throw new StageError(
-      `product id "${product}" must be one DNS label: lowercase letters and digits, no hyphen, at least two characters`
-    );
-  }
-  // `staging` or `pr` as the whole id would let one product's names fall inside another's `<product>-<env>-*` scope.
-  if (['pr', 'staging', 'prod', 'shared'].includes(product)) {
-    throw new StageError(`product id "${product}" is an env word (pr, staging, prod, shared)`);
-  }
-  if (product.startsWith('pebble')) {
-    throw new StageError(`product id "${product}" starts with "pebble", which is reserved for shared infrastructure`);
-  }
-}
-
-function parseEnv(stack: string): { env: StageEnv; kind: StageKind; pr?: number } {
-  if (stack === 'staging' || stack === 'prod' || stack === 'shared') return { env: stack, kind: stack };
-  const preview = PREVIEW.exec(stack);
-  if (preview) return { env: stack as StageEnv, kind: 'preview', pr: Number(preview[1]) };
-  throw new StageError(`stack "${stack}" is not one of pr-<n>, staging, prod or shared`);
-}
 
 function assertSlug(what: string, value: string): void {
   if (!SLUG.test(value)) throw new NamespaceError(`${what} "${value}" must be lowercase kebab case`);
@@ -197,8 +174,7 @@ export class Stage extends pulumi.ComponentResource {
   /** Postgres database name: `<product>_stg`, `<product>_prd` or `<product>_pr_<n>`, dashes as underscores. */
   databaseName(): string {
     this.requireKind('a database', ['preview', 'staging', 'prod']);
-    const suffix = this.isProd ? 'prd' : this.kind === 'staging' ? 'stg' : `pr_${this.pr}`;
-    return `${this.product.replaceAll('-', '_')}_${suffix}`;
+    return databaseName(this.product, this.env);
   }
 
   /** The deploy role that serves this stage. `shared` has none of its own (staging's role applies it). */
