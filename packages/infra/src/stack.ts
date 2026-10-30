@@ -76,6 +76,12 @@ export interface StackContext {
   projectDir: string;
   /** Product id; names the preview database (`<product>_pr_<n>`), as `Stage` does. */
   product: string;
+  /**
+   * The product's previews have a `Database` (`EntriesModule.previewDatabase`): `pr-<n>` stacks then drop a leftover
+   * database before they are created, check the admin before `up`, and drop the database on remove. Without it the
+   * steps never reach Postgres.
+   */
+  previewDatabase: boolean;
   /** `s3://<bucket>/<path>?region=…`, the backend `pulumi login` used. */
   backendUrl: string;
   /** `awskms://alias/…?region=…`, the key new stacks encrypt their secrets with. */
@@ -127,18 +133,23 @@ function clearLock(ctx: StackContext, stack: string): void {
 }
 
 /**
- * What a preview stack may hold for the reset to start it again with `stack rm --force`: the database, its role and
- * password, the Stage and Database components, and their providers. The SQL drop removes all of it.
+ * What a preview stack may hold for the reset to remove its state with `stack rm --force`: the stack and `Stage`, and
+ * when the previews have a database, the database, its role and password, the `Database` component and their
+ * providers, which the SQL drop removes. Nothing else holds a cloud resource.
  */
+const STAGE_ONLY = /^(pulumi:pulumi:Stack|pebbletech:index:Stage)$/;
 const DATABASE_CLOSURE =
   /^(pulumi:pulumi:Stack|pulumi:providers:(postgresql|random)|postgresql:.+|random:.+|pebbletech:index:(Stage|Database))$/;
 
-/** Every type in the state, or in an operation still pending, outside the database closure; untyped counts. */
-function foreignTypes(state: Deployment): string[] {
+/** Every type in the state, or in an operation still pending, that its removal would orphan; untyped counts. */
+function foreignTypes(ctx: StackContext, state: Deployment): string[] {
+  const closure = ctx.previewDatabase ? DATABASE_CLOSURE : STAGE_ONLY;
   const resources = [...(state.resources ?? []), ...(state.pending_operations ?? []).map((op) => op.resource ?? {})];
   const types = resources.map((resource) => resource.type ?? '(a resource with no type)');
-  return [...new Set(types.filter((type) => !DATABASE_CLOSURE.test(type)))].sort();
+  return [...new Set(types.filter((type) => !closure.test(type)))].sort();
 }
+
+const beyond = (ctx: StackContext) => (ctx.previewDatabase ? 'beyond its database' : 'beyond its Stage');
 
 /**
  * `<product>_pr_<n>` and its role, dropped with the admin URL in PG_ADMIN_URL; a no-op when neither exists. Throws,
@@ -204,7 +215,7 @@ export function prepare(ctx: StackContext, stack: string, options: PrepareOption
     );
   }
   if (!present) {
-    if (preview) dropPreviewDatabase(ctx, stack);
+    if (preview && ctx.previewDatabase) dropPreviewDatabase(ctx, stack);
     init(ctx, stack);
     ctx.log(`created stack ${stack}`);
     return 'created';
@@ -229,14 +240,14 @@ export function prepare(ctx: StackContext, stack: string, options: PrepareOption
   const pending = state.pending_operations?.length ?? 0;
   const resources = state.resources?.length ?? 0;
   if (preview && (pending > 0 || resources === 0)) {
-    const foreign = foreignTypes(state);
+    const foreign = foreignTypes(ctx, state);
     if (foreign.length > 0) {
       throw new Error(
-        `stack ${stack} holds ${foreign.join(', ')}, beyond its database; a reset would leave ${foreign.length === 1 ? 'it' : 'them'} running. Run \`pulumi refresh -s ${stack}\` and check each pending operation, or remove the preview (pebble-infra remove ${stack})`
+        `stack ${stack} holds ${foreign.join(', ')}, ${beyond(ctx)}; a reset would leave ${foreign.length === 1 ? 'it' : 'them'} running. Run \`pulumi refresh -s ${stack}\` and check each pending operation, or remove the preview (pebble-infra remove ${stack})`
       );
     }
     // The drop first: if it is refused, the state stays for an authorized cleanup.
-    dropPreviewDatabase(ctx, stack);
+    if (ctx.previewDatabase) dropPreviewDatabase(ctx, stack);
     must(ctx, ['stack', 'rm', stack, '--force', '--yes', '--remove-backups']);
     init(ctx, stack);
     ctx.log(`reset stack ${stack} (${pending} pending operations, ${resources} resources)`);
@@ -255,7 +266,7 @@ export function prepare(ctx: StackContext, stack: string, options: PrepareOption
     ctx.log(`created stack ${stack} again: it was never updated`);
     return 'reset';
   }
-  if (preview) checkPreviewDatabase(ctx, stack);
+  if (preview && ctx.previewDatabase) checkPreviewDatabase(ctx, stack);
   restoreSecretsConfig(ctx, stack, state);
   return 'ready';
 }
@@ -281,7 +292,7 @@ export function remove(ctx: StackContext, stack: string, options: { clearLock?: 
     }
   }
   // Always: covers a database from an earlier workflow, one leaked by an interrupted create, a failed destroy.
-  dropPreviewDatabase(ctx, stack);
+  if (ctx.previewDatabase) dropPreviewDatabase(ctx, stack);
   if (present) must(ctx, ['stack', 'rm', stack, '--force', '--yes', '--remove-backups']);
   sweepState(ctx, stack, state);
 }

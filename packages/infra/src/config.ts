@@ -31,6 +31,12 @@ export interface EntriesModule {
   derive?: (values: ConfigValues, stack: string) => ConfigValues;
   /** Namespace for keys that name none; defaults to the product id. */
   namespace?: string;
+  /**
+   * `true` when the program creates a `Database` on `pr-<n>` stacks. `pebble-infra` then drops a database an earlier
+   * run left (`<product>_pr_<n>`) before it creates the stack, checks before `up` that `PG_ADMIN_URL`'s admin could drop
+   * it, and drops it on `remove`. Left out, the CLI never reaches Postgres and needs no `PG_ADMIN_URL`.
+   */
+  previewDatabase?: boolean;
 }
 
 export interface ConfigWrite {

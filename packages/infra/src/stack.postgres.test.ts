@@ -98,6 +98,7 @@ function context(destroyOutput = '', resources = 0) {
     run,
     projectDir: mkdtempSync(join(tmpdir(), 'pebble-infra-remove-')),
     product: 'acme',
+    previewDatabase: true,
     backendUrl: 's3://acme-state/acme/preview?region=xx-test-1',
     secretsProvider: 'awskms://alias/k',
     log: (line) => log.push(line),

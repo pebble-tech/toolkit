@@ -141,6 +141,7 @@ function context(world: World): StackContext {
     run: world.run,
     projectDir: mkdtempSync(join(tmpdir(), 'pebble-infra-stack-')),
     product: 'acme',
+    previewDatabase: true,
     backendUrl: BACKEND,
     secretsProvider: PROVIDER,
     log: () => {},

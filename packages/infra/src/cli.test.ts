@@ -32,7 +32,21 @@ export function derive(values) {
   if (!values.DATABASE_RUNTIME_URL) return {};
   return { PG_RUNTIME_ROLE: decodeURIComponent(new URL(values.DATABASE_RUNTIME_URL).username).split('.')[0] };
 }
+export const previewDatabase = true;
 `;
+
+/** A product whose previews have no database: a Worker and its Stage, no Postgres entry, no previewDatabase. */
+const DATABASE_FREE = `
+export const entries = [
+  { key: 'aws:region', env: 'AWS_REGION', secret: false, required: true, stacks: ['shared', 'preview', 'staging', 'prod'] },
+];
+`;
+const WORKER_PREVIEW = [
+  'pulumi:pulumi:Stack',
+  'pebbletech:index:Stage',
+  'pebbletech:index:Worker',
+  'cloudflare:index/workersScript:WorkersScript',
+];
 
 const SECRETS = {
   AWS_REGION: 'xx-test-1',
@@ -62,6 +76,7 @@ function product(name = 'acme') {
   }
   writeFileSync(join(infra, 'Pulumi.yaml'), `name: ${name}\nruntime: nodejs\nmain: dist/index.js\n`);
   writeFileSync(join(infra, 'entries.mjs'), ENTRIES);
+  writeFileSync(join(infra, 'free.mjs'), DATABASE_FREE);
   const files = { log: join(dir, 'calls.jsonl'), plan: join(dir, 'plan.json'), output: join(dir, 'github-output') };
   writeFileSync(files.log, '');
   const env = {
@@ -490,6 +505,14 @@ describe('usage', () => {
     [['up', 'prod'], 'up needs --entries <module>'],
     [['outputs', 'prod', '--clear-lock'], 'outputs takes no --clear-lock'],
     [['prepare'], 'prepare takes a stack'],
+    [
+      ['prepare', 'pr-7'],
+      'prepare pr-7 needs --entries <module>: its previewDatabase says whether the preview has a database',
+    ],
+    [
+      ['remove', 'pr-7', '--clear-lock'],
+      'remove pr-7 needs --entries <module>: its previewDatabase says whether the preview has a database',
+    ],
   ])('%j exits 2: %s', async (argv, message) => {
     const p = product();
     const result = await p.run(argv);
@@ -503,6 +526,32 @@ describe('usage', () => {
       1,
       'only pr-<n> stacks are removed this way (got staging)\n',
       [],
+    ]);
+  });
+});
+
+describe('a product whose previews have no database', () => {
+  test('up and remove a preview with no PG_ADMIN_URL, never reaching Postgres', async () => {
+    const p = product();
+    p.plan([{ result: 'ok', resources: WORKER_PREVIEW }]);
+    const deployed = await p.run(['up', 'pr-12345', '--entries', 'free.mjs'], { AWS_REGION: 'xx-test-1' });
+    const removed = await p.run(['remove', 'pr-12345', '--entries', 'free.mjs', '--clear-lock']);
+    expect([deployed.code, deployed.stderr.split('\n')[0], removed.code, p.stateObjects()]).toEqual([
+      0,
+      'created stack pr-12345',
+      0,
+      [],
+    ]);
+  });
+
+  test('a cancelled update holding only its Stage is reset without Postgres', async () => {
+    const p = product();
+    p.plan([{ result: 'interrupt', resources: ['pulumi:pulumi:Stack'], pending: ['pebbletech:index:Stage'] }]);
+    await p.run(['up', 'pr-12346', '--entries', 'free.mjs'], { AWS_REGION: 'xx-test-1' });
+    const result = await p.run(['prepare', 'pr-12346', '--entries', 'free.mjs', '--clear-lock']);
+    expect([result.code, result.stderr]).toEqual([
+      0,
+      'reset stack pr-12346 (1 pending operations, 1 resources)\nstack pr-12346: reset\n',
     ]);
   });
 });
@@ -538,7 +587,7 @@ describe('preview stacks (Postgres)', () => {
     const p = product();
     await sql('drop database if exists acme_pr_81001 with (force)');
     await sql('create database acme_pr_81001');
-    const result = await p.run(['prepare', 'pr-81001'], { PG_ADMIN_URL: adminUrl() });
+    const result = await p.run(['prepare', 'pr-81001', '--entries', 'entries.mjs'], { PG_ADMIN_URL: adminUrl() });
     expect([result.code, result.stderr, await databaseExists('acme_pr_81001')]).toEqual([
       0,
       'dropped acme_pr_81001 and its role if they existed\ncreated stack pr-81001\nstack pr-81001: created\n',
@@ -551,7 +600,7 @@ describe('preview stacks (Postgres)', () => {
     const p = product();
     await sql('drop database if exists acme_pr_81002 with (force)');
     await sql('create database acme_pr_81002');
-    const result = await p.run(['prepare', 'pr-81002'], {
+    const result = await p.run(['prepare', 'pr-81002', '--entries', 'entries.mjs'], {
       PEBBLE_INFRA_VALUES: JSON.stringify({ PG_ADMIN_URL: adminUrl() }),
     });
     expect([result.code, await databaseExists('acme_pr_81002')]).toEqual([0, false]);
@@ -610,7 +659,9 @@ describe('preview stacks (Postgres)', () => {
       },
     ]);
     await p.run(['up', 'pr-81006', '--entries', 'entries.mjs'], { ...SECRETS, PG_ADMIN_URL: adminUrl() });
-    const result = await p.run(['prepare', 'pr-81006', '--clear-lock'], { PG_ADMIN_URL: adminUrl() });
+    const result = await p.run(['prepare', 'pr-81006', '--entries', 'entries.mjs', '--clear-lock'], {
+      PG_ADMIN_URL: adminUrl(),
+    });
     expect([result.code, result.stderr.split('\n').at(-2)]).toEqual([0, 'stack pr-81006: reset']);
   });
 
@@ -626,7 +677,9 @@ describe('preview stacks (Postgres)', () => {
     ]);
     await p.run(['up', 'pr-81007', '--entries', 'entries.mjs'], { ...SECRETS, PG_ADMIN_URL: adminUrl() });
     const before = p.commands().length;
-    const result = await p.run(['prepare', 'pr-81007', '--clear-lock'], { PG_ADMIN_URL: adminUrl() });
+    const result = await p.run(['prepare', 'pr-81007', '--entries', 'entries.mjs', '--clear-lock'], {
+      PG_ADMIN_URL: adminUrl(),
+    });
     expect([
       result.code,
       result.stderr,
@@ -648,7 +701,9 @@ describe('preview stacks (Postgres)', () => {
     await sql('drop database if exists acme_pr_81008 with (force)');
     await sql('create database acme_pr_81008');
     const before = p.stateObjects();
-    const result = await p.run(['remove', 'pr-81008', '--clear-lock'], { PG_ADMIN_URL: adminUrl() });
+    const result = await p.run(['remove', 'pr-81008', '--entries', 'entries.mjs', '--clear-lock'], {
+      PG_ADMIN_URL: adminUrl(),
+    });
     expect([
       before.length > 2,
       result.code,
@@ -663,7 +718,7 @@ describe('preview stacks (Postgres)', () => {
     const p = product();
     await p.run(['up', 'pr-81009', '--entries', 'entries.mjs'], { ...SECRETS, PG_ADMIN_URL: adminUrl() });
     p.lock('pr-81009');
-    const result = await p.run(['remove', 'pr-81009'], { PG_ADMIN_URL: adminUrl() });
+    const result = await p.run(['remove', 'pr-81009', '--entries', 'entries.mjs'], { PG_ADMIN_URL: adminUrl() });
     expect([
       result.code,
       matching(p.commands(), /cancel/),

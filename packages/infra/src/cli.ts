@@ -2,11 +2,12 @@
 // product's Pulumi.yaml (`pnpm --dir infra exec pebble-infra <command>`).
 //
 //   prepare <stack> [--preview-only] [--clear-lock]   select or create the stack, reset a broken preview stack
+//                                                     (pr-<n>: --entries <module> too, for previewDatabase)
 //   configure <stack> --entries <module>              write the stack config from the product's entries module
 //   up <stack> --entries <module> [--clear-lock]      prepare, configure, pulumi up, outputs to $GITHUB_OUTPUT
 //   preview <stack> --entries <module> [--summary]    prepare --preview-only, configure, pulumi preview --diff
 //   outputs <stack> [--github-output] [--if-exists]   the stack's outputs, before or after up
-//   remove pr-<n> [--clear-lock]                      destroy a preview stack and leave nothing in its state path
+//   remove pr-<n> --entries <module> [--clear-lock]   destroy a preview stack and leave nothing in its state path
 //   pg-database <drop|check> <name> [--owner <role>]  drop a database and its role, or check that the admin could
 //
 // The product id is Pulumi.yaml's `name` unless --product names it; the outputs export is `outputs` unless --outputs
@@ -70,24 +71,24 @@ const FLAGS = {
 
 type Flag = keyof typeof FLAGS;
 
-/** Each command's flags; `entries` is required where it is listed. */
+/** Each command's flags. `entries` is required for configure, up and preview, and for prepare and remove on `pr-<n>`. */
 const COMMANDS: Record<string, readonly Flag[]> = {
-  prepare: ['preview-only', 'clear-lock', 'product'],
+  prepare: ['preview-only', 'clear-lock', 'entries', 'product'],
   configure: ['entries', 'product'],
   up: ['entries', 'clear-lock', 'product', 'outputs'],
   preview: ['entries', 'summary', 'product'],
   outputs: ['outputs', 'github-output', 'if-exists'],
-  remove: ['clear-lock', 'product'],
+  remove: ['clear-lock', 'entries', 'product'],
   'pg-database': ['owner'],
 };
 
 const USAGE = `usage: pebble-infra <command> <stack> [flags]
-  prepare <stack> [--preview-only | --clear-lock]
+  prepare <stack> [--preview-only | --clear-lock] [--entries <module>, required on pr-<n>]
   configure <stack> --entries <module>
   up <stack> --entries <module> [--clear-lock] [--outputs <name>]
   preview <stack> --entries <module> [--summary]
   outputs <stack> [--github-output] [--if-exists] [--outputs <name>]
-  remove pr-<n> [--clear-lock]
+  remove pr-<n> --entries <module> [--clear-lock]
   pg-database <drop|check> <name> [--owner <role>]
   --product <id> overrides Pulumi.yaml's name for prepare, configure, up, preview and remove
 `;
@@ -135,7 +136,7 @@ async function loadEntries(cwd: string, path: string): Promise<EntriesModule> {
   const fail = (what: string): never => {
     throw new Error(`${path}: ${what}`);
   };
-  const { entries, derive, namespace } = loaded;
+  const { entries, derive, namespace, previewDatabase } = loaded;
   if (!Array.isArray(entries)) return fail('exports no `entries` array');
   entries.forEach((entry: Record<string, unknown> | null, index) => {
     const valid =
@@ -153,7 +154,8 @@ async function loadEntries(cwd: string, path: string): Promise<EntriesModule> {
   });
   if (derive !== undefined && typeof derive !== 'function') fail('`derive` is not a function');
   if (namespace !== undefined && (typeof namespace !== 'string' || namespace === '')) fail('`namespace` is not a name');
-  return { entries, derive, namespace } as EntriesModule;
+  if (previewDatabase !== undefined && typeof previewDatabase !== 'boolean') fail('`previewDatabase` is not a boolean');
+  return { entries, derive, namespace, previewDatabase } as EntriesModule;
 }
 
 /** `databaseUrl` → `database_url`: a camelCase output key as a snake_case step output name. */
@@ -193,9 +195,21 @@ function parse(argv: string[]) {
   const arity = command === 'pg-database' ? 2 : 1;
   if (positionals.length !== arity)
     throw new UsageError(`${command} takes ${arity === 1 ? 'a stack' : 'drop|check and a name'}`);
-  if (allowed.includes('entries') && !flags.entries) throw new UsageError(`${command} needs --entries <module>`);
+  const stack = positionals[0]!;
+  const onPreview = command !== 'pg-database' && /^pr-[1-9][0-9]*$/.test(stack);
+  const needsEntries =
+    ['configure', 'up', 'preview'].includes(command) ||
+    (command === 'remove' && onPreview) ||
+    (command === 'prepare' && onPreview && !flags['preview-only']);
+  if (needsEntries && !flags.entries) {
+    throw new UsageError(
+      ['configure', 'up', 'preview'].includes(command)
+        ? `${command} needs --entries <module>`
+        : `${command} ${stack} needs --entries <module>: its previewDatabase says whether the preview has a database`
+    );
+  }
   if (flags['preview-only'] && flags['clear-lock']) throw new UsageError('--preview-only never clears a lock');
-  return { command, stack: positionals[0]!, positionals, flags };
+  return { command, stack, positionals, flags };
 }
 
 /** Runs one command; resolves to the process exit code (2 for a usage error). */
@@ -216,6 +230,7 @@ export async function main(argv: string[], io: CliIo = processIo()): Promise<num
     delete childEnv[VALUES];
     if (values.PG_ADMIN_URL !== undefined) childEnv.PG_ADMIN_URL = values.PG_ADMIN_URL;
     const run = processRunner({ cwd: io.cwd, env: childEnv });
+    const module = flags.entries ? await loadEntries(io.cwd, flags.entries) : undefined;
     const outputsName = flags.outputs ?? 'outputs';
     const product = () => {
       const id = flags.product ?? projectName(io.cwd);
@@ -227,10 +242,10 @@ export async function main(argv: string[], io: CliIo = processIo()): Promise<num
       const secretsProvider = io.env.PULUMI_SECRETS_PROVIDER?.trim();
       if (!backendUrl || !secretsProvider)
         throw new Error('PULUMI_BACKEND_URL and PULUMI_SECRETS_PROVIDER are required');
-      return { run, projectDir: io.cwd, product: product(), backendUrl, secretsProvider, log };
+      const previewDatabase = module?.previewDatabase === true;
+      return { run, projectDir: io.cwd, product: product(), previewDatabase, backendUrl, secretsProvider, log };
     };
-    const writeConfig = async () =>
-      configure(run, stack, await loadEntries(io.cwd, flags.entries!), { ...io.env, ...values }, product(), log);
+    const writeConfig = () => configure(run, stack, module!, { ...io.env, ...values }, product(), log);
     const stream = processStreamer({ cwd: io.cwd, env: childEnv, stdout: io.stdout, stderr: io.stderr });
 
     switch (command) {
@@ -240,12 +255,12 @@ export async function main(argv: string[], io: CliIo = processIo()): Promise<num
         );
         return 0;
       case 'configure':
-        await writeConfig();
+        writeConfig();
         return 0;
       case 'up': {
         const ctx = context();
         log(`stack ${stack}: ${prepare(ctx, stack, { clearLock: flags['clear-lock'] })}`);
-        await writeConfig();
+        writeConfig();
         await pulumiUp(stream, stack, log, io.sleep);
         if (io.env.GITHUB_OUTPUT) {
           const outputs = stackOutputs(run, stack, outputsName, { ifExists: true });
@@ -257,7 +272,7 @@ export async function main(argv: string[], io: CliIo = processIo()): Promise<num
       case 'preview': {
         if (flags.summary && !io.env.GITHUB_STEP_SUMMARY) throw new Error('--summary needs GITHUB_STEP_SUMMARY');
         log(`stack ${stack}: ${prepare(context(), stack, { previewOnly: true })}`);
-        await writeConfig();
+        writeConfig();
         const result = await stream('pulumi', ['preview', '--diff', '--color', 'never', '--stack', stack]);
         if (flags.summary) {
           const sha = io.env.GITHUB_SHA ? ` (${io.env.GITHUB_SHA})` : '';
