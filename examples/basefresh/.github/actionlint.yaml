@@ -1,6 +1,6 @@
 # actionlint 1.7.12 does not know a concurrency group's `queue` key, which GitHub reads: `queue: max` keeps every pending
 # run instead of only the newest.
 paths:
-  .github/workflows/**/*.yml:
+  "**/.github/workflows/*.yml":
     ignore:
       - 'unexpected key "queue" for "concurrency" section'
