@@ -4,7 +4,8 @@
 // refuses up, destroy and stack rm; destroy refuses pending operations; stack rm leaves its .json.bak behind.
 //
 // $FAKE_LOG gets one JSON line per call (argv, cwd, env, stdin). $FAKE_PLAN is a JSON array: each `up` takes the first
-// step ({ result: 'ok' | 'template1' | 'fail' | 'interrupt', resources?, pending?, outputs?, wholeSecret? }).
+// step for it ({ result: 'ok' | 'template1' | 'fail' | 'interrupt', resources?, pending?, outputs?, wholeSecret? }),
+// each `destroy` the first with `command: 'destroy'` ({ result: 'fail', message? }).
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -63,10 +64,12 @@ function requireStack(stack) {
   return state.checkpoint.latest;
 }
 
-function nextStep() {
+/** The first planned step for `command` (a step without `command` is for `up`), taken off the plan. */
+function nextStep(command) {
   const file = process.env.FAKE_PLAN;
   const plan = file && existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : [];
-  const step = plan.shift() ?? { result: 'ok' };
+  const index = plan.findIndex((step) => (step.command ?? 'up') === command);
+  const [step] = index === -1 ? [{ result: 'ok' }] : plan.splice(index, 1);
   if (file) writeFileSync(file, JSON.stringify(plan));
   return step;
 }
@@ -115,15 +118,21 @@ switch (verb) {
     const deployment = requireStack(stack);
     if (locked(stack)) fail('the stack is currently locked by 1 lock(s)');
     if ((deployment.pending_operations?.length ?? 0) > 0) fail('the current deployment has pending operations');
-    save(stack, { ...deployment, resources: [] });
+    const step = nextStep('destroy');
     history(stack, 'destroy.history');
+    if (step.result === 'fail') {
+      // A refused delete leaves the resource, and its state, where they were.
+      process.stdout.write(`Destroying (${stack})\n    error: ${step.message ?? 'delete refused'}\n`);
+      process.exit(255);
+    }
+    save(stack, { ...deployment, resources: [] });
     process.stdout.write('Destroying\nResources:\n    - destroyed\n');
     break;
   }
   case 'up': {
     const deployment = requireStack(stack);
     if (locked(stack)) fail('the stack is currently locked by 1 lock(s)');
-    const step = nextStep();
+    const step = nextStep('up');
     const secretsProviders = { type: 'cloud', state: { url: 'awskms://alias/fake', encryptedkey: 'a2V5' } };
     history(stack, 'update.history');
     if (step.result === 'template1') {

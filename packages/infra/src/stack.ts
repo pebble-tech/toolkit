@@ -133,9 +133,9 @@ function clearLock(ctx: StackContext, stack: string): void {
 }
 
 /**
- * What a preview stack may hold for the reset to remove its state with `stack rm --force`: the stack and `Stage`, and
- * when the previews have a database, the database, its role and password, the `Database` component and their
- * providers, which the SQL drop removes. Nothing else holds a cloud resource.
+ * What a preview stack may hold for its state to be removed with `stack rm --force` (the reset, or a remove whose
+ * destroy failed): the stack and `Stage`, and when the previews have a database, the database, its role and password,
+ * the `Database` component and their providers, which the SQL drop removes. Nothing else holds a cloud resource.
  */
 const STAGE_ONLY = /^(pulumi:pulumi:Stack|pebbletech:index:Stage)$/;
 const DATABASE_CLOSURE =
@@ -273,8 +273,10 @@ export function prepare(ctx: StackContext, stack: string, options: PrepareOption
 
 /**
  * Removes a preview stack and everything it made, whatever state an earlier run left: never created, locked (with
- * `clearLock`), interrupted mid-update, or complete. Ends by checking that no object for the stack is left in the
- * state path.
+ * `clearLock`), interrupted mid-update, or complete. When `pulumi destroy` fails, the state is removed only if what it
+ * still holds is the database closure, which the SQL drop removes; anything else (a Worker whose delete was refused)
+ * stops the remove by type and keeps the state for another run. Ends by checking that no object for the stack is left
+ * in the state path.
  */
 export function remove(ctx: StackContext, stack: string, options: { clearLock?: boolean } = {}): void {
   if (stackKind(stack) !== 'preview') throw new Error(`only pr-<n> stacks are removed this way (got ${stack})`);
@@ -288,6 +290,12 @@ export function remove(ctx: StackContext, stack: string, options: { clearLock?: 
     if (!destroyed.ok) {
       // Pulumi prints the failing step's error with its progress on stdout, not stderr.
       const output = `${destroyed.stdout}\n${destroyed.stderr}`.trim();
+      const foreign = foreignTypes(ctx, deployment(ctx, stack));
+      if (foreign.length > 0) {
+        throw new Error(
+          `pulumi destroy -s ${stack} failed and the stack still holds ${foreign.join(', ')}, ${beyond(ctx)}; its state is kept so another remove can finish once the cause is fixed:\n${output}`
+        );
+      }
       ctx.log(`pulumi destroy failed; the SQL drop below removes what the stack held:\n${output}`);
     }
   }

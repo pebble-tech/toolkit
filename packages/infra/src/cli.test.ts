@@ -554,6 +554,28 @@ describe('a product whose previews have no database', () => {
       'reset stack pr-12346 (1 pending operations, 1 resources)\nstack pr-12346: reset\n',
     ]);
   });
+
+  test('remove keeps the state and fails when destroy leaves a Worker behind', async () => {
+    const p = product();
+    p.plan([
+      { result: 'ok', resources: WORKER_PREVIEW },
+      { command: 'destroy', result: 'fail', message: 'cloudflare deletion refused: 403' },
+    ]);
+    await p.run(['up', 'pr-12347', '--entries', 'free.mjs'], { AWS_REGION: 'xx-test-1' });
+    const before = p.commands().length;
+    const result = await p.run(['remove', 'pr-12347', '--entries', 'free.mjs', '--clear-lock']);
+    expect([
+      result.code,
+      result.stderr.split('\n')[0],
+      matching(p.commands().slice(before), /stack rm|aws s3 rm/),
+      p.stateObjects().filter((o) => o.startsWith('stacks/')),
+    ]).toEqual([
+      1,
+      'pulumi destroy -s pr-12347 failed and the stack still holds cloudflare:index/workersScript:WorkersScript, pebbletech:index:Worker, beyond its Stage; its state is kept so another remove can finish once the cause is fixed:',
+      [],
+      ['stacks/acme/pr-12347.json'],
+    ]);
+  });
 });
 
 // ---- Preview stacks: the database closure reaches Postgres through the pg-database script. ----
