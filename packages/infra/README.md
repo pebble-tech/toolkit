@@ -201,27 +201,35 @@ pnpm --dir infra exec pebble-infra up staging --entries dist/entries.js --clear-
 
 | Command | Does |
 |---|---|
-| `prepare <stack> [--clear-lock]` | selects the stack, or creates it with `PULUMI_SECRETS_PROVIDER`; restores its secrets key from the state on a fresh checkout; starts a preview again from nothing when an interrupted run left only its database |
+| `prepare <stack> [--clear-lock] [--entries <module>]` | selects the stack, or creates it with `PULUMI_SECRETS_PROVIDER`; restores its secrets key from the state on a fresh checkout; starts a preview again from nothing when an interrupted run left only its Stage and database. A `pr-<n>` stack needs `--entries`, for `previewDatabase` |
 | `prepare <stack> --preview-only` | selects the stack and restores its key; never clears a lock, creates, removes or resets, and refuses a stack that is missing, never updated or has pending operations |
 | `configure <stack> --entries <module>` | writes the stack config from the product's entries module; values go to Pulumi through stdin |
 | `up <stack> --entries <module> [--clear-lock] [--outputs <name>]` | `prepare`, `configure`, `pulumi up` (previews with `--refresh`, tried again twice on a template1 collision), then the outputs to `$GITHUB_OUTPUT` when it is set |
 | `preview <stack> --entries <module> [--summary]` | `prepare --preview-only`, `configure`, `pulumi preview --diff`; `--summary` appends the diff to `$GITHUB_STEP_SUMMARY` |
 | `outputs <stack> [--github-output] [--if-exists] [--outputs <name>]` | prints the stack's `outputs` export with secrets hidden, or writes it to `$GITHUB_OUTPUT`; `--if-exists` exits 0 with nothing when the stack or the export does not exist yet (read before `up` to migrate first) |
-| `remove pr-<n> [--clear-lock]` | destroys a preview, drops its database and role, removes the stack and deletes every state object it left under the S3 backend path |
+| `remove pr-<n> --entries <module> [--clear-lock]` | destroys a preview, drops its database and role (with `previewDatabase`), removes the stack and deletes every state object it left under the S3 backend path. When the destroy fails and the state still holds anything beyond the Stage and database (a `Worker` whose delete was refused), it stops naming the types and keeps the state for another `remove` |
 | `pg-database <drop\|check> <name> [--owner <role>]` | drops a database and its role with `PG_ADMIN_URL`, or exits 3 naming the admin that could |
 
 - **Product id**: `Pulumi.yaml`'s `name`, or `--product`. The preview database is `<product>_pr_<n>`, the name
   `Database` gives it.
-- **Locks**: only `--clear-lock` runs `pulumi cancel`. Pass it only from a job that owns the stack's lock, in a
-  concurrency group that is never cancelled; a preview never clears one.
+- **Preview database**: only an entries module that exports `previewDatabase = true` makes the `pr-<n>` steps reach
+  Postgres: `prepare` drops a database an earlier run left before it creates the stack and checks before `up` that
+  `PG_ADMIN_URL`'s admin could drop it, and `remove` drops it. Without it they never touch Postgres and need no
+  `PG_ADMIN_URL`.
+- **Locks**: only `--clear-lock` runs `pulumi cancel`; `preview` and `prepare --preview-only` never clear a lock. A
+  long-lived stack (`shared`, `staging`, `prod`) is cleared only by jobs in one concurrency group that is never
+  cancelled, shared by every job on that stack, preview jobs included. On a `pr-<n>` stack every job, `remove`
+  included, shares the pull request's one group, which may cancel in progress: the lock a cancelled run leaves belongs
+  to that group, and its next `up` or `remove` clears it.
 - **Preview reset**: a `pr-<n>` stack with pending operations or no resources is removed and created again only when
-  it holds nothing beyond the database closure (`postgresql`, `random`, `Stage`, `Database`). Anything else (a
-  `Worker`, a Vercel project) stops `prepare` by type, for `pulumi refresh` or `remove`.
+  it holds nothing beyond its Stage and, with `previewDatabase`, the database closure (`postgresql`, `random`,
+  `Database`). Anything else (a `Worker`, a Vercel project) stops `prepare` by type, for `pulumi refresh` or
+  `remove`.
 - **Outputs**: each key of the export becomes a step output in snake case (`databaseUrl` → `database_url`). Every
-  line of a secret value is masked with `::add-mask::` before anything is written; multi-line values use the heredoc
-  form.
+  secret value is masked with `::add-mask::` before anything is written, escaped as `core.setSecret` escapes it, and
+  each line of a multi-line value is masked too; multi-line values use the heredoc form.
 - **Environment**: `PULUMI_BACKEND_URL` and `PULUMI_SECRETS_PROVIDER` for `prepare`, `up`, `preview` and `remove`;
-  `PG_ADMIN_URL` for preview stacks; `aws` on `PATH` for `remove`.
+  `PG_ADMIN_URL` for preview stacks with `previewDatabase`; `aws` on `PATH` for `remove`.
 
 ### The entries module
 
@@ -245,6 +253,9 @@ export function derive(values: ConfigValues): ConfigValues {
   const user = values.DATABASE_RUNTIME_URL && decodeURIComponent(new URL(values.DATABASE_RUNTIME_URL).username);
   return user ? { PG_RUNTIME_ROLE: user.split('.')[0] } : {};
 }
+
+/** The program creates a `Database` on `pr-<n>` stacks. */
+export const previewDatabase = true;
 ```
 
 A key without a namespace goes in the product's (or the module's `namespace` export). `aws:region` has no default:
