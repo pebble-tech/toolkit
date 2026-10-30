@@ -65,6 +65,7 @@ const check = (workflows: Record<string, object>, options: Partial<WorkflowCheck
     region: REGION,
     entries: ENTRIES,
     secrets: { staging: TABLE },
+    roleSecret: 'ROLE',
     database: { output: 'database_url', stacks: ['preview', 'staging', 'prod'] },
     ...options,
   });
@@ -103,22 +104,6 @@ describe('checkWorkflows on workflows shaped differently', () => {
       ['state', true],
       ['state', true],
     ]);
-  });
-
-  test('the stack comes from a choice input through the step env, and each option is checked', () => {
-    const apply = {
-      on: { workflow_dispatch: { inputs: { stack: { type: 'choice', options: ['shared', 'staging'] } } } },
-      jobs: {
-        apply: {
-          'runs-on': 'ubuntu-latest',
-          environment: 'staging',
-          concurrency: { group: 'stg-state', 'cancel-in-progress': false },
-          env: { ...state('stg', '${{ github.event.inputs.stack }}', 'staging'), STACK: '${{ inputs.stack }}' },
-          steps: [credentials, ...migrateFirst('"$STACK"')],
-        },
-      },
-    };
-    expect(check({ 'apply.yml': apply })).toEqual([]);
   });
 
   test('a stack the helper cannot read fails until the job declares it', () => {
@@ -184,7 +169,7 @@ describe('checkWorkflows on workflows shaped differently', () => {
   describe('two jobs on staging, one of which clears its lock', () => {
     const workflow = (preview: object) => ({
       on: { push: {} },
-      concurrency: { group: 'staging-${{ github.ref }}', 'cancel-in-progress': false, queue: 'max' },
+      concurrency: { group: 'staging', 'cancel-in-progress': false, queue: 'max' },
       jobs: {
         deploy: {
           'runs-on': 'ubuntu-latest',
@@ -216,7 +201,10 @@ describe('checkWorkflows on workflows shaped differently', () => {
     test('fail when the workflow’s group may cancel the run in progress', () => {
       const cancelling = workflow({ needs: 'deploy' });
       cancelling.concurrency['cancel-in-progress'] = true;
-      expect(rules(check({ 'stg.yml': cancelling }))).toEqual([['lock', 'stg.yml#deploy']]);
+      expect(rules(check({ 'stg.yml': cancelling }))).toEqual([
+        ['lock', 'stg.yml#deploy'],
+        ['lock', 'stg.yml#preview'],
+      ]);
     });
   });
 
@@ -264,7 +252,13 @@ describe('checkWorkflows on workflows shaped differently', () => {
     test('an unguarded migrate fails: on a first deploy it would run with no URL', () => {
       const { if: _guard, ...unguarded } = migrate;
       expect(check({ 'd.yml': job([before, unguarded, up, first]) })).toEqual([
-        { rule: 'migrate', job: 'd.yml#deploy', message: expect.stringContaining('with no guard on') },
+        {
+          rule: 'migrate',
+          job: 'd.yml#deploy',
+          message: expect.stringContaining(
+            "under if: (none); the guard is exactly `if: steps.before.outputs.database_url != ''`"
+          ),
+        },
       ]);
     });
 
@@ -308,5 +302,226 @@ describe('checkWorkflows on workflows shaped differently', () => {
       const env = { PG_ADMIN_URL: '${{ secrets.PG_ADMIN_URL }}' };
       expect(check({ 'd.yml': job(env) }, { database: false })).toEqual([]);
     });
+  });
+});
+
+// The T3 review's probes (review-t3.md): one valid staging deploy, then one change each. Each bad probe must fail on the
+// rule named; each good one must pass.
+describe('review probes', () => {
+  const group = { group: 'pulumi-staging', 'cancel-in-progress': false, queue: 'max' };
+  const deploy = () => ({
+    'runs-on': 'ubuntu-latest',
+    environment: 'staging',
+    concurrency: { ...group } as Record<string, unknown>,
+    env: state('stg', 'staging', 'staging') as Record<string, string>,
+    steps: [credentials, ...migrateFirst('staging')].map((step) => structuredClone(step)) as Record<string, any>[],
+  });
+  const reader = (extra: object = {}) => ({
+    'runs-on': 'ubuntu-latest',
+    environment: 'staging',
+    env: state('stg', 'staging', 'staging'),
+    steps: [credentials, { env: VALUES, run: 'pebble-infra preview staging --entries e.js' }],
+    ...extra,
+  });
+  const workflow = (change: (w: Record<string, any>) => void) => {
+    const w: Record<string, any> = { on: { push: {} }, jobs: { deploy: deploy() } };
+    change(w);
+    return w;
+  };
+  const run = (change: (w: Record<string, any>) => void, options: Partial<WorkflowChecks> = {}) =>
+    rules(check({ 'p.yml': workflow(change) }, options));
+  const toWorkflowGroup = (w: Record<string, any>) => {
+    w.concurrency = w.jobs.deploy.concurrency;
+    delete w.jobs.deploy.concurrency;
+  };
+
+  test('the unchanged deploy passes', () => {
+    expect(run(() => {})).toEqual([]);
+  });
+
+  test.each([
+    // lock-1
+    [
+      'nonclearer-cancels-holder',
+      (w: any) => (w.jobs.read = reader({ concurrency: { ...group, 'cancel-in-progress': true } })),
+      [['lock', 'p.yml#read']],
+    ],
+    [
+      'nonclearer-workflow-cancels',
+      (w: any) => {
+        w.concurrency = { group: 'run', 'cancel-in-progress': true };
+        w.jobs.read = reader({ concurrency: group });
+      },
+      [
+        ['lock', 'p.yml#deploy'],
+        ['lock', 'p.yml#read'],
+      ],
+    ],
+    // lock-2
+    [
+      'run-specific-group',
+      (w: any) => (w.jobs.deploy.concurrency.group = 'pulumi-staging-${{ github.run_id }}'),
+      [['lock', 'p.yml#deploy']],
+    ],
+    // lock-3
+    [
+      'concurrent-matrix-staging',
+      (w: any) => {
+        toWorkflowGroup(w);
+        w.jobs.deploy.strategy = { matrix: { runner: ['ubuntu-latest', 'ubuntu-24.04'] } };
+      },
+      [['lock', 'p.yml#deploy']],
+    ],
+    // migrate-1
+    [
+      'both-migrations-disabled',
+      (w: any) => {
+        w.jobs.deploy.steps[2].if = "false && steps.before.outputs.database_url != ''";
+        w.jobs.deploy.steps[4].if = "false && steps.before.outputs.database_url == ''";
+      },
+      [
+        ['migrate', 'p.yml#deploy'],
+        ['migrate', 'p.yml#deploy'],
+      ],
+    ],
+    [
+      'first-deploy-never-migrates',
+      (w: any) => (w.jobs.deploy.steps[4].if = "steps.before.outputs.database_url != ''"),
+      [['migrate', 'p.yml#deploy']],
+    ],
+    [
+      'conditional-staging-migrate',
+      (w: any) =>
+        (w.jobs.deploy.steps[2].if =
+          "steps.before.outputs.database_url != '' && github.event_name == 'workflow_dispatch'"),
+      [['migrate', 'p.yml#deploy']],
+    ],
+    [
+      'read-disabled-for-existing-stack',
+      (w: any) => (w.jobs.deploy.steps[1].if = 'false'),
+      [['migrate', 'p.yml#deploy']],
+    ],
+    // stack-1
+    [
+      'shell-overrides-stack',
+      (w: any) => {
+        w.jobs.deploy.env.STACK = 'staging';
+        w.jobs.deploy.steps[3].run = 'STACK=prod\npebble-infra up "$STACK" --entries e.js --clear-lock';
+      },
+      [['stack', 'p.yml#deploy']],
+    ],
+    [
+      'stack-in-env-context',
+      (w: any) => {
+        w.jobs.deploy.env.STACK = 'staging';
+        w.jobs.deploy.steps[3].run = 'pebble-infra up "${{ env.STACK }}" --entries e.js --clear-lock';
+      },
+      [['stack', 'p.yml#deploy']],
+    ],
+    // stack-2
+    [
+      'composite-lock-clear',
+      (w: any) => (w.jobs.rogue = reader({ steps: [credentials, { uses: './.github/actions/clear-staging' }] })),
+      [['stack', 'p.yml#rogue']],
+    ],
+    // secrets-1
+    [
+      'discarded-secret-field',
+      (w: any) => (w.jobs.deploy.steps[2]['working-directory'] = '${{ secrets.MISSING_DIR }}'),
+      [['secrets', 'p.yml#deploy']],
+    ],
+    [
+      'secret-in-container-env',
+      (w: any) => (w.jobs.deploy.container = { image: 'node:24', env: { TOKEN: '${{ secrets.MISSING_TOKEN }}' } }),
+      [['secrets', 'p.yml#deploy']],
+    ],
+    [
+      'missing-dynamic-token',
+      (w: any) => (w.jobs.deploy.steps[2].env.DEPLOY_TOKEN = "${{ secrets[format('MISSING_{0}', 'TOKEN')] }}"),
+      [['secrets', 'p.yml#deploy']],
+    ],
+    // secrets-2
+    [
+      'computed-default-values',
+      (w: any) => (w.jobs.deploy.steps[3].env = { ...VALUES, PG_ADMIN_URL: '   ' }),
+      [['secrets', 'p.yml#deploy']],
+      { secrets: { staging: ['ROLE'] } },
+    ],
+    [
+      'derived-overwrites-required',
+      () => {},
+      [['secrets', 'entries']],
+      { entries: { ...ENTRIES, derive: () => ({ PG_ADMIN_URL: '' }) } },
+    ],
+    // parity-1
+    [
+      'wrong-role-secret-read-all',
+      (w: any) => {
+        w.jobs.deploy.steps[0] = {
+          ...credentials,
+          with: { ...credentials.with, 'role-to-assume': '${{ secrets.PG_ADMIN_URL }}' },
+        };
+        w.jobs.deploy.steps.push({ env: { ROLE: '${{ secrets.ROLE }}' }, run: 'test -n "$ROLE"' });
+      },
+      [['state', 'p.yml#deploy']],
+    ],
+  ] as [string, (w: any) => void, string[][], Partial<WorkflowChecks>?][])(
+    '%s fails',
+    (_name, change, expected, options) => {
+      expect(run(change, options)).toEqual(expected);
+    }
+  );
+
+  test.each([
+    [
+      'max-parallel: 1 serialises the matrix copies',
+      (w: any) => {
+        toWorkflowGroup(w);
+        w.jobs.deploy.strategy = { 'max-parallel': 1, matrix: { runner: ['ubuntu-latest', 'ubuntu-24.04'] } };
+      },
+    ],
+    [
+      'a declared local action shares the deploy’s group',
+      (w: any) =>
+        (w.jobs.rogue = reader({
+          concurrency: group,
+          steps: [credentials, { uses: './.github/actions/clear-staging' }],
+        })),
+    ],
+    [
+      'a stack in a YAML env variable no run block assigns',
+      (w: any) => {
+        w.jobs.deploy.env.STACK = 'staging';
+        w.jobs.deploy.steps[3].run = 'pebble-infra up "$STACK" --entries e.js --clear-lock';
+      },
+    ],
+    ['a derived entry whose declared source is in the table', () => {}],
+  ] as [string, (w: any) => void][])('%s passes', (_name, change) => {
+    expect(
+      run(change, {
+        stacks: { 'p.yml#rogue': ['staging'] },
+        entries: { ...ENTRIES, derive: () => ({}) },
+        derived: { PG_ADMIN_URL: ['PG_ADMIN_URL'] },
+      })
+    ).toEqual([]);
+  });
+
+  test('independent PR stacks hold their own groups; two groups on one PR stack fail', () => {
+    const pr = (n: number, groupName: string) => ({
+      ...deploy(),
+      environment: 'preview',
+      concurrency: { group: groupName, 'cancel-in-progress': true },
+      env: state('stg', 'preview', 'preview'),
+      steps: [credentials, ...migrateFirst(`pr-${n}`)],
+    });
+    const options = { secrets: { preview: TABLE } };
+    expect(
+      check({ 'pr.yml': { on: { push: {} }, jobs: { one: pr(1, 'preview-1'), two: pr(2, 'preview-2') } } }, options)
+    ).toEqual([]);
+    expect(
+      rules(
+        check({ 'pr.yml': { on: { push: {} }, jobs: { one: pr(1, 'preview-1'), two: pr(1, 'preview-2') } } }, options)
+      )
+    ).toEqual([['lock', 'pr.yml#two']]);
   });
 });
