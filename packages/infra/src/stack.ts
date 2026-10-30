@@ -82,6 +82,8 @@ export interface StackContext {
    * steps never reach Postgres.
    */
   previewDatabase: boolean;
+  /** The entries module this run was given (`--entries`), repeated in the recovery commands a refusal suggests. */
+  entries?: string;
   /** `s3://<bucket>/<path>?region=…`, the backend `pulumi login` used. */
   backendUrl: string;
   /** `awskms://alias/…?region=…`, the key new stacks encrypt their secrets with. */
@@ -108,6 +110,15 @@ const PG_DATABASE = fileURLToPath(
 /** Arguments for `node` to run the package's pg-database script. */
 export function pgDatabaseArgs(args: string[]): string[] {
   return [PG_DATABASE, ...args];
+}
+
+/**
+ * `pebble-infra <verb> <stack>` as the CLI accepts it: a `pr-<n>` stack names its entries module, the one this run
+ * was given or a placeholder to fill in.
+ */
+function suggest(ctx: StackContext, verb: 'prepare' | 'remove', stack: string): string {
+  const entries = stackKind(stack) === 'preview' ? ` --entries ${ctx.entries ?? '<entries-module>'}` : '';
+  return `pebble-infra ${verb} ${stack}${entries}`;
 }
 
 function must(ctx: StackContext, args: string[], input?: string): string {
@@ -211,7 +222,7 @@ export function prepare(ctx: StackContext, stack: string, options: PrepareOption
   const present = exists(ctx, stack);
   if (options.previewOnly && !present) {
     throw new Error(
-      `stack ${stack} does not exist; a preview does not create it (the deploying run does: pebble-infra prepare ${stack})`
+      `stack ${stack} does not exist; a preview does not create it (the deploying run does: ${suggest(ctx, 'prepare', stack)})`
     );
   }
   if (!present) {
@@ -229,7 +240,7 @@ export function prepare(ctx: StackContext, stack: string, options: PrepareOption
     }
     if ((state.resources?.length ?? 0) === 0) {
       throw new Error(
-        `stack ${stack} was never updated; a preview does not recreate it (the deploying run does: pebble-infra prepare ${stack})`
+        `stack ${stack} was never updated; a preview does not recreate it (the deploying run does: ${suggest(ctx, 'prepare', stack)})`
       );
     }
     restoreSecretsConfig(ctx, stack, state);
@@ -243,7 +254,7 @@ export function prepare(ctx: StackContext, stack: string, options: PrepareOption
     const foreign = foreignTypes(ctx, state);
     if (foreign.length > 0) {
       throw new Error(
-        `stack ${stack} holds ${foreign.join(', ')}, ${beyond(ctx)}; a reset would leave ${foreign.length === 1 ? 'it' : 'them'} running. Run \`pulumi refresh -s ${stack}\` and check each pending operation, or remove the preview (pebble-infra remove ${stack})`
+        `stack ${stack} holds ${foreign.join(', ')}, ${beyond(ctx)}; a reset would leave ${foreign.length === 1 ? 'it' : 'them'} running. Run \`pulumi refresh -s ${stack}\` and check each pending operation, or remove the preview (${suggest(ctx, 'remove', stack)})`
       );
     }
     // The drop first: if it is refused, the state stays for an authorized cleanup.

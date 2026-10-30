@@ -549,6 +549,65 @@ describe('usage', () => {
   });
 });
 
+describe('recovery commands in refusals', () => {
+  /** The `pebble-infra …` command a refusal suggests, as argv. */
+  const suggested = (stderr: string) => /pebble-infra ([^)]+)\)/.exec(stderr)?.[1]?.split(' ') ?? [];
+
+  test('the remove a refused preview reset suggests is accepted, and keeps the state', async () => {
+    const p = product();
+    p.plan([{ result: 'interrupt', resources: ['pulumi:pulumi:Stack'], pending: ['pebbletech:index:Worker'] }]);
+    await p.run(['up', 'pr-12350', '--entries', 'free.mjs'], { AWS_REGION: 'xx-test-1' });
+    const refused = await p.run(['prepare', 'pr-12350', '--entries', 'free.mjs', '--clear-lock']);
+    const followed = await p.run(suggested(refused.stderr));
+    expect([refused.code, suggested(refused.stderr), followed.code, followed.stderr.split('\n')[0]]).toEqual([
+      1,
+      ['remove', 'pr-12350', '--entries', 'free.mjs'],
+      1,
+      'pulumi destroy -s pr-12350 failed and the stack still holds pebbletech:index:Worker, beyond its Stage; its state is kept so another remove can finish once the cause is fixed:',
+    ]);
+  });
+
+  test('the prepare a preview of a missing preview stack suggests is accepted', async () => {
+    const p = product();
+    const refused = await p.run(['prepare', 'pr-12351', '--preview-only', '--entries', 'free.mjs']);
+    const followed = await p.run(suggested(refused.stderr));
+    expect([refused.code, suggested(refused.stderr), followed.code, followed.stderr]).toEqual([
+      1,
+      ['prepare', 'pr-12351', '--entries', 'free.mjs'],
+      0,
+      'created stack pr-12351\nstack pr-12351: created\n',
+    ]);
+  });
+
+  test('the prepare a preview of a never-updated preview stack suggests is accepted', async () => {
+    const p = product();
+    await p.run(['prepare', 'pr-12352', '--entries', 'free.mjs']);
+    const refused = await p.run(['prepare', 'pr-12352', '--preview-only', '--entries', 'free.mjs']);
+    const followed = await p.run(suggested(refused.stderr));
+    expect([refused.code, suggested(refused.stderr), followed.code, followed.stderr.split('\n').at(-2)]).toEqual([
+      1,
+      ['prepare', 'pr-12352', '--entries', 'free.mjs'],
+      0,
+      'stack pr-12352: reset',
+    ]);
+  });
+
+  test('without a module in the run, the suggestion marks where it goes', async () => {
+    const p = product();
+    const refused = await p.run(['prepare', 'pr-12353', '--preview-only']);
+    expect([refused.code, suggested(refused.stderr)]).toEqual([
+      1,
+      ['prepare', 'pr-12353', '--entries', '<entries-module>'],
+    ]);
+  });
+
+  test('a long-lived stack needs no module in its suggestion', async () => {
+    const p = product();
+    const refused = await p.run(['prepare', 'prod', '--preview-only']);
+    expect(suggested(refused.stderr)).toEqual(['prepare', 'prod']);
+  });
+});
+
 describe('a product whose previews have no database', () => {
   test('up and remove a preview with no PG_ADMIN_URL, never reaching Postgres', async () => {
     const p = product();
@@ -728,7 +787,7 @@ describe('preview stacks (Postgres)', () => {
       p.stateObjects().filter((o) => o.startsWith('stacks/')),
     ]).toEqual([
       1,
-      'stack pr-81007 holds cloudflare:index/workersScript:WorkersScript, pebbletech:index:Worker, beyond its database; a reset would leave them running. Run `pulumi refresh -s pr-81007` and check each pending operation, or remove the preview (pebble-infra remove pr-81007)\n',
+      'stack pr-81007 holds cloudflare:index/workersScript:WorkersScript, pebbletech:index:Worker, beyond its database; a reset would leave them running. Run `pulumi refresh -s pr-81007` and check each pending operation, or remove the preview (pebble-infra remove pr-81007 --entries entries.mjs)\n',
       [],
       ['stacks/acme/pr-81007.json'],
     ]);

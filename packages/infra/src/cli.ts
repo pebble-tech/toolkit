@@ -2,7 +2,8 @@
 // product's Pulumi.yaml (`pnpm --dir infra exec pebble-infra <command>`).
 //
 //   prepare <stack> [--preview-only] [--clear-lock]   select or create the stack, reset a broken preview stack
-//                                                     (pr-<n>: --entries <module> too, for previewDatabase)
+//                                                     (pr-<n>: --entries <module> too, for previewDatabase,
+//                                                     except with --preview-only)
 //   configure <stack> --entries <module>              write the stack config from the product's entries module
 //   up <stack> --entries <module> [--clear-lock]      prepare, configure, pulumi up, outputs to $GITHUB_OUTPUT
 //   preview <stack> --entries <module> [--summary]    prepare --preview-only, configure, pulumi preview --diff
@@ -83,7 +84,7 @@ const COMMANDS: Record<string, readonly Flag[]> = {
 };
 
 const USAGE = `usage: pebble-infra <command> <stack> [flags]
-  prepare <stack> [--preview-only | --clear-lock] [--entries <module>, required on pr-<n>]
+  prepare <stack> [--preview-only | --clear-lock] [--entries <module>, required on pr-<n> unless --preview-only]
   configure <stack> --entries <module>
   up <stack> --entries <module> [--clear-lock] [--outputs <name>]
   preview <stack> --entries <module> [--summary]
@@ -248,7 +249,16 @@ export async function main(argv: string[], io: CliIo = processIo()): Promise<num
       if (!backendUrl || !secretsProvider)
         throw new Error('PULUMI_BACKEND_URL and PULUMI_SECRETS_PROVIDER are required');
       const previewDatabase = module?.previewDatabase === true;
-      return { run, projectDir: io.cwd, product: product(), previewDatabase, backendUrl, secretsProvider, log };
+      return {
+        run,
+        projectDir: io.cwd,
+        product: product(),
+        previewDatabase,
+        entries: flags.entries,
+        backendUrl,
+        secretsProvider,
+        log,
+      };
     };
     const writeConfig = () => configure(run, stack, module!, { ...io.env, ...values }, product(), log);
     const stream = processStreamer({ cwd: io.cwd, env: childEnv, stdout: io.stdout, stderr: io.stderr });
