@@ -312,30 +312,35 @@ expect(
 
 | Rule | A job breaks it when |
 |---|---|
-| `stack` | the helper cannot read the stack a `pebble-infra` step names; a job holding state (`PULUMI_BACKEND_URL` or a credentials step) runs a local `uses: ./…` action; or a step runs `pulumi` directly (other than `login`) |
+| `stack` | the stack a `pebble-infra` step names is not one of the forms below and is not declared; a job holding state (`PULUMI_BACKEND_URL` or a credentials step) runs a local `uses: ./…` action; a job on a stack has a `strategy.matrix` that is not a literal mapping; the checked workflows touch both a literal `pr-<number>` and the PR form; or a step runs `pulumi` directly (other than `login`) |
 | `state` | it touches a stack outside the GitHub environment that stack's deploy role trusts (`production` for `prod`, `staging` for `shared`); before a `configure-aws-credentials` step whose `role-to-assume` is exactly `${{ secrets.<roleSecret> }}`; or with a `PULUMI_BACKEND_URL` or `PULUMI_SECRETS_PROVIDER` other than that stack's (`deployState`) |
-| `secrets` | anywhere in the job as written it reads `secrets.X` (or `secrets['X']`) that its environment does not set, or reads a secret by a computed name; a step with `PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}` runs `configure`, `up` or `preview` and a required entry is unset (or `PG_ADMIN_URL`, on a `pr-<n>` stack with `previewDatabase`); the table lists a secret no job reads; or the module exports `derive` and the test gives no `derived` |
+| `secrets` | anywhere in the job as written a `${{ }}` reads `secrets.X` that its environment does not set, or names `secrets` in any other way (brackets, spaces, a computed name) except the whole expression `${{ toJSON(secrets) }}`; a step with `PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}` runs `configure`, `up` or `preview` and a required entry is unset (or `PG_ADMIN_URL`, on a `pr-<n>` stack with `previewDatabase`); the table lists a secret no job reads; or the module exports `derive` and the test gives no `derived` |
 | `lock` | a `preview` or `prepare --preview-only` passes `--clear-lock`; on a long-lived stack whose lock a job clears, a job holds a group another job on it does not, holds an expression as its group, or may be cancelled in progress (its own group or the workflow's); a job on one `pr-<n>` stack holds another group than the other jobs on that stack; two jobs of one run on one stack, matrix copies included, share only the workflow's group with no `needs` between them (or, for copies, no `max-parallel: 1`) |
 | `concurrency` | a long-lived stack whose lock a job clears is touched by more than one job, and a job's group does not set `queue: max` (a newer run would drop a pending one) |
-| `migrate` | it runs `up` on a stack in `database.stacks` without the migrate-first shape below, or with any other condition on its steps |
+| `migrate` | it runs `up` on a stack in `database.stacks` without the migrate-first shape below in the same job, or with any other condition on its steps |
 
-What the helper reads, and nothing else:
-- **Stack**: a literal (`shared`, `staging`, `prod`, `pr-<number>`, or `pr-${{ github.event.pull_request.number }}`),
-  or `"$VAR"` whose value in the step, job or workflow `env:` is one, when no `run:` in the job assigns `VAR` (`VAR=`,
-  `read`, `for`). A literal matrix list (`include`, `exclude`) is written into each copy of the job. Anything else, and
-  a local action in a job holding state, needs a declaration: `stacks: { 'release.yml#deploy': ['prod'] }`. A
-  declared local action is taken to clear the lock.
+What the helper reads, and nothing else. It never works out what a non-literal value will be:
+- **Expressions**: a value is an expression only inside `${{ }}`; bare text is literal, so `role-to-assume:
+  secrets.ROLE` and `PEBBLE_INFRA_VALUES: toJSON(secrets)` are literal strings and fail. Only an `if:` may leave out
+  its `${{ }}`.
+- **Stack**: the stack argument written in the `pebble-infra` command: `shared`, `staging`, `prod`, `pr-<number>`, or
+  `"pr-${{ github.event.pull_request.number }}"` (quoted, so the shell sees one word). A variable such as
+  `"$PULUMI_STACK"` is not read, whatever its `env:` says. A literal `strategy.matrix` (lists, `include`, `exclude`)
+  is written into each copy of the job; any other matrix refuses. Anything else, and a local action in a job holding
+  state, needs a declaration: `stacks: { 'release.yml#deploy': ['prod'] }`. A declared local action is taken to clear
+  the lock.
 - **Group**: on a long-lived stack, a literal string; on a PR stack, a literal or one keyed only on
-  `${{ github.event.pull_request.number }}`. Groups are compared per stack, so each PR stack has its own.
+  `${{ github.event.pull_request.number }}`. Groups are compared per stack, so each PR stack has its own. Workflows
+  that use both a literal `pr-<number>` and the PR form refuse, since the two can be one stack.
 - **Values**: a required entry is set by a non-blank step, job or workflow env value, by the environment's table when
   the step has `PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}`, by `AWS_REGION` after a credentials step with
   `aws-region`, or, for a variable named in `derived`, only when all its sources are set. `derive` itself never runs.
-- **Migrate first**: `pebble-infra outputs <stack> --github-output --if-exists` with an `id` and no `if:` (or a needed
-  job's output carrying it) before `up`; every step between it and `up` that reads the URL runs under exactly
-  `if: steps.<id>.outputs.<output> != ''`; and a step after `up` (which has an `id`) runs under exactly
-  `if: steps.<id>.outputs.<output> == ''` and reads `steps.<up id>.outputs.<output>`. That pair marks the first deploy,
-  when there is no stack before `up` and the read writes nothing. `${{ }}` around a guard and its spacing do not
-  matter; any other condition fails.
+- **Migrate first**: in the job that runs `up`, `pebble-infra outputs <stack> --github-output --if-exists` with an
+  `id` and no `if:` comes before `up`; a read in another job does not count. Every step between it and `up` that
+  reads the URL runs under exactly `if: steps.<id>.outputs.<output> != ''`, and a step after `up` (which has an `id`)
+  runs under exactly `if: steps.<id>.outputs.<output> == ''` and reads `steps.<up id>.outputs.<output>`. That pair
+  marks the first deploy, when there is no stack before `up` and the read writes nothing. `${{ }}` around a guard and
+  its spacing do not matter; any other condition fails.
 
 `examples/basefresh/.github/workflows` holds three workflows written this way. `loadWorkflow(path)` returns one
 parsed workflow, for checks of the product's own (the jobs a release run holds, say). The helper and `yaml` load only
