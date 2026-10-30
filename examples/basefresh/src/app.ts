@@ -94,6 +94,8 @@ export function basefresh(inputs: BasefreshInputs): Record<string, pulumi.Input<
 
   return {
     databaseName: database.databaseName,
+    // The owner's direct URL: the deploy workflows migrate with it, read before `up` (`pebble-infra outputs`).
+    databaseUrl: database.directUrl,
     apiUrl: api.url,
     uploadsUrl: uploads.url,
     webUrl: web.url!,

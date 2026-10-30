@@ -1,0 +1,174 @@
+name: Deploy staging
+
+# Every push to main: migrate staging's database, then `pulumi up` shared and staging. A second job previews prod, so
+# the diff exists before any release.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  APEX: pebbletech.my
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    # The only job on shared and staging. Queue, never cancel: a cancelled `pulumi up` leaves its lock and can leave an
+    # operation half done; the next run in this group clears the lock (`--clear-lock`).
+    concurrency:
+      group: pulumi-staging
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # Pulumi downloads provider plugins from GitHub releases; the token lifts the unauthenticated rate limit.
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # T2: the toolkit's setup action replaces this step and the next four.
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Cache Pulumi plugins
+        uses: actions/cache@v5
+        with:
+          path: ~/.pulumi/plugins
+          key: ${{ runner.os }}-pulumi-plugins-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install the Pulumi CLI
+        run: |
+          curl -fsSL https://get.pulumi.com | sh -s -- --version 3.271.0
+          echo "$HOME/.pulumi/bin" >> "$GITHUB_PATH"
+
+      - name: Build the infra program and the bundles
+        run: pnpm --dir infra build
+
+      - name: Assume the staging deploy role
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-southeast-1
+
+      - name: Staging's database URL, before up (nothing before the first deploy)
+        id: before
+        env:
+          PULUMI_BACKEND_URL: s3://pebble-stg-pulumi-state/basefresh/staging?region=ap-southeast-1
+          PULUMI_SECRETS_PROVIDER: awskms://alias/pebble-stg-pulumi-staging?region=ap-southeast-1
+        run: |
+          pulumi login "$PULUMI_BACKEND_URL"
+          pnpm --dir infra exec pebble-infra outputs staging --github-output --if-exists
+
+      # Every push migrates staging, before up, so the code that up deploys finds its schema.
+      - name: Migrate staging
+        if: steps.before.outputs.database_url != ''
+        env:
+          DATABASE_URL: ${{ steps.before.outputs.database_url }}
+        run: pnpm db:migrate
+
+      - name: Pulumi up (shared)
+        env:
+          PULUMI_BACKEND_URL: s3://pebble-stg-pulumi-state/basefresh/shared?region=ap-southeast-1
+          PULUMI_SECRETS_PROVIDER: awskms://alias/pebble-stg-pulumi-staging?region=ap-southeast-1
+          PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}
+        run: |
+          pulumi login "$PULUMI_BACKEND_URL"
+          pnpm --dir infra exec pebble-infra up shared --entries dist/entries.js --clear-lock
+
+      - name: Pulumi up (staging)
+        id: up
+        env:
+          PULUMI_BACKEND_URL: s3://pebble-stg-pulumi-state/basefresh/staging?region=ap-southeast-1
+          PULUMI_SECRETS_PROVIDER: awskms://alias/pebble-stg-pulumi-staging?region=ap-southeast-1
+          PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}
+        run: |
+          pulumi login "$PULUMI_BACKEND_URL"
+          pnpm --dir infra exec pebble-infra up staging --entries dist/entries.js --clear-lock
+
+      - name: Migrate staging's new database (first deploy)
+        if: steps.before.outputs.database_url == ''
+        env:
+          DATABASE_URL: ${{ steps.up.outputs.database_url }}
+        run: pnpm db:migrate
+
+      # The web deploy to Vercel's staging environment follows here (T6).
+
+  prod-preview:
+    # What a release would change on prod. Never applies and never clears a lock (`pebble-infra preview`).
+    runs-on: ubuntu-latest
+    environment: production
+    # One group with deploy-production.yml's deploy, so a preview never runs while prod deploys; queue: max, so this
+    # preview waits behind a pending release instead of dropping it.
+    concurrency:
+      group: pulumi-prod
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PULUMI_BACKEND_URL: s3://pebble-prd-pulumi-state/basefresh/prod?region=ap-southeast-1
+      PULUMI_SECRETS_PROVIDER: awskms://alias/pebble-prd-pulumi-prod?region=ap-southeast-1
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # T2: the toolkit's setup action replaces this step and the next four.
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Cache Pulumi plugins
+        uses: actions/cache@v5
+        with:
+          path: ~/.pulumi/plugins
+          key: ${{ runner.os }}-pulumi-plugins-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install the Pulumi CLI
+        run: |
+          curl -fsSL https://get.pulumi.com | sh -s -- --version 3.271.0
+          echo "$HOME/.pulumi/bin" >> "$GITHUB_PATH"
+
+      - name: Build the infra program and the bundles
+        run: pnpm --dir infra build
+
+      - name: Assume the prod deploy role
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-southeast-1
+
+      - name: Pulumi preview (prod) into the run summary
+        env:
+          PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}
+        run: |
+          pulumi login "$PULUMI_BACKEND_URL"
+          pnpm --dir infra exec pebble-infra preview prod --entries dist/entries.js --summary
