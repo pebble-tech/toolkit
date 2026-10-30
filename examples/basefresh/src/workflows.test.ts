@@ -126,7 +126,7 @@ describe('basefresh workflows', () => {
         {
           rule: 'migrate',
           job: 'deploy-production.yml#deploy',
-          message: expect.stringContaining("before any step reads prod's database_url"),
+          message: expect.stringContaining("before any step in this job reads prod's database_url"),
         },
       ]);
     });
@@ -194,10 +194,14 @@ describe('basefresh workflows', () => {
       preview.jobs.deploy!.concurrency,
       preview.jobs.close!.concurrency,
       preview.jobs.deploy!.steps.some(
-        (step) => step.run?.includes('pebble-infra up "$PULUMI_STACK"') && step.run.includes('--clear-lock')
+        (step) =>
+          step.run?.includes('pebble-infra up "pr-${{ github.event.pull_request.number }}"') &&
+          step.run.includes('--clear-lock')
       ),
       preview.jobs.close!.steps.some(
-        (step) => step.run?.includes('pebble-infra remove "$PULUMI_STACK"') && step.run.includes('--clear-lock')
+        (step) =>
+          step.run?.includes('pebble-infra remove "pr-${{ github.event.pull_request.number }}"') &&
+          step.run.includes('--clear-lock')
       ),
     ]).toEqual([group, group, true, true]);
     expect(checkWorkflows(checks([join(WORKFLOWS, 'preview.yml')], { preview: SECRETS.preview }))).toEqual([]);

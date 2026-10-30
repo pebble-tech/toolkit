@@ -12,7 +12,6 @@ permissions:
   contents: read
 
 env:
-  PULUMI_STACK: pr-${{ github.event.pull_request.number }}
   APEX: pebbletech.my
 
 jobs:
@@ -76,7 +75,7 @@ jobs:
         id: before
         run: |
           pulumi login "$PULUMI_BACKEND_URL"
-          pnpm --dir infra exec pebble-infra outputs "$PULUMI_STACK" --github-output --if-exists
+          pnpm --dir infra exec pebble-infra outputs "pr-${{ github.event.pull_request.number }}" --github-output --if-exists
 
       - name: Migrate the PR's database
         if: steps.before.outputs.database_url != ''
@@ -88,7 +87,7 @@ jobs:
         id: up
         env:
           PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}
-        run: pnpm --dir infra exec pebble-infra up "$PULUMI_STACK" --entries dist/entries.js --clear-lock
+        run: pnpm --dir infra exec pebble-infra up "pr-${{ github.event.pull_request.number }}" --entries dist/entries.js --clear-lock
 
       - name: Migrate the PR's new database (first push)
         if: steps.before.outputs.database_url == ''
@@ -156,4 +155,4 @@ jobs:
           PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}
         run: |
           pulumi login "$PULUMI_BACKEND_URL"
-          pnpm --dir infra exec pebble-infra remove "$PULUMI_STACK" --entries dist/entries.js --clear-lock
+          pnpm --dir infra exec pebble-infra remove "pr-${{ github.event.pull_request.number }}" --entries dist/entries.js --clear-lock
