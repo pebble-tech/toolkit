@@ -70,10 +70,8 @@ export interface WorkflowStep {
 export interface WorkflowJob {
   environment?: string;
   needs: string[];
-  if?: string;
   concurrency?: Concurrency;
   env: Record<string, string>;
-  outputs: Record<string, string>;
   strategy?: { matrix?: unknown; 'max-parallel'?: unknown };
   steps: WorkflowStep[];
 }
@@ -81,7 +79,6 @@ export interface WorkflowJob {
 export interface Workflow {
   /** The file name without its directory, as violations name it. */
   file: string;
-  on: Record<string, any>;
   concurrency?: Concurrency;
   env: Record<string, string>;
   jobs: Record<string, WorkflowJob>;
@@ -113,10 +110,8 @@ function normalize(file: string, raw: Record<string, any>): Workflow {
     jobs[key] = {
       ...(environment === undefined ? {} : { environment: text(environment) }),
       needs: job.needs === undefined ? [] : [job.needs].flat().map(text),
-      ...(job.if === undefined ? {} : { if: text(job.if) }),
       ...(job.concurrency === undefined ? {} : { concurrency: concurrency(job.concurrency) }),
       env: strings(job.env),
-      outputs: strings(job.outputs),
       ...(job.strategy === undefined ? {} : { strategy: job.strategy }),
       steps: ((job.steps ?? []) as Record<string, any>[]).map((step) => ({
         ...(step.id === undefined ? {} : { id: text(step.id) }),
@@ -129,16 +124,8 @@ function normalize(file: string, raw: Record<string, any>): Workflow {
       })),
     };
   }
-  // YAML 1.2 keeps `on` a string key; a workflow written `on: push` is one trigger with no settings.
-  const on =
-    typeof raw.on === 'string'
-      ? { [raw.on]: null }
-      : Array.isArray(raw.on)
-        ? Object.fromEntries(raw.on.map((t: string) => [t, null]))
-        : (raw.on ?? {});
   return {
     file,
-    on,
     ...(raw.concurrency === undefined ? {} : { concurrency: concurrency(raw.concurrency) }),
     env: strings(raw.env),
     jobs,
@@ -164,6 +151,8 @@ interface Variant {
   key: string;
   job: WorkflowJob;
   raw: unknown;
+  /** The job's `strategy.matrix` is not a literal mapping, so how many copies run is unknown. */
+  opaque: boolean;
 }
 
 const EXPRESSION = /\$\{\{\s*([A-Za-z_][\w.-]*)\s*\}\}/g;
@@ -176,23 +165,27 @@ function substitute<T>(value: T, binding: Record<string, string>): T {
   return value;
 }
 
-/** The legs of a literal matrix: list keys crossed, then `include` and `exclude`. A matrix expression gives none. */
-function matrixLegs(matrix: unknown): Record<string, string>[] {
-  if (!matrix || typeof matrix !== 'object' || Array.isArray(matrix)) return [{}];
+/** The legs of a literal matrix: list keys crossed, then `include` and `exclude`; undefined for any other matrix. */
+function matrixLegs(matrix: unknown): Record<string, string>[] | undefined {
+  if (matrix === undefined) return [{}];
+  if (!matrix || typeof matrix !== 'object' || Array.isArray(matrix)) return undefined;
   const { include, exclude, ...keys } = matrix as Record<string, unknown>;
+  const lists = [include ?? [], exclude ?? []];
+  if (lists.some((list) => !Array.isArray(list) || list.some((entry) => !entry || typeof entry !== 'object')))
+    return undefined;
   let legs: Record<string, string>[] = Object.keys(keys).length > 0 ? [{}] : [];
   for (const [key, values] of Object.entries(keys)) {
-    if (!Array.isArray(values)) return [{}];
+    if (!Array.isArray(values)) return undefined;
     legs = legs.flatMap((leg) => values.map((value) => ({ ...leg, [`matrix.${key}`]: text(value) })));
   }
   const prefixed = (entry: Record<string, unknown>) =>
     Object.fromEntries(Object.entries(entry).map(([k, v]) => [`matrix.${k}`, text(v)]));
-  for (const entry of Array.isArray(exclude) ? exclude : []) {
+  for (const entry of (exclude ?? []) as Record<string, unknown>[]) {
     const wanted = prefixed(entry);
     legs = legs.filter((leg) => !Object.entries(wanted).every(([k, v]) => leg[k] === v));
   }
   const original = Object.keys(keys).map((k) => `matrix.${k}`);
-  for (const entry of Array.isArray(include) ? include : []) {
+  for (const entry of (include ?? []) as Record<string, unknown>[]) {
     const extra = prefixed(entry);
     const hit = legs.filter((leg) =>
       Object.entries(extra).every(([k, v]) => !original.includes(k) || !(k in leg) || leg[k] === v)
@@ -205,8 +198,9 @@ function matrixLegs(matrix: unknown): Record<string, string>[] {
 
 function variants({ workflow, raw }: { workflow: Workflow; raw: Record<string, any> }): Variant[] {
   const { jobs: _jobs, ...top } = raw;
-  return Object.entries(workflow.jobs).flatMap(([key, job]) =>
-    matrixLegs(job.strategy?.matrix).map((binding) => {
+  return Object.entries(workflow.jobs).flatMap(([key, job]) => {
+    const legs = matrixLegs(job.strategy?.matrix);
+    return (legs ?? [{}]).map((binding) => {
       const shown = Object.entries(binding).map(([k, v]) => `${k}=${v}`);
       return {
         id: `${workflow.file}#${key}`,
@@ -219,9 +213,10 @@ function variants({ workflow, raw }: { workflow: Workflow; raw: Record<string, a
         key,
         job: substitute(job, binding),
         raw: [top, raw.jobs[key]],
+        opaque: legs === undefined,
       };
-    })
-  );
+    });
+  });
 }
 
 // `pebble-infra <verb> <stack> [flags]` as a workflow step runs it, or a declared local action (`verb: 'declared'`,
@@ -270,29 +265,13 @@ function rawPulumi(run: string): string[] {
     .filter((command) => !allowed.has(command));
 }
 
-const stepEnv = (variant: Variant, step: WorkflowStep) => ({
-  ...variant.workflow.env,
-  ...variant.job.env,
-  ...step.env,
-});
+const stepEnv = (v: Variant, step: WorkflowStep) => ({ ...v.workflow.env, ...v.job.env, ...step.env });
 
 /** The one expression a PR stack name or a PR group may hold. */
 const PR_NUMBER = '${{ github.event.pull_request.number }}';
 const KNOWN_STACK = /^(?:shared|staging|prod|pr-[1-9][0-9]*)$/;
 const known = (stack: string) => KNOWN_STACK.test(stack) || stack === `pr-${PR_NUMBER}`;
 const kindOf = (stack: string): StageKind => (stack.startsWith('pr-') ? 'preview' : (stack as StageKind));
-
-/**
- * The stack a command names: a literal, or `$VAR`/`${VAR}` whose value is a literal in the step, job or workflow env
- * and which no `run:` in the job assigns (`VAR=`, `read`, `for`). Anything else is unread.
- */
-function readStack(arg: string, env: Record<string, string>, runs: string): string | undefined {
-  const name = /^\$\{?([A-Za-z_]\w*)\}?$/.exec(arg)?.[1];
-  if (name === undefined) return known(arg) ? arg : undefined;
-  const assigned = new RegExp(`(?:^|[^\\w$])${name}=|\\b(?:read|for)\\b[^\\n;]*\\b${name}\\b`, 'm').test(runs);
-  const value = env[name];
-  return !assigned && value !== undefined && known(value) ? value : undefined;
-}
 
 // One `pebble-infra` command on one stack, in one job variant.
 interface Touch {
@@ -319,7 +298,6 @@ function collectTouches(context: Context): void {
   const { options, add } = context;
   for (const variant of context.variants) {
     const { steps } = variant.job;
-    const runs = steps.map((step) => step.run ?? '').join('\n');
     const declared = options.stacks?.[variant.id];
     for (const name of declared ?? []) {
       if (!known(name)) add('stack', variant.id, `${variant.id} is declared to touch "${name}", not a stack name`);
@@ -350,17 +328,34 @@ function collectTouches(context: Context): void {
       }
       for (const command of commands(step.run)) {
         if (command.stackArg === undefined) continue;
-        const stacks = stacksOf(readStack(command.stackArg, stepEnv(variant, step), runs));
+        const stacks = stacksOf(known(command.stackArg) ? command.stackArg : undefined);
         if (stacks.length === 0) {
           add(
             'stack',
             variant.id,
-            `${variant.label} step ${stepName(step, index)} runs \`${command.text}\` and its stack cannot be read: name it, or a YAML env variable no run block assigns, holding shared, staging, prod, pr-<n> or pr-${PR_NUMBER}; or declare it in the \`stacks\` option under "${variant.id}"`
+            `${variant.label} step ${stepName(step, index)} runs \`${command.text}\` and its stack is not shared, staging, prod, pr-<n> or "pr-${PR_NUMBER}" written in the command; declare it in the \`stacks\` option under "${variant.id}"`
           );
         }
         for (const stack of stacks) push(command, stack);
       }
     });
+    if (variant.opaque && context.touches.some((t) => t.variant === variant)) {
+      add(
+        'stack',
+        variant.id,
+        `${variant.label} touches a stack under a strategy.matrix that is not a literal mapping, so how many copies run at once is unknown`
+      );
+    }
+  }
+  // A literal pr-<n> and the PR form can name the same stack under different groups.
+  const literal = context.touches.find((t) => /^pr-\d/.test(t.stack));
+  const form = context.touches.find((t) => t.stack === `pr-${PR_NUMBER}`);
+  if (literal && form) {
+    add(
+      'stack',
+      literal.variant.id,
+      `${literal.variant.label} touches ${literal.stack} while ${form.variant.label} touches pr-${PR_NUMBER}, which can be the same stack; use one form`
+    );
   }
 }
 
@@ -378,14 +373,14 @@ function stateRule({ options, touches, add }: Context): void {
       );
     }
     const credentials = variant.job.steps.findIndex(isCredentials);
-    const role = bare(variant.job.steps[credentials]?.with['role-to-assume']);
+    const role = variant.job.steps[credentials]?.with['role-to-assume'];
     if (credentials < 0 || credentials > index) {
       add(
         'state',
         variant.id,
         `${variant.label} touches ${stack} before any aws-actions/configure-aws-credentials step`
       );
-    } else if (role !== `secrets.${options.roleSecret}`) {
+    } else if (role !== `\${{ secrets.${options.roleSecret} }}`) {
       add(
         'state',
         variant.id,
@@ -412,7 +407,7 @@ function stateRule({ options, touches, add }: Context): void {
 }
 
 const ALWAYS_SET = new Set(['GITHUB_TOKEN']);
-const viaValues = (env: Record<string, string>) => bare(env.PEBBLE_INFRA_VALUES) === 'toJSON(secrets)';
+const viaValues = (env: Record<string, string>) => env.PEBBLE_INFRA_VALUES === '${{ toJSON(secrets) }}';
 
 /** The variables a `pebble-infra` command reads from its values: entries for configure, up and preview, and the admin URL of a preview database. */
 function valuesNeeded(module: EntriesModule, command: Command, kind: StageKind) {
@@ -440,12 +435,14 @@ function secretsRule({ options, variants, touches, add }: Context): void {
   const read: Record<string, Set<string>> = {};
   for (const variant of variants) {
     const environment = variant.job.environment;
-    const all = JSON.stringify(variant.raw);
-    const explicit = [...all.matchAll(/secrets\.([A-Za-z_]\w*)|secrets\[\s*'([A-Za-z_]\w*)'\s*\]/g)]
-      .map((m) => (m[1] ?? m[2])!)
-      .filter((name) => !ALWAYS_SET.has(name));
-    if (/secrets\[(?!\s*'[A-Za-z_]\w*'\s*\])/.test(all)) {
-      add('secrets', variant.id, `${variant.label} reads a secret by a computed name; read each secret by its name`);
+    // Inside each `${{ }}` of the job as written, `secrets` is either `secrets.NAME` or the whole `toJSON(secrets)`.
+    const explicit: string[] = [];
+    for (const [, body] of JSON.stringify(variant.raw).matchAll(/\$\{\{([\s\S]*?)\}\}/g)) {
+      if (body!.trim() === 'toJSON(secrets)') continue;
+      for (const [use, , name] of body!.matchAll(/\bsecrets\b(\.([A-Za-z_]\w*))?/g)) {
+        if (!name) add('secrets', variant.id, `${variant.label} reads ${use} other than as secrets.NAME`);
+        else if (!ALWAYS_SET.has(name)) explicit.push(name);
+      }
     }
     const usesValues = variant.job.steps.some((step) => viaValues(stepEnv(variant, step)));
     if ((explicit.length === 0 && !usesValues) || environment === undefined) continue;
@@ -651,8 +648,8 @@ const references = (step: WorkflowStep, expression: string) =>
   JSON.stringify({ run: step.run, env: step.env, with: step.with }).includes(expression);
 
 /**
- * In each deploying job, an unconditional `pebble-infra outputs <stack> --github-output --if-exists` (in the job, or
- * in a needed job whose output carries the URL) comes first. Every step between it and `up` that reads the URL runs
+ * In each deploying job, an unconditional `pebble-infra outputs <stack> --github-output --if-exists` in that same job
+ * comes first; a read in another job does not count. Every step between it and `up` that reads the URL runs
  * under exactly `if: <read> != ''`, and a step after `up` under exactly `if: <read> == ''` migrates the first deploy
  * from `up`'s own output. Any other condition fails.
  */
@@ -673,14 +670,6 @@ function migrateRule({ options, touches, add }: Context): void {
       if (i < index && step.id && touch)
         reads.push({ expression: `steps.${step.id}.outputs.${output}`, from: i + 1, step });
     });
-    for (const need of variant.job.needs) {
-      for (const t of touches.filter((t) => t.variant.id === `${variant.workflow.file}#${need}` && isRead(t, stack))) {
-        for (const [name, value] of Object.entries(variant.workflow.jobs[need]?.outputs ?? {})) {
-          if (t.step.id && value.includes(`steps.${t.step.id}.outputs.${output}`))
-            reads.push({ expression: `needs.${need}.outputs.${name}`, from: 0, step: t.step });
-        }
-      }
-    }
     const fail = (message: string) => add('migrate', variant.id, `${variant.label} ${message}`);
     const migrate = reads.flatMap(({ expression, from }) =>
       steps
@@ -690,7 +679,7 @@ function migrateRule({ options, touches, add }: Context): void {
     );
     if (migrate.length === 0) {
       fail(
-        `runs \`${up.command.text}\` (step ${stepName(up.step, index)}) before any step reads ${stack}'s ${output}: read it first with \`pebble-infra outputs ${stack} --github-output --if-exists\` and migrate before up`
+        `runs \`${up.command.text}\` (step ${stepName(up.step, index)}) before any step in this job reads ${stack}'s ${output}: read it first with \`pebble-infra outputs ${stack} --github-output --if-exists\` and migrate before up`
       );
       continue;
     }

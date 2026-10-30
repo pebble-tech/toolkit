@@ -208,7 +208,7 @@ describe('checkWorkflows on workflows shaped differently', () => {
     });
   });
 
-  test('a job output carries the URL another job read before up', () => {
+  test('a URL read in another job does not count: the read is in the deploying job', () => {
     const group = { group: 'pulumi-staging', 'cancel-in-progress': false, queue: 'max' };
     const deploy = {
       on: { push: {} },
@@ -231,7 +231,7 @@ describe('checkWorkflows on workflows shaped differently', () => {
         },
       },
     };
-    expect(check({ 'deploy.yml': deploy })).toEqual([]);
+    expect(rules(check({ 'deploy.yml': deploy }))).toEqual([['migrate', 'deploy.yml#apply']]);
   });
 
   describe('migrate before up', () => {
@@ -489,7 +489,7 @@ describe('review probes', () => {
         })),
     ],
     [
-      'a stack in a YAML env variable no run block assigns',
+      'a stack in an env variable, declared',
       (w: any) => {
         w.jobs.deploy.env.STACK = 'staging';
         w.jobs.deploy.steps[3].run = 'pebble-infra up "$STACK" --entries e.js --clear-lock';
@@ -499,7 +499,7 @@ describe('review probes', () => {
   ] as [string, (w: any) => void][])('%s passes', (_name, change) => {
     expect(
       run(change, {
-        stacks: { 'p.yml#rogue': ['staging'] },
+        stacks: { 'p.yml#rogue': ['staging'], 'p.yml#deploy': ['staging'] },
         entries: { ...ENTRIES, derive: () => ({}) },
         derived: { PG_ADMIN_URL: ['PG_ADMIN_URL'] },
       })
@@ -523,5 +523,97 @@ describe('review probes', () => {
         check({ 'pr.yml': { on: { push: {} }, jobs: { one: pr(1, 'preview-1'), two: pr(1, 'preview-2') } } }, options)
       )
     ).toEqual([['lock', 'pr.yml#two']]);
+  });
+});
+
+// The T3 review's round-2 probes: each infers a value that is not written as a literal, and must fail.
+describe('review probes, round 2', () => {
+  const group = { group: 'pulumi-staging', 'cancel-in-progress': false, queue: 'max' };
+  const deploy = (steps = migrateFirst('staging')) => ({
+    'runs-on': 'ubuntu-latest',
+    environment: 'staging',
+    concurrency: { ...group } as Record<string, unknown> | undefined,
+    env: state('stg', 'staging', 'staging') as Record<string, string>,
+    steps: [credentials, ...steps].map((step) => structuredClone(step)) as Record<string, any>[],
+  });
+  const one = (change: (job: ReturnType<typeof deploy>) => void, options: Partial<WorkflowChecks> = {}) => {
+    const job = deploy();
+    change(job);
+    return rules(check({ 'p.yml': { on: { push: {} }, jobs: { deploy: job } } }, options));
+  };
+  const stackFrom = (script: string) => (job: ReturnType<typeof deploy>) => {
+    job.env.STACK = 'staging';
+    job.steps[3]!.run = `${script}pebble-infra up "$STACK" --entries e.js --clear-lock`;
+  };
+
+  test.each([
+    ['printf-v-overrides-stack', stackFrom('printf -v STACK %s prod\n')],
+    ['source-overrides-stack', stackFrom('source ./deploy-target.sh\n')],
+    ['yaml-env-stack', stackFrom('')],
+  ])('%s: a stack in a variable is not read', (_name, change) => {
+    expect(one(change)).toEqual([['stack', 'p.yml#deploy']]);
+  });
+
+  test('dynamic-matrix-copies-staging: a matrix that is not a literal mapping refuses', () => {
+    const job = deploy();
+    delete job.concurrency;
+    (job as any).strategy = { matrix: '${{ fromJSON(vars.RUNNERS) }}' };
+    const workflow = { on: { push: {} }, concurrency: group, jobs: { deploy: job } };
+    expect(rules(check({ 'p.yml': workflow }))).toEqual([['stack', 'p.yml#deploy']]);
+  });
+
+  test('read-prior-job-only-dispatch: a read in a job that may skip does not count', () => {
+    const lookup = {
+      ...deploy([{ id: 'before', run: 'pebble-infra outputs staging --github-output --if-exists' }]),
+      if: "github.event_name == 'workflow_dispatch'",
+      outputs: { url: '${{ steps.before.outputs.database_url }}' },
+    };
+    const apply = { ...deploy(migrateFirst('staging', 'needs.lookup.outputs.url')), needs: 'lookup', if: 'always()' };
+    expect(rules(check({ 'p.yml': { on: { push: {} }, jobs: { lookup, apply } } }))).toEqual([
+      ['migrate', 'p.yml#apply'],
+    ]);
+  });
+
+  test.each([
+    ['spaced-secret-lookup', "${{ secrets [ 'MISSING_TOKEN' ] }}"],
+    ['spaced-computed-secret-lookup', "${{ secrets [ format('MISSING_{0}', 'TOKEN') ] }}"],
+  ])('%s: secrets other than secrets.NAME refuses', (_name, value) => {
+    const job = deploy();
+    job.steps[2]!.env.TOKEN = value;
+    expect(check({ 'p.yml': { on: { push: {} }, jobs: { deploy: job } } })).toEqual([
+      { rule: 'secrets', job: 'p.yml#deploy', message: expect.stringContaining('other than as secrets.NAME') },
+    ]);
+  });
+
+  test('literal-symbolic-pr-overlap: a literal pr-<n> beside the PR form refuses', () => {
+    const pr = (stack: string, name: string) => ({
+      ...deploy(migrateFirst(stack)),
+      environment: 'preview',
+      concurrency: { group: name, 'cancel-in-progress': true },
+      env: state('stg', 'preview', 'preview'),
+    });
+    const jobs = {
+      fixed: pr('pr-1', 'preview-fixed'),
+      each: pr('"pr-${{ github.event.pull_request.number }}"', 'preview-${{ github.event.pull_request.number }}'),
+    };
+    expect(rules(check({ 'p.yml': { on: { pull_request: {} }, jobs } }, { secrets: { preview: TABLE } }))).toEqual([
+      ['stack', 'p.yml#fixed'],
+    ]);
+  });
+
+  test('literal-role-lookalike: role-to-assume without ${{ }} is the literal text', () => {
+    expect(
+      one((job) => {
+        job.steps[0] = { ...credentials, with: { ...credentials.with, 'role-to-assume': 'secrets.ROLE' } };
+        job.steps.push({ env: { ROLE: '${{ secrets.ROLE }}' }, run: 'test -n "$ROLE"' });
+      })
+    ).toEqual([['state', 'p.yml#deploy']]);
+  });
+
+  test('literal-values-lookalike: PEBBLE_INFRA_VALUES without ${{ }} hands the CLI no values', () => {
+    expect(one((job) => (job.steps[3]!.env = { PEBBLE_INFRA_VALUES: 'toJSON(secrets)' }))).toEqual([
+      ['secrets', 'p.yml#deploy'],
+      ['secrets', 'environment staging'],
+    ]);
   });
 });
