@@ -1,6 +1,7 @@
 /**
  * Run a Pulumi program against a fake engine and get back every resource it registered, with the options the SDK
  * sent (protect, retainOnDelete, deleteBeforeReplace, import id, ignoreChanges, dependencies, parent). For product tests of an `infra/` program; no cloud calls.
+ * `checkWorkflows` checks the product's own workflow files against the rules `pebble-infra` depends on.
  */
 import * as pulumi from '@pulumi/pulumi';
 
@@ -233,3 +234,15 @@ export async function runProgram<T>(
 export function valueOf<T>(output: pulumi.Input<T>): Promise<T> {
   return new Promise((resolve) => pulumi.output(output).apply((value) => resolve(value as T)));
 }
+
+export {
+  checkWorkflows,
+  loadWorkflow,
+  type Concurrency,
+  type Workflow,
+  type WorkflowChecks,
+  type WorkflowJob,
+  type WorkflowRule,
+  type WorkflowStep,
+  type WorkflowViolation,
+} from './workflows.js';

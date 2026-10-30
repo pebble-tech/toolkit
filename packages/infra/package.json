@@ -46,7 +46,8 @@
     "@pulumi/postgresql": "3.18.2",
     "@pulumi/random": "4.21.4",
     "@pulumiverse/vercel": "5.21.1",
-    "pg": "8.23.1"
+    "pg": "8.23.1",
+    "yaml": "2.9.1"
   },
   "peerDependencies": {
     "@pulumi/pulumi": "^3.271.0"
