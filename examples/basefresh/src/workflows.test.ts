@@ -50,7 +50,10 @@ const checks = (
   region: 'ap-southeast-1',
   entries,
   secrets,
+  roleSecret: 'AWS_DEPLOY_ROLE_ARN',
   database: { output: 'database_url', stacks: ['preview', 'staging', 'prod'] },
+  // entries.ts's derive reads the runtime role and its password from the pooled URL.
+  derived: { PG_RUNTIME_ROLE: ['DATABASE_RUNTIME_URL'], PG_RUNTIME_PASSWORD: ['DATABASE_RUNTIME_URL'] },
 });
 
 /** The three workflows in a fresh directory, with `from` replaced by `to` in `file`: a broken copy of the fixture. */
@@ -106,7 +109,9 @@ describe('basefresh workflows', () => {
         {
           rule: 'lock',
           job: 'preview.yml#close',
-          message: expect.stringContaining('preview.yml#close runs on pr-<n> in group (none)'),
+          message: expect.stringContaining(
+            'preview.yml#close runs on pr-${{ github.event.pull_request.number }} in group (none)'
+          ),
         },
       ]);
     });
@@ -205,6 +210,15 @@ describe('basefresh workflows', () => {
       expect(found(workflows)).toEqual([['state', 'deploy-staging.yml#prod-preview']]);
     });
 
+    test('a job assumes its environment’s deploy role secret and no other', () => {
+      const workflows = broken(
+        'deploy-production.yml',
+        'role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}',
+        'role-to-assume: ${{ secrets.PG_ADMIN_URL }}'
+      );
+      expect(found(workflows)).toEqual([['state', 'deploy-production.yml#deploy']]);
+    });
+
     test('a job logs in to its own stack’s state and key', () => {
       const workflows = broken(
         'deploy-staging.yml',
@@ -238,14 +252,17 @@ describe('basefresh workflows', () => {
     });
 
     test.each(['preview', 'staging', 'prod'] as const)(
-      '%s: the deploy role trusts the environment the checks expect',
+      '%s: the deploy role is named for its env and trusts the environment the checks expect',
       async (env) => {
         const { resources } = await runProgram({ project: 'basefresh-bootstrap', stack: env }, () => bootstrap(env));
         const role = resources.find((r) => r.type === 'aws:iam/role:Role')!;
         const subjects = JSON.parse(role.inputs.assumeRolePolicy).Statement[0].Condition.StringEquals[
           'token.actions.githubusercontent.com:sub'
         ];
-        expect(subjects).toEqual([`repo:pebble-tech/basefresh:environment:${githubEnvironment(env)}`]);
+        expect([role.inputs.name, subjects]).toEqual([
+          `basefresh-${env}-deploy`,
+          [`repo:pebble-tech/basefresh:environment:${githubEnvironment(env)}`],
+        ]);
       }
     );
   });
