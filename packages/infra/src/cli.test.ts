@@ -813,6 +813,49 @@ describe('preview stacks (Postgres)', () => {
     ]).toEqual([true, 0, [], false, true]);
   });
 
+  test('remove keeps the state and the database when destroy leaves a Worker behind', async (ctx) => {
+    ctx.skip(noPostgres, noPostgresReason);
+    const p = product();
+    p.plan([
+      {
+        result: 'ok',
+        resources: [
+          'pulumi:pulumi:Stack',
+          'pebbletech:index:Stage',
+          'pebbletech:index:Database',
+          'postgresql:index/database:Database',
+          'pebbletech:index:Worker',
+          'cloudflare:index/workersScript:WorkersScript',
+        ],
+      },
+      { command: 'destroy', result: 'fail', message: 'cloudflare deletion refused: 403' },
+    ]);
+    await p.run(['up', 'pr-81010', '--entries', 'entries.mjs'], { ...SECRETS, PG_ADMIN_URL: adminUrl() });
+    await sql('drop database if exists acme_pr_81010 with (force)');
+    await sql('create database acme_pr_81010');
+    try {
+      const before = p.commands().length;
+      const result = await p.run(['remove', 'pr-81010', '--entries', 'entries.mjs', '--clear-lock'], {
+        PG_ADMIN_URL: adminUrl(),
+      });
+      expect([
+        result.code,
+        result.stderr.split('\n')[0],
+        matching(p.commands().slice(before), /stack rm|aws s3 rm/),
+        p.stateObjects().filter((o) => o.startsWith('stacks/')),
+        await databaseExists('acme_pr_81010'),
+      ]).toEqual([
+        1,
+        'pulumi destroy -s pr-81010 failed and the stack still holds cloudflare:index/workersScript:WorkersScript, pebbletech:index:Worker, beyond its database; its state is kept so another remove can finish once the cause is fixed:',
+        [],
+        ['stacks/acme/pr-81010.json'],
+        true,
+      ]);
+    } finally {
+      await sql('drop database if exists acme_pr_81010 with (force)');
+    }
+  });
+
   test('remove without --clear-lock leaves a locked stack and fails', async (ctx) => {
     ctx.skip(noPostgres, noPostgresReason);
     const p = product();
