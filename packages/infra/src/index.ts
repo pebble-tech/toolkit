@@ -29,3 +29,5 @@ export {
 } from './vercel-project.js';
 export { DeployRole, type DeployRoleArgs } from './deploy-role.js';
 export { Operators, type OperatorsArgs } from './operators.js';
+export { stackKind } from './names.js';
+export { configWrites, type ConfigValues, type ConfigWrite, type EntriesModule, type Entry } from './config.js';
