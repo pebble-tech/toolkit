@@ -283,3 +283,46 @@ expect(resources.filter((r) => r.type === 'aws:lambda/function:Function' && !r.p
 
 [`examples/basefresh`](https://github.com/pebble-tech/toolkit/tree/main/examples/basefresh) is a whole product program
 with its tests.
+
+### Check the workflows
+
+`checkWorkflows` reads the product's own workflow files and returns every violation, each naming its job
+(`<file>#<job>`) and rule; a product's test expects none. It checks rules, never a job graph or a trigger:
+
+```ts
+import { checkWorkflows } from '@pebbletech/infra/testing';
+import * as entries from './entries.js';
+
+expect(
+  checkWorkflows({
+    workflows: ['preview.yml', 'deploy-staging.yml', 'deploy-production.yml'].map((f) => `../.github/workflows/${f}`),
+    product: 'basefresh',
+    region: 'ap-southeast-1',
+    entries,
+    // Every secret set in each GitHub environment: data, kept next to the test.
+    secrets: { preview: ['AWS_DEPLOY_ROLE_ARN', 'PG_ADMIN_URL'], staging: [/* … */], production: [/* … */] },
+    database: { output: 'database_url', stacks: ['preview', 'staging', 'prod'] },
+  })
+).toEqual([]);
+```
+
+| Rule | A job breaks it when |
+|---|---|
+| `stack` | a `pebble-infra` step names a stack the helper cannot read, or a step runs `pulumi` directly (other than `login`) |
+| `state` | it touches a stack outside the GitHub environment that stack's deploy role trusts (`production` for `prod`, `staging` for `shared`), before a `configure-aws-credentials` step whose `role-to-assume` is a secret, or with a `PULUMI_BACKEND_URL` or `PULUMI_SECRETS_PROVIDER` other than that stack's (`deployState`) |
+| `secrets` | it reads `secrets.X` that its environment does not set; a step with `PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}` runs `configure`, `up` or `preview` and the table, the step's env and `derive` leave a required entry unset (or `PG_ADMIN_URL`, on a `pr-<n>` stack with `previewDatabase`); or the table lists a secret no job reads |
+| `lock` | a `preview` or `prepare --preview-only` passes `--clear-lock`; on a long-lived stack a job passing `--clear-lock` holds a group another job on that stack does not, or one that may cancel in progress (its own or the workflow's); a job on a `pr-<n>` stack is outside the one group every other job on those stacks holds; two jobs of one workflow on one stack share only the workflow's group and neither needs the other |
+| `concurrency` | a long-lived stack whose lock a job clears is touched by more than one job, and a job's group does not set `queue: max` (a newer run would drop a pending one) |
+| `migrate` | it runs `up` on a stack in `database.stacks` before a step reads that stack's URL from `pebble-infra outputs <stack> --github-output --if-exists` (or a job output carrying it); that step is not guarded on the URL; or no step after `up` migrates the first deploy |
+
+A stack is read from the step: a literal name, `$VAR` from the step, job or workflow env, a matrix list (`include`
+and `exclude` too) or a `workflow_dispatch` input of type `choice`; each leg or option is checked on its own. Any other
+expression fails the `stack` rule until the test declares it: `stacks: { 'release.yml#deploy': ['prod'] }`.
+
+A first deploy has no stack before `up`, so `outputs --if-exists` writes nothing. The workflow marks it with two
+guards on that output: the migrate step before `up` runs `if: steps.before.outputs.database_url != ''`, and a step
+after `up` runs `if: steps.before.outputs.database_url == ''`, reading `steps.up.outputs.database_url`. The helper
+recognises the pair by those `if`s. `examples/basefresh/.github/workflows` holds three workflows written this way.
+
+`loadWorkflow(path)` returns one parsed workflow, for checks of the product's own (the jobs a release run holds, say).
+The helper and `yaml` load only through `@pebbletech/infra/testing`.
