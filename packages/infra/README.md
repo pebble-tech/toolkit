@@ -348,6 +348,66 @@ Values come from `PEBBLE_INFRA_VALUES` first, when it holds a JSON object (in a 
 strings is refused without repeating it, and no child process (Pulumi, `aws`, the database script) gets the variable.
 `PG_ADMIN_URL` is read the same way.
 
+## Workflow actions
+
+The toolkit repo ships two composite actions for a product's own workflows. Pin each by its full commit SHA, with the
+package version it belongs to in a comment, and keep the SHA and `@pebbletech/infra` in step:
+
+```yaml
+- uses: pebble-tech/toolkit/.github/actions/setup@<40-character SHA> # @pebbletech/infra@0.4.0
+```
+
+They decide no job graph and no trigger, and they never assume a role: AWS credentials stay a visible
+`aws-actions/configure-aws-credentials` step in the product's workflow.
+
+### setup
+
+One step in place of the five every deploying job repeats: pnpm from `packageManager`, Node.js from `.nvmrc`,
+`pnpm install --frozen-lockfile`, the Pulumi CLI and its plugin cache. It also sets `GITHUB_TOKEN` to the job's token
+for Pulumi's plugin downloads, unless the job sets one.
+
+The CLI version is the version of the `@pulumi/pulumi` the product installed, read from `infra` after the install.
+That package is the one source: Renovate bumps it, and the CLI follows, so the CLI never drifts from the SDK the program
+runs with. No input sets a version. Setup stops, naming the package, when `infra` has no `@pulumi/pulumi` installed.
+The plugin cache key holds that version and the lockfile's hash.
+
+| Input | Default | |
+|---|---|---|
+| `infra` | `infra` | the directory, from the repository root, whose installed `@pulumi/pulumi` sets the version |
+| `pulumi` | `true` | `false` skips the CLI, its cache and the token, for a job that never runs `pulumi` (a smoke) |
+
+### pulumi
+
+Optional: a `uses:` step in place of a `run:` line, for `up`, `preview` and `remove`. It runs
+`pnpm --dir <infra> exec pebble-infra <command> <stack> --entries=<entries>` with `--clear-lock` and `--summary` when
+set, from the product's own `node_modules`, after `pulumi login "$PULUMI_BACKEND_URL"` when that is set. Every input
+reaches `pebble-infra` as one argument. It stops before running anything when the installed `@pebbletech/infra`'s
+major.minor is not the action's own: pin the action at the commit of the version the product installs. Read the URL
+before `up` with a `run:` line (`pebble-infra outputs <stack> --github-output --if-exists`), as below.
+
+```yaml
+- name: Pulumi up (prod)
+  id: up
+  uses: pebble-tech/toolkit/.github/actions/pulumi@<40-character SHA> # @pebbletech/infra@0.4.0
+  env:
+    PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}
+  with:
+    command: up
+    stack: prod
+    entries: dist/entries.js
+    clear-lock: true
+- name: Migrate prod's new database (first release)
+  if: steps.before.outputs.database_url == ''
+  env:
+    DATABASE_URL: ${{ fromJSON(steps.up.outputs.json).database_url }}
+  run: pnpm db:migrate
+```
+
+A composite action cannot pass on outputs it does not name, so the action has one: `json`, every output `pebble-infra`
+wrote, keyed as it wrote them. Read `fromJSON(steps.<id>.outputs.json).<name>`, never `steps.<id>.outputs.<name>`.
+Inputs: `command`, `stack`, `entries` (all required), `clear-lock` and `summary` (`true` or `false`), `infra` (default
+`infra`). The step's `env:` reaches `pebble-infra` as on a `run:` line.
+
 ## Test a program
 
 `@pebbletech/infra/testing` runs a program against Pulumi's mocks and returns every registered resource with the
@@ -400,7 +460,7 @@ expect(
 
 | Rule | A job breaks it when |
 |---|---|
-| `stack` | the stack a `pebble-infra` step names is not one of the forms below and is not declared; a job holding state (`PULUMI_BACKEND_URL` or a credentials step) runs a local `uses: ./…` action; a job on a stack has a `strategy.matrix` that is not a literal mapping; the checked workflows touch both a literal `pr-<number>` and the PR form; or a step runs `pulumi` directly (other than `login`) |
+| `stack` | the stack a `pebble-infra` step names is not one of the forms below and is not declared; a job holding state (`PULUMI_BACKEND_URL` or a credentials step) runs a local `uses: ./…` action; a step runs a toolkit action other than `setup`, or the `pulumi` action with an input that is not a literal; a job on a stack has a `strategy.matrix` that is not a literal mapping; the checked workflows touch both a literal `pr-<number>` and the PR form; or a step runs `pulumi` directly (other than `login`) |
 | `state` | it touches a stack outside the GitHub environment that stack's deploy role trusts (`production` for `prod`, `staging` for `shared`); before a `configure-aws-credentials` step whose `role-to-assume` is exactly `${{ secrets.<roleSecret> }}`; or with a `PULUMI_BACKEND_URL` or `PULUMI_SECRETS_PROVIDER` other than that stack's (`deployState`) |
 | `secrets` | anywhere in the job as written a `${{ }}` reads `secrets.X` that its environment does not set, or names `secrets` in any other way (brackets, spaces, a computed name) except the whole expression `${{ toJSON(secrets) }}`; a step with `PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}` runs `configure`, `up` or `preview` and a required entry is unset (or `PG_ADMIN_URL`, on a `pr-<n>` stack with `previewDatabase`); the table lists a secret no job reads; or the module exports `derive` and the test gives no `derived` |
 | `lock` | a `preview` or `prepare --preview-only` passes `--clear-lock`; on a long-lived stack whose lock a job clears, a job holds a group another job on it does not, holds an expression as its group, or may be cancelled in progress (its own group or the workflow's); a job on one `pr-<n>` stack holds another group than the other jobs on that stack; two jobs of one run on one stack, matrix copies included, share only the workflow's group with no `needs` between them (or, for copies, no `max-parallel: 1`) |
@@ -417,6 +477,11 @@ What the helper reads, and nothing else. It never works out what a non-literal v
   is written into each copy of the job; any other matrix refuses. Anything else, and a local action in a job holding
   state, needs a declaration: `stacks: { 'release.yml#deploy': ['prod'] }`. A declared local action is taken to clear
   the lock.
+- **The pulumi action**: a step whose `uses:` is `pebble-tech/toolkit/.github/actions/pulumi@<any ref>` (owner and repo
+  in any case, as GitHub matches them) is read as the `pebble-infra` command its `with:` makes: a literal `command`
+  (`up`, `preview` or `remove`), a stack in one of the forms above, `clear-lock` and `summary` written as `true` or
+  `false`. Any other input, value or path under `pebble-tech/toolkit/` (other than `setup`) refuses, naming the step.
+  Every rule then reads it as the `run:` line it stands for.
 - **Group**: on a long-lived stack, a literal string; on a PR stack, a literal or one keyed only on
   `${{ github.event.pull_request.number }}`. Groups are compared per stack, so each PR stack has its own. Workflows
   that use both a literal `pr-<number>` and the PR form refuse, since the two can be one stack.
@@ -426,7 +491,8 @@ What the helper reads, and nothing else. It never works out what a non-literal v
 - **Migrate first**: in the job that runs `up`, `pebble-infra outputs <stack> --github-output --if-exists` with an
   `id` and no `if:` comes before `up`; a read in another job does not count. Every step between it and `up` that
   reads the URL runs under exactly `if: steps.<id>.outputs.<output> != ''`, and a step after `up` (which has an `id`)
-  runs under exactly `if: steps.<id>.outputs.<output> == ''` and reads `steps.<up id>.outputs.<output>`. That pair
+  runs under exactly `if: steps.<id>.outputs.<output> == ''` and reads `steps.<up id>.outputs.<output>` (after the
+  `pulumi` action, `fromJSON(steps.<up id>.outputs.json).<output>`). That pair
   marks the first deploy, when there is no stack before `up` and the read writes nothing. `${{ }}` around a guard and
   its spacing do not matter; any other condition fails.
 
