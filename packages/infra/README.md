@@ -465,7 +465,7 @@ expect(
 | `secrets` | anywhere in the job as written a `${{ }}` reads `secrets.X` that its environment does not set, or names `secrets` in any other way (brackets, spaces, a computed name) except the whole expression `${{ toJSON(secrets) }}`; a step with `PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}` runs `configure`, `up` or `preview` and a required entry is unset (or `PG_ADMIN_URL`, on a `pr-<n>` stack with `previewDatabase`); the table lists a secret no job reads; or the module exports `derive` and the test gives no `derived` |
 | `lock` | a `preview` or `prepare --preview-only` passes `--clear-lock`; on a long-lived stack whose lock a job clears, a job holds a group another job on it does not, holds an expression as its group, or may be cancelled in progress (its own group or the workflow's); a job on one `pr-<n>` stack holds another group than the other jobs on that stack; two jobs of one run on one stack, matrix copies included, share only the workflow's group with no `needs` between them (or, for copies, no `max-parallel: 1`) |
 | `concurrency` | a long-lived stack whose lock a job clears is touched by more than one job, and a job's group does not set `queue: max` (a newer run would drop a pending one) |
-| `migrate` | it runs `up` on a stack in `database.stacks` without the migrate-first shape below in the same job, or with any other condition on its steps |
+| `migrate` | it runs `up` on a stack in `database.stacks` without the migrate-first shape below in the same job, or with any other condition on its steps, `up`'s included |
 
 What the helper reads, and nothing else. It never works out what a non-literal value will be:
 - **Expressions**: a value is an expression only inside `${{ }}`; bare text is literal, so `role-to-assume:
@@ -477,11 +477,12 @@ What the helper reads, and nothing else. It never works out what a non-literal v
   is written into each copy of the job; any other matrix refuses. Anything else, and a local action in a job holding
   state, needs a declaration: `stacks: { 'release.yml#deploy': ['prod'] }`. A declared local action is taken to clear
   the lock.
-- **The pulumi action**: a step whose `uses:` is `pebble-tech/toolkit/.github/actions/pulumi@<any ref>` (owner and repo
-  in any case, as GitHub matches them) is read as the `pebble-infra` command its `with:` makes: a literal `command`
-  (`up`, `preview` or `remove`), a stack in one of the forms above, `clear-lock` and `summary` written as `true` or
-  `false`. Any other input, value or path under `pebble-tech/toolkit/` (other than `setup`) refuses, naming the step.
-  Every rule then reads it as the `run:` line it stands for.
+- **The pulumi action**: a step whose `uses:` is `pebble-tech/toolkit/.github/actions/pulumi@<any ref>` (the owner and
+  repo in any case, as GitHub matches them; the path exactly; a ref may hold `/`) is read as the `pebble-infra` command
+  its `with:` makes: a literal `command` (`up`, `preview` or `remove`), a stack in one of the forms above, a literal
+  `entries` (required) and `infra`, and `clear-lock` and `summary` written as `true` or `false`. Any other input,
+  value or path under `pebble-tech/toolkit/` (other than `setup`) refuses, naming the step. Every rule then reads it as
+  the `run:` line it stands for.
 - **Group**: on a long-lived stack, a literal string; on a PR stack, a literal or one keyed only on
   `${{ github.event.pull_request.number }}`. Groups are compared per stack, so each PR stack has its own. Workflows
   that use both a literal `pr-<number>` and the PR form refuse, since the two can be one stack.
@@ -493,8 +494,10 @@ What the helper reads, and nothing else. It never works out what a non-literal v
   reads the URL runs under exactly `if: steps.<id>.outputs.<output> != ''`, and a step after `up` (which has an `id`)
   runs under exactly `if: steps.<id>.outputs.<output> == ''` and reads `steps.<up id>.outputs.<output>` (after the
   `pulumi` action, `fromJSON(steps.<up id>.outputs.json).<output>`). That pair
-  marks the first deploy, when there is no stack before `up` and the read writes nothing. `${{ }}` around a guard and
-  its spacing do not matter; any other condition fails.
+  marks the first deploy, when there is no stack before `up` and the read writes nothing. `up` itself has no `if:`. A
+  step reads an output only inside `${{ }}` and outside a quoted string: `DATABASE_URL: steps.up.outputs.database_url`
+  without `${{ }}`, or `${{ 'steps.up.outputs.database_url' }}`, reads nothing. `${{ }}` around a guard and its spacing
+  do not matter; any other condition fails.
 
 `examples/basefresh/.github/workflows` holds three workflows written this way. `loadWorkflow(path)` returns one
 parsed workflow, for checks of the product's own (the jobs a release run holds, say). The helper and `yaml` load only
