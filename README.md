@@ -22,7 +22,7 @@ groups. [packages/config/README.md](packages/config/README.md) has the example a
 ## Use `@pebbletech/infra`
 
 ```sh
-pnpm add @pebbletech/infra @pulumi/pulumi
+pnpm --dir infra add --save-exact @pebbletech/infra @pulumi/pulumi
 ```
 
 A product's `infra/` program builds every stage from one `Stage` (`pr-<n>`, `staging`, `prod`, plus `shared` for the
