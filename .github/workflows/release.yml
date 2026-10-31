@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -42,7 +42,7 @@ jobs:
       # None pending: `changeset publish` runs `pnpm publish` for every package whose version is not on npm yet
       # (prepack builds dist/) and tags each one; the action pushes the tags and creates the GitHub releases.
       - name: Version PR or publish
-        uses: changesets/action@v2
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           version-script: pnpm changeset version
           publish-script: pnpm release
