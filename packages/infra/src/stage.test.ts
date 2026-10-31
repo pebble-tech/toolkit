@@ -1,7 +1,20 @@
+import * as aws from '@pulumi/aws';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { NamespaceError, OwnershipError, Stage, StageError, deployState, stateKeyAlias } from './index.js';
-import { runProgram } from './testing.js';
+import {
+  ApiFunction,
+  DeployRole,
+  NamespaceError,
+  OwnershipError,
+  Stage,
+  StageError,
+  deployState,
+  stateKeyAlias,
+} from './index.js';
+import { type Registration, runProgram } from './testing.js';
 
 const stageIn = async (stack: string, product = 'basefresh') => {
   const { result, resources } = await runProgram({ project: product, stack }, () => new Stage('stage', { product }));
@@ -99,6 +112,66 @@ describe('Stage', () => {
     expect(stage.name()).toBe('basefresh-shared');
     expect(() => stage.databaseName()).toThrow(OwnershipError);
     expect(() => stage.hostname('app', 'pebbletech.my')).toThrow(OwnershipError);
+  });
+});
+
+/** Whether the AWS SDK's resource class for `type` (`aws:<module>/<name>:<Class>`) sends a `tags` input. */
+function takesTags(type: string): boolean {
+  const [, module, name] = /^aws:([^/]+)\/[^:]+:(.+)$/.exec(type)!;
+  const resource = (aws as unknown as Record<string, Record<string, unknown>>)[module!]![name!];
+  return String(resource).includes('resourceInputs["tags"] = args?.tags');
+}
+
+describe('cost tags', () => {
+  // Cost per product is read from the `product` and `env` tags. Every component that creates AWS resources, in every
+  // stack it allows, through the mocks: ApiFunction (its alarm included) and the DeployRole of each env.
+  test('every AWS resource of a type that takes tags carries product and env', async () => {
+    const code = mkdtempSync(join(tmpdir(), 'pebbletech-infra-tags-'));
+    writeFileSync(join(code, 'index.js'), 'export const handler = async () => ({ statusCode: 200 });\n');
+    const created: Registration[] = [];
+    for (const stack of ['pr-7', 'staging', 'prod']) {
+      const { resources } = await runProgram({ project: 'basefresh', stack }, () => {
+        const stage = new Stage('stage', { product: 'basefresh' });
+        new ApiFunction('api', {
+          stage,
+          code,
+          domain: { hostname: stage.hostname('api', 'pebbletech.my'), zoneId: 'zone-1' },
+          alarm: { topicArn: 'arn:aws:sns:ap-southeast-1:123456789012:alerts' },
+        });
+      });
+      created.push(...resources);
+    }
+    for (const env of ['preview', 'staging', 'prod'] as const) {
+      const { resources } = await runProgram(
+        { project: 'basefresh-bootstrap', stack: env },
+        () =>
+          new DeployRole('deploy', {
+            product: 'basefresh',
+            env,
+            apex: 'pebbletech.my',
+            github: { org: 'pebble-tech', repo: 'basefresh' },
+          })
+      );
+      created.push(...resources);
+    }
+
+    const tagged = created.filter((r) => r.type.startsWith('aws:') && takesTags(r.type));
+    expect(new Set(tagged.map((r) => r.type))).toEqual(
+      new Set([
+        'aws:acm/certificate:Certificate',
+        'aws:apigatewayv2/api:Api',
+        'aws:apigatewayv2/domainName:DomainName',
+        'aws:apigatewayv2/stage:Stage',
+        'aws:cloudwatch/logGroup:LogGroup',
+        'aws:cloudwatch/metricAlarm:MetricAlarm',
+        'aws:iam/policy:Policy',
+        'aws:iam/role:Role',
+        'aws:lambda/function:Function',
+      ])
+    );
+    expect(
+      tagged.filter((r) => r.inputs.tags?.product !== 'basefresh' || !r.inputs.tags?.env).map((r) => r.urn)
+    ).toEqual([]);
   });
 });
 
