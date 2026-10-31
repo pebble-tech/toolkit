@@ -301,22 +301,51 @@ by a new one.
 
 ## Use it
 
-```sh
-pnpm add @pebbletech/infra @pulumi/pulumi
-```
+A product's repository holds only what is about that product: its `infra/` program, its entries module, its own
+workflow files and its runbook. The toolkit decides no job graph and no trigger; it ships the pieces below, which a
+product composes in this order.
 
-Use pnpm. `@pulumi/pulumi` declares `typescript <7` as an optional peer; pnpm warns, but npm refuses to install it next
-to TypeScript 7, so npm users need an `overrides` entry or `--legacy-peer-deps`.
+1. **Install** the package in `infra/`, a package of the product's pnpm workspace, and pin it exactly. Until 0.4.0 is
+   out, `@pebbletech/infra@next` is the 0.4.0-next.N prerelease.
 
-```ts
-import { Database, Stage } from '@pebbletech/infra';
-import * as pulumi from '@pulumi/pulumi';
+   ```sh
+   pnpm --dir infra add --save-exact @pebbletech/infra @pulumi/pulumi
+   ```
 
-const config = new pulumi.Config();
-const stage = new Stage('stage', { product: 'basefresh' });
-const db = new Database('db', { stage, adminUrl: config.requireSecret('pgAdminUrl') });
-export const databaseUrl = db.directUrl;
-```
+   Use pnpm. `@pulumi/pulumi` declares `typescript <7` as an optional peer; pnpm warns, but npm refuses to install it
+   next to TypeScript 7, so npm users need an `overrides` entry or `--legacy-peer-deps`.
+2. **Write the program** from the components above, and export what the workflows read as `outputs`, which
+   `pebble-infra` reads by default. Compile it with `tsc` ([Precompile the program](#precompile-the-program)).
+
+   ```ts
+   import { Database, Stage } from '@pebbletech/infra';
+   import * as pulumi from '@pulumi/pulumi';
+
+   const config = new pulumi.Config();
+   const stage = new Stage('stage', { product: 'basefresh' });
+   const db = new Database('db', { stage, adminUrl: config.requireSecret('pgAdminUrl') });
+   export const outputs = { databaseUrl: db.directUrl };
+   ```
+3. **List its config once**, in the entries module ([The entries module](#the-entries-module)): every stack config
+   value, the variable it comes from, and the stacks that need it.
+4. **Run the stack steps with `pebble-infra`**, from `infra/`'s own `node_modules`, never through `npx`
+   ([Run the stack steps](#run-the-stack-steps)): `outputs` before `up` to migrate first, `up`, `preview`, `remove`.
+5. **Write the workflows.** Each deploying job runs the `setup` action, a visible
+   `aws-actions/configure-aws-credentials` step, then `pebble-infra` lines or the optional `pulumi` action
+   ([Workflow actions](#workflow-actions)). The web-only production workflow below is one to start from.
+6. **Check them in a test** with `checkWorkflows` from `@pebbletech/infra/testing`, experimental in 0.4
+   ([Check the workflows](#check-the-workflows)), with the product's GitHub environment secrets as data.
+7. **Wire the alarm topic** if the program has an `ApiFunction`: each account bootstrap's `alarmTopicArn`, stored per
+   GitHub environment and passed as `alarm: { topicArn }` ([Errors alarm](#errors-alarm)). Without it the alarm
+   notifies no one. A product on 0.3.x first follows [Upgrade to 0.4](#upgrade-to-04).
+8. **Leave `pebble_operators` to the cluster.** A product program constructs no `Operators`; its people are added to the
+   cluster operators program's list ([Operators](#operators)). On a fresh cluster that program is applied before any
+   product stack.
+9. **Keep the pins in step** with one Renovate group for the package and the action SHAs ([Renovate](#renovate)).
+
+Before the first deploy, Kong mints the product's admins ([Mint a product's admins](#mint-a-products-admins)) and the
+product's `infra/bootstrap` (a `DeployRole` per env) is applied by hand with SSO ([Ownership](#ownership)). Each AWS
+account's bootstrap and each cluster's operators program already exist; neither belongs to the product.
 
 ### Precompile the program
 
@@ -335,6 +364,118 @@ main: dist/index.js
 
 Run `tsc -p infra` before every `pulumi preview` or `pulumi up`. Bundles (`ApiFunction.code`, `Worker.script`) come
 from the product's own build; the components never bundle.
+
+### A web-only production workflow
+
+A product whose only app is a Vercel web app on a database: `shared` owns the Vercel project, `pr-<n>` a database, and
+`staging` and `prod` a database and the web app's env vars and domain. This is its whole production workflow:
+migrate, `pulumi up`, then the web deploy.
+
+<!-- examples/web-only/.github/workflows/deploy-production.yml -->
+```yaml
+name: Deploy production
+
+# Each published release: migrate prod's database, `pulumi up` prod, then deploy the web app to Vercel's production
+# target. The database is migrated before `up`, except on the first release, when there is none yet: then right after.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  APEX: pebbletech.my
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    # The only job on prod, and the one that clears its lock (`clear-lock`). Never cancel: a cancelled `pulumi up` leaves
+    # its lock and can leave an operation half done. Any other job on prod joins this group, with `queue: max`.
+    concurrency:
+      group: pulumi-prod
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PULUMI_BACKEND_URL: s3://pebble-prd-pulumi-state/notes/prod?region=ap-southeast-1
+      PULUMI_SECRETS_PROVIDER: awskms://alias/pebble-prd-pulumi-prod?region=ap-southeast-1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Pin both toolkit actions at the commit tagged @pebbletech/infra@<the version infra/ installs>.
+      - name: Set up pnpm, Node.js, the dependencies and the Pulumi CLI
+        uses: pebble-tech/toolkit/.github/actions/setup@0000000000000000000000000000000000000000 # @pebbletech/infra@0.4.0
+
+      - name: Build the infra program
+        run: pnpm --dir infra build
+
+      - name: Assume the prod deploy role
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-southeast-1
+
+      - name: Prod's database URL, before up (nothing before the first release)
+        id: before
+        run: |
+          pulumi login "$PULUMI_BACKEND_URL"
+          pnpm --dir infra exec pebble-infra outputs prod --github-output --if-exists
+
+      - name: Migrate prod
+        if: steps.before.outputs.database_url != ''
+        env:
+          DATABASE_URL: ${{ steps.before.outputs.database_url }}
+        run: pnpm db:migrate
+
+      - name: Pulumi up (prod)
+        id: up
+        uses: pebble-tech/toolkit/.github/actions/pulumi@0000000000000000000000000000000000000000 # @pebbletech/infra@0.4.0
+        env:
+          PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}
+        with:
+          command: up
+          stack: prod
+          entries: dist/entries.js
+          clear-lock: true
+
+      - name: Migrate prod's new database (first release)
+        if: steps.before.outputs.database_url == ''
+        env:
+          DATABASE_URL: ${{ fromJSON(steps.up.outputs.json).database_url }}
+        run: pnpm db:migrate
+
+      # The prod stack has set the project's production env vars and domain; this builds and deploys the app.
+      - name: Deploy the web app to Vercel (production)
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(steps.up.outputs.json).project_id }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
+        run: |
+          pnpm exec vercel pull --scope "$VERCEL_ORG_ID" --yes --environment=production --token "$VERCEL_TOKEN"
+          pnpm exec vercel build --scope "$VERCEL_ORG_ID" --prod --token "$VERCEL_TOKEN"
+          pnpm exec vercel deploy --scope "$VERCEL_ORG_ID" --prebuilt --prod --yes --token "$VERCEL_TOKEN"
+```
+
+What it assumes of the product:
+
+- `infra/`'s `build` script compiles the program to `dist/`, with the entries module at `dist/entries.js`
+  ([`examples/web-only/src/entries.ts`](https://github.com/pebble-tech/toolkit/tree/main/examples/web-only/src/entries.ts)),
+  and the prod stack exports `databaseUrl` and `projectId`.
+- The root `package.json` has a `db:migrate` script reading `DATABASE_URL`, and `vercel` as a dev dependency.
+- The `production` GitHub environment sets `AWS_DEPLOY_ROLE_ARN`, `PG_ADMIN_URL`, `PG_RUNTIME_ROLE`,
+  `PG_RUNTIME_PASSWORD`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_API_TOKEN`, `VERCEL_API_TOKEN` and `VERCEL_TEAM_ID`.
+- The toolkit's two actions are pinned at the commit tagged `@pebbletech/infra@<version>` for the version `infra/`
+  installs, in place of the all-zero SHA.
+
+[`examples/web-only`](https://github.com/pebble-tech/toolkit/tree/main/examples/web-only) holds this workflow, its
+program and the test that runs `checkWorkflows` on it. [`examples/basefresh`](https://github.com/pebble-tech/toolkit/tree/main/examples/basefresh)
+is the fuller reference: previews, staging with `shared`, a preview of prod on every push, an API, a Worker and a
+read-only smoke.
 
 ## Run the stack steps
 
@@ -415,8 +556,9 @@ strings is refused without repeating it, and no child process (Pulumi, `aws`, th
 
 ## Workflow actions
 
-The toolkit repo ships two composite actions for a product's own workflows. Pin each by its full commit SHA, with the
-package version it belongs to in a comment, and keep the SHA and `@pebbletech/infra` in step:
+The toolkit repo ships two composite actions for a product's own workflows. Pin each by the full SHA of the commit
+tagged `@pebbletech/infra@<version>`, for the version `infra/` installs, with that version in a comment, and keep the
+SHA and `@pebbletech/infra` in step ([Renovate](#renovate)):
 
 ```yaml
 - uses: pebble-tech/toolkit/.github/actions/setup@<40-character SHA> # @pebbletech/infra@0.4.0
@@ -472,6 +614,40 @@ A composite action cannot pass on outputs it does not name, so the action has on
 wrote, keyed as it wrote them. Read `fromJSON(steps.<id>.outputs.json).<name>`, never `steps.<id>.outputs.<name>`.
 Inputs: `command`, `stack`, `entries` (all required), `clear-lock` and `summary` (`true` or `false`), `infra` (default
 `infra`). The step's `env:` reaches `pebble-infra` as on a `run:` line.
+
+### Renovate
+
+The package and the two action pins move together: one Renovate group. The pins need a custom regex manager, because
+Renovate's GitHub Actions manager reads a version comment only as a plain version (`# v1.2.3`, `# tag=v1.2.3`), not as
+`# @pebbletech/infra@1.2.3`; left to it, a SHA with no version it can read would follow the toolkit's default branch.
+The regex manager reads the SHA and the version from the toolkit's release tags (`@pebbletech/infra@<version>`), and
+rewrites both together.
+
+The Pulumi CLI needs no manager of its own: `setup` installs the version of the `@pulumi/pulumi` the product installed,
+which Renovate's npm manager already bumps.
+
+```json
+{
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStrings": [
+        "uses: pebble-tech/toolkit/\\.github/actions/[a-z-]+@(?<currentDigest>[0-9a-f]{40}) # @pebbletech/infra@(?<currentValue>\\S+)"
+      ],
+      "depNameTemplate": "@pebbletech/infra",
+      "packageNameTemplate": "pebble-tech/toolkit",
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "npm",
+      "extractVersionTemplate": "^@pebbletech/infra@(?<version>.+)$"
+    }
+  ],
+  "packageRules": [
+    { "matchManagers": ["github-actions"], "matchPackageNames": ["pebble-tech/toolkit"], "enabled": false },
+    { "matchDepNames": ["@pebbletech/infra"], "groupName": "@pebbletech/infra" }
+  ]
+}
+```
 
 ## Test a program
 
@@ -564,6 +740,6 @@ What the helper reads, and nothing else. It never works out what a non-literal v
   without `${{ }}`, or `${{ 'steps.up.outputs.database_url' }}`, reads nothing. `${{ }}` around a guard and its spacing
   do not matter; any other condition fails.
 
-`examples/basefresh/.github/workflows` holds three workflows written this way. `loadWorkflow(path)` returns one
+`examples/basefresh/.github/workflows` holds three workflows written this way, and `examples/web-only` one. `loadWorkflow(path)` returns one
 parsed workflow, for checks of the product's own (the jobs a release run holds, say). The helper and `yaml` load only
 through `@pebbletech/infra/testing`.

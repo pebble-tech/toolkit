@@ -281,6 +281,28 @@ importers:
         specifier: 'catalog:'
         version: 5.0.5(@opentelemetry/api@1.10.0)(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(yaml@2.9.1))
 
+  examples/web-only:
+    dependencies:
+      '@pebbletech/infra':
+        specifier: workspace:*
+        version: link:../../packages/infra
+      '@pulumi/pulumi':
+        specifier: 'catalog:'
+        version: 3.271.0(typescript@7.0.2)
+      '@pulumiverse/vercel':
+        specifier: 5.21.1
+        version: 5.21.1(typescript@7.0.2)
+    devDependencies:
+      '@types/node':
+        specifier: 24.19.2
+        version: 24.19.2
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.5(@opentelemetry/api@1.10.0)(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(yaml@2.9.1))
+
   packages/config:
     dependencies:
       oxfmt:

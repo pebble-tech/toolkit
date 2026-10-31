@@ -1,0 +1,86 @@
+name: Deploy production
+
+# Each published release: migrate prod's database, `pulumi up` prod, then deploy the web app to Vercel's production
+# target. The database is migrated before `up`, except on the first release, when there is none yet: then right after.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  APEX: pebbletech.my
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    # The only job on prod, and the one that clears its lock (`clear-lock`). Never cancel: a cancelled `pulumi up` leaves
+    # its lock and can leave an operation half done. Any other job on prod joins this group, with `queue: max`.
+    concurrency:
+      group: pulumi-prod
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PULUMI_BACKEND_URL: s3://pebble-prd-pulumi-state/notes/prod?region=ap-southeast-1
+      PULUMI_SECRETS_PROVIDER: awskms://alias/pebble-prd-pulumi-prod?region=ap-southeast-1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Pin both toolkit actions at the commit tagged @pebbletech/infra@<the version infra/ installs>.
+      - name: Set up pnpm, Node.js, the dependencies and the Pulumi CLI
+        uses: pebble-tech/toolkit/.github/actions/setup@0000000000000000000000000000000000000000 # @pebbletech/infra@0.4.0
+
+      - name: Build the infra program
+        run: pnpm --dir infra build
+
+      - name: Assume the prod deploy role
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-southeast-1
+
+      - name: Prod's database URL, before up (nothing before the first release)
+        id: before
+        run: |
+          pulumi login "$PULUMI_BACKEND_URL"
+          pnpm --dir infra exec pebble-infra outputs prod --github-output --if-exists
+
+      - name: Migrate prod
+        if: steps.before.outputs.database_url != ''
+        env:
+          DATABASE_URL: ${{ steps.before.outputs.database_url }}
+        run: pnpm db:migrate
+
+      - name: Pulumi up (prod)
+        id: up
+        uses: pebble-tech/toolkit/.github/actions/pulumi@0000000000000000000000000000000000000000 # @pebbletech/infra@0.4.0
+        env:
+          PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}
+        with:
+          command: up
+          stack: prod
+          entries: dist/entries.js
+          clear-lock: true
+
+      - name: Migrate prod's new database (first release)
+        if: steps.before.outputs.database_url == ''
+        env:
+          DATABASE_URL: ${{ fromJSON(steps.up.outputs.json).database_url }}
+        run: pnpm db:migrate
+
+      # The prod stack has set the project's production env vars and domain; this builds and deploys the app.
+      - name: Deploy the web app to Vercel (production)
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(steps.up.outputs.json).project_id }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
+        run: |
+          pnpm exec vercel pull --scope "$VERCEL_ORG_ID" --yes --environment=production --token "$VERCEL_TOKEN"
+          pnpm exec vercel build --scope "$VERCEL_ORG_ID" --prod --token "$VERCEL_TOKEN"
+          pnpm exec vercel deploy --scope "$VERCEL_ORG_ID" --prebuilt --prod --yes --token "$VERCEL_TOKEN"
