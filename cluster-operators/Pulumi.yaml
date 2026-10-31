@@ -7,6 +7,6 @@ runtime:
     typescript: false
 main: dist/index.js
 config:
-  # The handover from a product's stacks adopts the cluster's existing group: README step 4 turns this on for the
-  # first apply and off once the stack holds the group. A fresh cluster leaves it off, and the program creates it.
+  # The handover from a product's stacks adopts the cluster's existing group: README step 2 turns this on for the
+  # first apply and step 4 turns it off once the stack holds the group. A fresh cluster leaves it off, and the program creates it.
   pebble-cluster-operators:adoptExisting: false

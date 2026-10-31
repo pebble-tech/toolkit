@@ -27,6 +27,8 @@ its admin, the cluster admin, is a role no product uses.
   its role is not on the list, naming the role that can revoke it and the line to run; it is a warning when its role
   is on the list. The cluster admin's own membership must give no access (`INHERIT FALSE, SET FALSE`), or it is refused
   the same way.
+- **The wrong cluster**: each stack records its cluster admin's role (`adminRole`, a secret). Each cluster has its own
+  roles, so a `CLUSTER_ADMIN_URL` for the other cluster names another role and is refused before any connection.
 
 Who holds what on `pebble_operators` after the handover, as `src/handover.postgres.test.ts` checks on a real Postgres:
 
@@ -78,10 +80,10 @@ for anything here. If any check differs, stop.
 
 ## Hand the group over
 
-On a cluster where a product's stacks created `pebble_operators` (today: base-app's `shared` stack on `pebble-stg`,
-its `prod` stack on `pebble-prd-shared`). Every member keeps access at every step; the order is what guarantees it.
-Below, `PRODUCT_ADMIN_URL` is that product's admin URL on this cluster (its `PG_ADMIN_URL` there), and the cluster
-admin's role is the username in `CLUSTER_ADMIN_URL` before the dot.
+On a cluster where the group was created by a product stack (the product's `shared` stack on the staging cluster,
+its `prod` stack on the production cluster): call it the product stack that created the group. Every member keeps
+access at every step; the order is what guarantees it. Below, `PRODUCT_ADMIN_URL` is that product's admin URL on this
+cluster (its `PG_ADMIN_URL` there), and the cluster admin's role is the username in `CLUSTER_ADMIN_URL` before the dot.
 
 Run this query after each step; it lists every membership that gives access:
 
@@ -111,6 +113,7 @@ Before step 1 it shows each member granted by the product admin, and nothing els
    pulumi login 's3://pebble-stg-pulumi-state/cluster-operators?region=ap-southeast-1'
    pulumi stack init pebble-stg --secrets-provider 'awskms://alias/pebble-stg-pulumi-staging?region=ap-southeast-1'
    pulumi config set adoptExisting true
+   pulumi config set --secret adminRole '<cluster admin role>'
    pulumi config set --secret members '["<role>", "<role>"]'
    pulumi preview
    ```
@@ -126,11 +129,12 @@ Before step 1 it shows each member granted by the product admin, and nothing els
 
    Check: the query shows each member twice, granted by the product admin and by the cluster admin.
 
-3. **Remove `Operators` from the product's stack** (`shared` for `pebble-stg`, `prod` for `pebble-prd-shared`). The
-   group is protected in that state, and a protected resource stops an apply only when its delete comes up, after the
-   member grants' deletes have run. Unprotect it first, so the apply that removes `Operators` runs to the end and
-   leaves nothing half-deleted. With the product's state credentials, right before the deploy of the change, with no
-   other deploy of that stack in between (an older program would protect it again):
+3. **Remove `Operators` from the product stack that created the group.** The group is protected in that state, so
+   the deploy that removes `Operators` fails its preview (`cannot be deleted because it is protected`) and changes
+   nothing until the group is unprotected (with `--skip-preview`, which a deploy should not use, the member grants'
+   deletes ran before the apply stopped at the group). Unprotect it first, with the product's state credentials,
+   right before the deploy of the change, with no other deploy of that stack in between (an older program would
+   protect it again):
 
    ```sh
    pulumi state unprotect 'urn:pulumi:<stack>::<project>::pebbletech:index:Operators$postgresql:index/role:Role::operators-group'
@@ -157,30 +161,11 @@ Before step 1 it shows each member granted by the product admin, and nothing els
 
 For `pebble-prd-shared`, the same four steps with `AWS_PROFILE=pbt-prd`, stack `pebble-prd-shared`,
 `s3://pebble-prd-pulumi-state/cluster-operators?region=ap-southeast-1`,
-`awskms://alias/pebble-prd-pulumi-prod?region=ap-southeast-1`, the product's production admin URL and its `prod`
-stack. Step 3 there lands with the product's next release.
+`awskms://alias/pebble-prd-pulumi-prod?region=ap-southeast-1`, the product's production admin URL and the product
+stack that created the group there. Step 3 lands with whatever deploys that stack: a merge for a staging-cluster stack,
+a release for a production one, each right after its unprotect and after this program's step 2 on that cluster.
 
-### What base-app changes (tec-346-base)
 
-The product side of step 3, once per cluster, in base-app at its current main:
-
-- `infra/src/app.ts`: drop `Operators` from the import, the `new Operators(...)` in the `shared` branch and the one
-  before `Database` in `prod`, and `operators` from `BaseInputs`. `Database` is unchanged.
-- `infra/src/config.ts`: drop the `operators` input and the import of `./operators.js`; `shared` no longer needs
-  `pgAdminUrl`, so drop `shared` from that entry's stacks.
-- `.github/workflows/deploy-staging.yml`: the `Pulumi up (shared)` step no longer passes `PG_ADMIN_URL`, and its two
-  comments about pebble-stg's operators group go.
-- `infra/operators.json`, `infra/src/operators.ts`, `infra/src/operators.test.ts`: delete. The lists move into the
-  cluster stacks' `members`, as ciphertext.
-- `infra/src/app.test.ts`: the `shared` and `prod` resource lists lose the `Operators` entries, and the test that the
-  group is applied before the database grant goes; `db-operators` stays. `infra/src/config.test.ts`: the `shared`
-  case no longer reads the admin URL.
-- `docs/deployment.md` (stacks table, database roles, "Operators"), `docs/platforms/github-pulumi-vercel-deploy.md`
-  (the `infra/operators.json` line) and `docs/runbooks/phase-2-cutover.md` ("Operators"; the cutover records stay as
-  history): the group is the cluster stack's; adding a person means `pulumi config set --secret members` in this
-  program, applied by Kong.
-- Order: step 3 for `pebble-stg` lands with the merge that deploys `shared`; for `pebble-prd-shared` with the release
-  that applies `prod`. Both after this program's step 2 on that cluster, and each right after its unprotect.
 
 ## Add or remove an operator
 
@@ -226,4 +211,9 @@ the group, and the cluster admin holds the creator's ADMIN OPTION. Apply it befo
   it while the cluster admin's ADMIN OPTION rests on its grant. Never run `DROP OWNED BY` it, or `REVOKE ... CASCADE`
   from it: `DROP OWNED BY` takes the cluster admin's ADMIN OPTION and every database's grant to the group, leaving the
   members' rows with no admin able to revoke them; `REVOKE pebble_operators FROM <cluster admin> CASCADE` takes every
-  membership the cluster admin granted. The test shows both.
+  membership the cluster admin granted. The test shows both. Its leftover implicit ADMIN OPTION still lets it grant
+  new members, rows only it can revoke (the cluster admin's `REVOKE` leaves them, and the next cluster preview refuses
+  them, naming it); and retiring it would first need a superuser to give the cluster admin its own ADMIN OPTION row
+  (`GRANT pebble_operators TO "<cluster admin role>" WITH ADMIN OPTION, INHERIT FALSE, SET FALSE`), after which the
+  creator could revoke its own grant without `CASCADE` and be dropped. PlanetScale may offer no such superuser, so keep
+  the role.
