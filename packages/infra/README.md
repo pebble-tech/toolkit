@@ -677,11 +677,14 @@ with its tests.
 ### Check the workflows
 
 Experimental in 0.4: the rules and the subset it reads may change in a minor release. It catches mistakes in a
-workflow written in good faith; it is not a security boundary. Two known gaps, both passing when they should fail:
+workflow written in good faith; it is not a security boundary. Three known gaps, all passing when they should fail:
 - a literal `strategy.matrix` whose `include` adds two entries on the same stack is read as one copy, so the `lock`
   rule does not see the two copies run at once;
 - a secret read after a `}}` inside a quoted string in the same expression, such as
-  `${{ format('{{"t":"{0}"}}', secrets.TOKEN) }}`, is not checked against the table.
+  `${{ format('{{"t":"{0}"}}', secrets.TOKEN) }}`, is not checked against the table;
+- shell control flow is not read: a `pebble-infra` command inside `if … fi`, `case`, after `||` or in a function
+  counts as run, so `if false; then pebble-infra prepare …; fi` satisfies the `migrate` rule's prepare. Write each
+  command as its own line.
 
 `checkWorkflows` reads the product's own workflow files and returns every violation, each naming its job
 (`<file>#<job>`) and rule; a product's test expects none. It checks rules, never a job graph or a trigger. It reads
