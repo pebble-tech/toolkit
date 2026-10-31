@@ -304,12 +304,28 @@ function wrapperCommand(step: WorkflowStep): Command | string {
   };
 }
 
-/** `pulumi <command>` run directly, other than logging in or reading the CLI's own state. */
+/** Pulumi's global flags that take no value; any other flag before the subcommand takes the next word, as cobra reads it. */
+const PULUMI_SWITCHES = new Set([
+  '--disable-integrity-checking',
+  '-e',
+  '--emoji',
+  '-Q',
+  '--fully-qualify-stack-names',
+  '--logflow',
+  '--logtostderr',
+  '--non-interactive',
+]);
+
+/** `pulumi <command>` run directly, after any global flags, other than logging in or reading the CLI's own state. */
 function rawPulumi(run: string): string[] {
   const allowed = new Set(['login', 'logout', 'version', 'whoami', 'about', 'plugin']);
-  return [...run.matchAll(/(?:^|[\s;&|(])pulumi\s+([a-z][\w-]*)/g)]
-    .map((m) => m[1]!)
-    .filter((command) => !allowed.has(command));
+  return [...run.replace(/\\\r?\n/g, ' ').matchAll(/(?:^|[\s;&|(])pulumi((?:[ \t]+[^\s;&|()]+)+)/g)].flatMap((m) => {
+    const words = m[1]!.trim().split(/[ \t]+/);
+    let i = 0;
+    while (words[i]?.startsWith('-')) i += words[i]!.includes('=') || PULUMI_SWITCHES.has(words[i]!) ? 1 : 2;
+    const command = /^[a-z][\w-]*/.exec(words[i] ?? '')?.[0];
+    return command && !allowed.has(command) ? [command] : [];
+  });
 }
 
 const stepEnv = (v: Variant, step: WorkflowStep) => ({ ...v.workflow.env, ...v.job.env, ...step.env });
@@ -354,6 +370,13 @@ function collectTouches(context: Context): void {
     steps.forEach((step, index) => {
       const push = (command: Command, stack: string) =>
         context.touches.push({ variant, index, step, command, stack, kind: kindOf(stack) });
+      if (holdsState && /^pulumi\/actions@/i.test(step.uses ?? '')) {
+        add(
+          'stack',
+          variant.id,
+          `${variant.label} step ${stepName(step, index)} runs ${step.uses} in a job holding state credentials; run Pulumi through pebble-infra, whose stack and lock the checks read`
+        );
+      }
       if (holdsState && step.uses?.startsWith('./')) {
         if (!declared) {
           add(

@@ -149,6 +149,57 @@ describe('checkWorkflows on workflows shaped differently', () => {
     ]);
   });
 
+  test('pulumi run directly after a global flag fails the same way; login after one passes', () => {
+    const raw = {
+      on: { push: {} },
+      jobs: {
+        deploy: {
+          'runs-on': 'ubuntu-latest',
+          steps: [
+            {
+              run: [
+                'pulumi --non-interactive login "$PULUMI_BACKEND_URL"',
+                'pulumi -C infra login s3://acme-state/acme/staging',
+                'pulumi -s staging up --yes',
+                'pulumi --cwd infra destroy --yes',
+                'pulumi --cwd=infra --non-interactive preview',
+                'pulumi -C infra cancel',
+              ].join('\n'),
+            },
+          ],
+        },
+      },
+    };
+    expect(
+      check({ 'raw.yml': raw }, { secrets: {} }).map((v) => /runs `pulumi (\S+)` directly/.exec(v.message)?.[1])
+    ).toEqual(['up', 'destroy', 'preview', 'cancel']);
+  });
+
+  test('a pulumi/actions step in a job holding state credentials fails, by name; without them it is not read', () => {
+    const job = (steps: object[]) => ({
+      on: { push: {} },
+      jobs: { deploy: { 'runs-on': 'ubuntu-latest', steps } },
+    });
+    const action = {
+      name: 'Deploy',
+      uses: 'pulumi/actions@v6',
+      with: { command: 'up', 'stack-name': 'prod', 'work-dir': 'infra' },
+    };
+    expect([
+      check({ 'a.yml': job([credentials, action]) }, { secrets: {} }),
+      check({ 'b.yml': job([action]) }, { secrets: {} }),
+    ]).toEqual([
+      [
+        {
+          rule: 'stack',
+          job: 'a.yml#deploy',
+          message: expect.stringContaining('step "Deploy" runs pulumi/actions@v6 in a job holding state credentials'),
+        },
+      ],
+      [],
+    ]);
+  });
+
   test('a lone job that clears staging’s lock holds no group, so two of its runs can overlap', () => {
     const deploy = {
       on: { push: {} },
