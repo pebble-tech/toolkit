@@ -202,7 +202,14 @@ pulumi stack output alarmTopicArn
 git add Pulumi.stg.yaml   # or Pulumi.prd.yaml; the address is ciphertext only
 ```
 
-Then confirm the subscription (step 9 above). Each product passes `alarmTopicArn` to its `ApiFunction`s; a product
+Then confirm the subscription (step 9 above).
+
+To change the address later, set `alarmEmail` again and `pulumi up`. The new subscription replaces the old one, and the
+old address is unsubscribed as soon as the new subscription is created, so alarms notify no one until the new address
+confirms. After every change, confirm again (step 9) and run its `aws sns list-subscriptions-by-topic` command until
+the subscription ARN is no longer `PendingConfirmation`.
+
+Each product passes `alarmTopicArn` to its `ApiFunction`s; a product
 stores it per GitHub environment (the pbt-stg topic for previews and staging, the pbt-prd topic for production), not
 in source, because the ARN holds the account id.
 
