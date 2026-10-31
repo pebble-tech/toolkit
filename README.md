@@ -6,7 +6,7 @@ copying config and infrastructure code from base-app.
 | Package | What it carries |
 |---|---|
 | [`@pebbletech/config`](packages/config) | base-app's tsconfig base, oxlint and oxfmt presets, and the lint-staged map |
-| [`@pebbletech/infra`](packages/infra) | Pulumi components for a product's `infra/` program: `Stage`, `VercelProject`, `Database`, `ApiFunction`, `Worker`, `DeployRole` |
+| [`@pebbletech/infra`](packages/infra) | Pulumi components for a product's `infra/` program (`Stage`, `VercelProject`, `Database`, `ApiFunction`, `Worker`, `DeployRole`, `Operators`), the `pebble-infra` CLI its workflows run, and `@pebbletech/infra/testing` |
 
 ## Use `@pebbletech/config`
 
@@ -33,11 +33,16 @@ frees the hostname); the components refuse anything else. Compile the program wi
 refuses that optional peer next to TypeScript 7 without an `overrides` entry or `--legacy-peer-deps`. `shared` and
 `prod` are protected, so their teardown starts with `pulumi state unprotect --all`. A `preview` deploy role can use
 only its state path and KMS key. A staging or prod deploy role can create a custom domain of any name (`POST` on `/domainnames` has no name condition), can edit routes, integrations and stages under another HTTP API's id, and can change a hostname in a sub-zone of its apex whose label ends with `-<product>-stg` or `-<product>` (for example `api-x-stg.foo-basefresh-stg.pebbletech.my`); API Gateway tag updates after creation are denied, and creation-time tags still arrive through `CreateApi`.
-[packages/infra/README.md](packages/infra/README.md) has the components, the naming table and the precompile setup;
-[examples/basefresh](examples/basefresh) is a whole product program with tests.
+[packages/infra/README.md](packages/infra/README.md) has the components, the naming table and, under "Use it", how a
+product composes 0.4: the program, its entries module, `pebble-infra`, the `setup` and `pulumi` actions in
+[.github/actions](.github/actions), the workflow checks and the Renovate group. [examples/web-only](examples/web-only)
+is a web-only product's program and production workflow; [examples/basefresh](examples/basefresh) is a whole product
+program with its three workflows, all tested.
 
-Each AWS account's shared bootstrap (GitHub OIDC provider, state bucket, state KMS keys, alarm topic) is the Pulumi
-program in [bootstrap/](bootstrap/README.md), applied by hand once per account.
+Two Pulumi programs here belong to no product and are applied by hand: [bootstrap/](bootstrap/README.md), each AWS
+account's shared bootstrap (GitHub OIDC provider, state bucket, state KMS keys, alarm topic), once per account; and
+[cluster-operators/](cluster-operators/README.md), each Postgres cluster's `pebble_operators` group and its members,
+once per cluster.
 
 ## Develop
 
@@ -48,6 +53,10 @@ pnpm install
 pnpm verify          # lint, format check, typecheck, build, tests
 BASE_APP_DIR=../base-app-monorepo pnpm test   # also checks the presets still match base-app
 ```
+
+The Postgres tests (`stack.postgres.test.ts`, `cli.test.ts`, `handover.postgres.test.ts`) run against
+`DATABASE_URL`, a local Postgres the tests may create and drop roles and databases in; without it they skip, except
+under `CI=true`, where they fail. CI gives them a Postgres service.
 
 ## Release
 
@@ -62,12 +71,21 @@ Changesets drives versions; `.github/workflows/release.yml` publishes.
    first) and creates a `<name>@<version>` git tag for each. The action pushes the tags and opens a GitHub release per
    package.
 
-Authentication: the first publish of each package uses the `NPM_TOKEN` repository secret (a granular npm token with
-publish rights on `@pebbletech`), passed as `NODE_AUTH_TOKEN`. After that first publish, switch the package to trusted
-publishing: on npmjs.com, package settings, add a trusted publisher for GitHub Actions with organisation
-`pebble-tech`, repository `toolkit` and workflow `release.yml`. Once every published package has one, delete the
-`env` block from the publish step and the `NPM_TOKEN` secret. The workflow already grants `id-token: write`, which is
-what npm checks; packages published that way get provenance, token publishes do not.
+Authentication: npm trusted publishing, with no token. Every published package has a trusted publisher on npmjs.com
+for GitHub Actions (organisation `pebble-tech`, repository `toolkit`, workflow `release.yml`), and the workflow's
+`id-token: write` is what npm checks; each publish gets provenance. A new package's first publish needs a trusted
+publisher set up on npm first.
+
+### Prereleases
+
+While `.changeset/pre.json` exists the repository is in changesets pre mode, with the tag `next`: the version PR
+versions a package as `<version>-next.<n>` (each later merge with a changeset raises `n`), and `changeset publish`
+publishes it to npm's `next` dist-tag, so `latest` and every product that did not opt in stay where they are.
+
+`@pebbletech/infra` 0.4 is in pre mode until base-app's recomposition on the prerelease is green. Then, on a branch,
+run `pnpm changeset pre exit`, commit the changed `.changeset/pre.json`, and merge: the next version PR versions
+`0.4.0` and deletes the pre-mode files, and merging it publishes `0.4.0` to `latest`. Products then move from the
+`next` version to `0.4.0`, and their action pins to the commit tagged `@pebbletech/infra@0.4.0`.
 
 ## License
 
