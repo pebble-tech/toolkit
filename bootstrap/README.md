@@ -23,7 +23,9 @@ applies it by hand with SSO, once per account. Nothing in it belongs to a produc
   functions `DeployRole` uses. A test fails if the two ever disagree.
 - Every resource but the email subscription is protected and retained: `pulumi destroy`, or a change that would
   delete or replace one, fails; after `pulumi state unprotect` a delete still leaves the resource in AWS and only drops
-  it from the state. The subscription is neither, so a new `alarmEmail` replaces it and unsubscribes the old address.
+  it from the state. The subscription is neither, so a new `alarmEmail` replaces it. The replacement unsubscribes the
+  old address only if that address had confirmed: a pending subscription cannot be deleted, so it stays until SNS
+  drops it ([Change the alarm address](#change-the-alarm-address)).
 - The alarm topic is where products' CloudWatch alarms send notifications: each product passes the `alarmTopicArn`
   output to its `ApiFunction`s (`alarm: { topicArn }`). It emails the `alarmEmail` address, which AWS asks to confirm
   first: the subscription stays pending, and nothing is delivered, until the address owner clicks the link in AWS's
@@ -161,7 +163,9 @@ Run every command from `bootstrap/`, in one shell.
 9. Confirm the subscription: AWS has emailed the address a link (subject "AWS Notification - Subscription
    Confirmation"). Until its owner clicks it, the subscription is pending and alarms email no one.
    `aws sns list-subscriptions-by-topic --topic-arn "$(pulumi stack output alarmTopicArn)"` shows
-   `PendingConfirmation` as the subscription ARN until then.
+   `PendingConfirmation` as the subscription ARN until then. The link works for 48 hours: SNS deletes a subscription
+   still unconfirmed after that, and it drops out of the list. To get a new link, run `pulumi up --refresh -s stg`:
+   the refresh finds the subscription gone and the update creates it again.
 
 ## Apply pbt-prd
 
@@ -204,14 +208,25 @@ git add Pulumi.stg.yaml   # or Pulumi.prd.yaml; the address is ciphertext only
 
 Then confirm the subscription (step 9 above).
 
-To change the address later, set `alarmEmail` again and `pulumi up`. The new subscription replaces the old one, and the
-old address is unsubscribed as soon as the new subscription is created, so alarms notify no one until the new address
-confirms. After every change, confirm again (step 9) and run its `aws sns list-subscriptions-by-topic` command until
-the subscription ARN is no longer `PendingConfirmation`.
-
 Each product passes `alarmTopicArn` to its `ApiFunction`s; a product
 stores it per GitHub environment (the pbt-stg topic for previews and staging, the pbt-prd topic for production), not
 in source, because the ARN holds the account id.
+
+### Change the alarm address
+
+Set `alarmEmail` again and `pulumi up`. The new subscription replaces the old one, and alarms notify no one at the new
+address until it confirms. The replacement can unsubscribe the old address only if it had confirmed. SNS refuses to
+delete a pending subscription: Pulumi drops it from the state, but it stays in SNS for up to 48 hours after it was
+created, and if the old address clicks its link in that window, it is confirmed and keeps receiving every alarm with
+nothing in the state to remove it.
+
+1. Before the change, list the subscriptions:
+   `aws sns list-subscriptions-by-topic --topic-arn "$(pulumi stack output alarmTopicArn)"`. If the current one shows
+   `PendingConfirmation`, either have its owner confirm it first, so the replacement can unsubscribe it, or wait until
+   it is 48 hours old and SNS has deleted it.
+2. Set `alarmEmail`, `pulumi up`, and confirm the new address (step 9).
+3. List the subscriptions again. Only the new address should be there; unsubscribe any other with
+   `aws sns unsubscribe --subscription-arn <its arn>`.
 
 ## When the preview is not what you expect
 

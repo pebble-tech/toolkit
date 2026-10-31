@@ -254,8 +254,9 @@ export function bootstrap(args: BootstrapArgs) {
   // would need a key policy that lets cloudwatch.amazonaws.com use it (alias/aws/sns does not), or alarms fail
   // silently; a notification holds an alarm's name and state, nothing secret.
   const alarms = new aws.sns.Topic('alarms', { name: `pebble-${args.account}-alarms`, tags }, { provider, ...keep });
-  // Not protected or retained: a new address replaces the subscription, and the old one is unsubscribed. AWS emails
-  // the address a confirmation link; nothing is delivered until its owner clicks it.
+  // Not protected or retained: a new address replaces the subscription. Only a confirmed old address is unsubscribed;
+  // SNS refuses to delete a pending one, which stays for up to 48 hours and can still be confirmed (README: "Change the
+  // alarm address"). AWS emails the address a confirmation link; nothing is delivered until its owner clicks it.
   new aws.sns.TopicSubscription(
     'alarms-email',
     { topic: alarms.arn, protocol: 'email', endpoint: pulumi.output(args.alarmEmail).apply(alarmAddress) },
