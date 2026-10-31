@@ -286,6 +286,13 @@ with its tests.
 
 ### Check the workflows
 
+Experimental in 0.4: the rules and the subset it reads may change in a minor release. It catches mistakes in a
+workflow written in good faith; it is not a security boundary. Two known gaps, both passing when they should fail:
+- a literal `strategy.matrix` whose `include` adds two entries on the same stack is read as one copy, so the `lock`
+  rule does not see the two copies run at once;
+- a secret read after a `}}` inside a quoted string in the same expression, such as
+  `${{ format('{{"t":"{0}"}}', secrets.TOKEN) }}`, is not checked against the table.
+
 `checkWorkflows` reads the product's own workflow files and returns every violation, each naming its job
 (`<file>#<job>`) and rule; a product's test expects none. It checks rules, never a job graph or a trigger. It reads
 a narrow subset of workflow text, below, and fails on anything outside it rather than guess:
