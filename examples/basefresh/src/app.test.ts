@@ -79,6 +79,7 @@ const RUNTIME = (env: string, suffix: string) => {
     'aws:apigatewayv2/route:Route api-route',
     'aws:apigatewayv2/stage:Stage api-stage $default',
     `aws:cloudwatch/logGroup:LogGroup api-logs /aws/lambda/basefresh-${env}-api`,
+    `aws:cloudwatch/metricAlarm:MetricAlarm api-errors basefresh-${env}-api-errors`,
     `aws:iam/role:Role api-role basefresh-${env}-api`,
     'aws:iam/rolePolicyAttachment:RolePolicyAttachment api-basic-execution',
     `aws:lambda/function:Function api basefresh-${env}-api`,
