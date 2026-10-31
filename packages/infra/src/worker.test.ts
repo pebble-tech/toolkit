@@ -87,6 +87,16 @@ describe('Worker', () => {
     expect(worker.secretInputs).toEqual(['bindings']);
   });
 
+  test('observability is on, sampling every request unless headSamplingRate says otherwise', async () => {
+    const observability = async (args: Partial<Omit<WorkerArgs, 'stage'>> = {}) =>
+      byType((await workerIn('staging', args)).resources, 'cloudflare:index/workersScript:WorkersScript')[0].inputs
+        .observability;
+    expect([await observability(), await observability({ headSamplingRate: 0.1 })]).toEqual([
+      { enabled: true, headSamplingRate: 1 },
+      { enabled: true, headSamplingRate: 0.1 },
+    ]);
+  });
+
   test('adoptExisting on prod imports the stage-named bucket, and only then', async () => {
     const adopted = await workerIn('prod', {
       hostname: 'uploads-basefresh.pebbletech.my',

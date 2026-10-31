@@ -40,9 +40,14 @@ export interface WorkerArgs {
   hostname: string;
   /** Name part after `<product>-<env>-`, default `worker`; names the script and the bucket. */
   kind?: string;
+  /** Share of requests Workers observability records, from 0 to 1. Default 1: every request. Observability is always on. */
+  headSamplingRate?: number;
 }
 
-/** A Cloudflare Worker from a prebuilt bundle, with an optional R2 bucket and a custom domain on the zone. */
+/**
+ * A Cloudflare Worker from a prebuilt bundle, with an optional R2 bucket and a custom domain on the zone. Workers
+ * observability (logs of each invocation, its errors and exceptions) is on.
+ */
 export class Worker extends pulumi.ComponentResource {
   readonly scriptName: string;
   readonly bucketName: pulumi.Output<string> | undefined;
@@ -93,6 +98,7 @@ export class Worker extends pulumi.ComponentResource {
         compatibilityDate: args.compatibilityDate,
         compatibilityFlags: args.compatibilityFlags ?? [],
         bindings,
+        observability: { enabled: true, headSamplingRate: args.headSamplingRate ?? 1 },
       },
       child()
     );
