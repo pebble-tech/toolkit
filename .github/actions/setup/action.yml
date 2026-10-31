@@ -1,0 +1,79 @@
+name: Pebble setup
+description: >-
+  pnpm and Node.js from the product's packageManager and .nvmrc, pnpm install --frozen-lockfile, and the Pulumi CLI at
+  the version of the product's installed @pulumi/pulumi, with its plugin cache and GITHUB_TOKEN for plugin downloads.
+
+inputs:
+  pulumi:
+    description: false skips the Pulumi CLI, its plugin cache and GITHUB_TOKEN, for a job that never runs pulumi (a smoke).
+    default: 'true'
+  infra:
+    description: The directory, from the repository root, whose installed @pulumi/pulumi sets the CLI version.
+    default: infra
+
+runs:
+  using: composite
+  steps:
+    - name: Install pnpm (packageManager in package.json)
+      uses: pnpm/action-setup@v5
+      with:
+        run_install: false
+
+    - name: Set up Node.js (.nvmrc)
+      uses: actions/setup-node@v6
+      with:
+        node-version-file: .nvmrc
+        cache: pnpm
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: pnpm install --frozen-lockfile
+
+    # After the install, so the version is the one the program runs with: one source, which Renovate tracks.
+    - name: The Pulumi CLI version (the installed @pulumi/pulumi)
+      id: version
+      if: inputs.pulumi != 'false'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        INFRA: ${{ inputs.infra }}
+      run: |
+        version="$(node "$GITHUB_ACTION_PATH/../installed.mjs" "$INFRA" @pulumi/pulumi)"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Pulumi plugins
+      if: inputs.pulumi != 'false'
+      uses: actions/cache@v5
+      with:
+        path: ~/.pulumi/plugins
+        key: ${{ runner.os }}-pulumi-${{ steps.version.outputs.version }}-plugins-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-pulumi-${{ steps.version.outputs.version }}-plugins-
+
+    - name: Install the Pulumi CLI
+      if: inputs.pulumi != 'false'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        VERSION: ${{ steps.version.outputs.version }}
+      run: |
+        curl -fsSL https://get.pulumi.com | sh -s -- --version "$VERSION"
+        installed="$("$HOME/.pulumi/bin/pulumi" version)"
+        if [ "$installed" != "v$VERSION" ]; then
+          echo "the Pulumi CLI installed is $installed, not v$VERSION" >&2
+          exit 1
+        fi
+        echo "$HOME/.pulumi/bin" >> "$GITHUB_PATH"
+
+    # Pulumi downloads provider plugins from GitHub releases; the token lifts the unauthenticated rate limit. A token the
+    # job already sets wins.
+    - name: GITHUB_TOKEN for Pulumi's plugin downloads
+      if: inputs.pulumi != 'false'
+      shell: bash
+      env:
+        TOKEN: ${{ github.token }}
+      run: |
+        if [ -z "${GITHUB_TOKEN:-}" ]; then
+          echo "GITHUB_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+        fi
