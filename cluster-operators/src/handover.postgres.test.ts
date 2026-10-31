@@ -21,7 +21,7 @@ const skipReason = 'DATABASE_URL is unset: this test needs a local Postgres (CI 
 const id = randomBytes(4).toString('hex');
 const PASSWORD = randomBytes(12).toString('hex');
 const role = (name: string) => `handover_${name}_${id}`;
-/** The product's admin: `ci-admin` on today's clusters. It created the group and granted every membership. */
+/** The product's admin, whose stacks own the group today: it created the group and granted every membership. */
 const PRODUCT_ADMIN = role('product_admin');
 /** The cluster admin: no product uses it. */
 const CLUSTER_ADMIN = role('cluster_admin');
@@ -263,14 +263,15 @@ async function cleanUp(): Promise<void> {
 /**
  * Today: the product admin created the group from the product's `shared` stack and granted M1 and M2, and the
  * product's `staging` stack owns a database whose owner role is granted to the group. The cluster admin exists, made
- * by hand (on PlanetScale, by `pscale role create`), and holds nothing.
+ * by hand (on PlanetScale, by `pscale role create` with no inherited roles), and holds nothing: no CREATEROLE, which
+ * only creating the group on a fresh cluster needs.
  */
 async function today() {
   await cleanUp();
   for (const admin of [PRODUCT_ADMIN, OTHER_ADMIN]) {
     await sql('superuser', `create role ${q(admin)} login createrole createdb password '${PASSWORD}'`);
   }
-  await sql('superuser', `create role ${q(CLUSTER_ADMIN)} login createrole password '${PASSWORD}'`);
+  await sql('superuser', `create role ${q(CLUSTER_ADMIN)} login password '${PASSWORD}'`);
   for (const login of [M1, M2, M3, M4, ...RUNTIMES]) {
     await sql('superuser', `create role ${q(login)} login password '${PASSWORD}'`);
   }
@@ -450,6 +451,27 @@ describe('the handover of pebble_operators to the cluster program', () => {
     await expect(sql(PRODUCT_ADMIN, `revoke ${OPERATORS_GROUP} from ${q(CLUSTER_ADMIN)}`)).rejects.toThrow(
       'dependent privileges exist'
     );
+    // DROP OWNED BY the product admin, as when retiring it, takes the cluster admin's ADMIN OPTION and the database's
+    // grant to the group, and leaves the members' rows with no admin to revoke them. Rolled back here.
+    const client = new pg.Client({ connectionString: url(PRODUCT_ADMIN) });
+    await client.connect();
+    try {
+      await client.query('begin');
+      await client.query(`drop owned by ${q(PRODUCT_ADMIN)}`);
+      const left = await client.query<{ line: string }>(
+        `select pg_get_userbyid(roleid) || ': ' || pg_get_userbyid(member) || ' by ' || pg_get_userbyid(grantor)
+           || case when admin_option then ' (admin)' else '' end as line
+         from pg_auth_members where roleid in ($1::regrole, $2::regrole) and member <> $3::regrole order by 1`,
+        [OPERATORS_GROUP, `${PRODUCT_DB}_owner`, PRODUCT_ADMIN]
+      );
+      expect(left.rows.map((row) => row.line)).toEqual([
+        `pebble_operators: ${M1} by ${CLUSTER_ADMIN}`,
+        `pebble_operators: ${M2} by ${CLUSTER_ADMIN}`,
+      ]);
+    } finally {
+      await client.query('rollback');
+      await client.end();
+    }
     // With CASCADE the revoke takes every membership the cluster admin granted with it.
     await sql(PRODUCT_ADMIN, `begin; revoke ${OPERATORS_GROUP} from ${q(CLUSTER_ADMIN)} cascade; commit`);
     expect(await access([M1, M2])).toEqual(all([M1, M2], false));
