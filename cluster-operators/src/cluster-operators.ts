@@ -15,10 +15,15 @@ export interface ClusterSettings {
   adoptExisting: boolean;
   /** SQL role names in the group, from the stack's secret `members` config. */
   members: string[];
+  /** This cluster's cluster admin role, from stack config: a URL for another cluster's admin is refused. */
+  adminRole: string;
 }
 
 /** Checks the stack name and the config the entry point read; throws on anything the program cannot run with. */
-export function settings(stack: string, config: { adoptExisting?: unknown; members?: unknown }): ClusterSettings {
+export function settings(
+  stack: string,
+  config: { adoptExisting?: unknown; members?: unknown; adminRole?: unknown }
+): ClusterSettings {
   const cluster = CLUSTERS.find((name) => name === stack);
   if (!cluster) {
     throw new Error(`pebble-cluster-operators stacks are ${CLUSTERS.join(' and ')}, one per cluster (got "${stack}")`);
@@ -32,7 +37,22 @@ export function settings(stack: string, config: { adoptExisting?: unknown; membe
       'members must be a list of role names, set as a secret (pulumi config set --secret members \'["<role>"]\')'
     );
   }
-  return { cluster, adoptExisting, members };
+  const { adminRole } = config;
+  if (typeof adminRole !== 'string' || adminRole === '' || adminRole.includes('.')) {
+    throw new Error("adminRole must be this cluster's cluster admin role, without a .<branch> suffix");
+  }
+  return { cluster, adoptExisting, members, adminRole };
+}
+
+/**
+ * Refuses an admin URL whose user is not this stack's cluster admin, before any connection: each cluster has its own
+ * roles, so another cluster's URL names another role. The role is the username before a PlanetScale `.<branch>`.
+ */
+export function assertClusterAdmin(adminUrl: string, adminRole: string): void {
+  const role = decodeURIComponent(new URL(adminUrl).username).split('.')[0];
+  if (role !== adminRole) {
+    throw new Error(`${ADMIN_URL_ENV} is for role "${role}", not this stack's cluster admin "${adminRole}"`);
+  }
 }
 
 /** The cluster admin's URL from the environment; refuses an unset or empty value. */
@@ -108,6 +128,7 @@ export interface ClusterOperatorsArgs extends ClusterSettings {
  */
 export function clusterOperators(args: ClusterOperatorsArgs) {
   const { cluster, adoptExisting, members } = args;
+  assertClusterAdmin(args.adminUrl, args.adminRole);
   const adminUrl = pulumi.secret(
     pulumi.output(args.adminUrl).apply(async (url) => {
       for (const warning of await checkMemberships(url, members)) pulumi.log.warn(warning);

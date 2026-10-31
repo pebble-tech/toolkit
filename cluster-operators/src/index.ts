@@ -9,6 +9,7 @@ export const { group, members } = clusterOperators({
   ...settings(pulumi.getStack(), {
     adoptExisting: config.getObject<unknown>('adoptExisting'),
     members: config.getObject<unknown>('members'),
+    adminRole: config.get('adminRole'),
   }),
   adminUrl: adminUrlFrom(process.env),
 });

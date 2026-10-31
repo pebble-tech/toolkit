@@ -141,8 +141,8 @@ const newStack = (admin: string): Stack => ({ admin, state: new Map() });
 
 /**
  * `pulumi up`: runs the program against the fake engine, then applies the difference from the stack's state on
- * Postgres, updating the state as each step lands. A protected resource stops the update when its delete comes up:
- * the deletes before it have run, as in Pulumi.
+ * Postgres, updating the state as each step lands. As `pulumi up --yes` (what `pebble-infra up` runs): its preview
+ * fails on the delete of a protected resource, so nothing runs.
  */
 async function up(stack: Stack, options: { project: string; stack: string }, program: () => unknown) {
   const { resources } = await runProgram(options, program);
@@ -151,12 +151,14 @@ async function up(stack: Stack, options: { project: string; stack: string }, pro
       .filter((r) => r.custom && !r.type.startsWith('pulumi:providers:') && !NOT_ABOUT_THE_GROUP(r))
       .map((r) => [r.urn, r])
   );
+  const gone = [...stack.state.values()].filter((r) => !next.has(r.urn)).reverse();
+  const guarded = gone.find((r) => r.protect);
+  if (guarded) throw new Error(`${guarded.name} cannot be deleted because it is protected`);
   for (const [urn, r] of next) {
     if (!stack.state.has(urn)) await create(stack.admin, r);
     stack.state.set(urn, r);
   }
-  for (const r of [...stack.state.values()].filter((r) => !next.has(r.urn)).reverse()) {
-    if (r.protect) throw new Error(`unable to delete ${r.name}: it is protected`);
+  for (const r of gone) {
     await destroy(stack.admin, r);
     stack.state.delete(r.urn);
   }
@@ -199,7 +201,13 @@ const productStaging = (product: string, admin: string, runtime: string) => () =
 const clusterProgram =
   (members: string[], adoptExisting = false) =>
   () =>
-    clusterOperators({ cluster: 'pebble-stg', adoptExisting, members, adminUrl: url(CLUSTER_ADMIN) });
+    clusterOperators({
+      cluster: 'pebble-stg',
+      adoptExisting,
+      members,
+      adminRole: CLUSTER_ADMIN,
+      adminUrl: url(CLUSTER_ADMIN),
+    });
 
 const CLUSTER_STACK = { project: 'pebble-cluster-operators', stack: 'pebble-stg' };
 
@@ -371,17 +379,22 @@ describe('the handover of pebble_operators to the cluster program', () => {
     ]);
   });
 
-  test('a product apply that forgets the unprotect revokes its member grants, then stops at the group', async (ctx) => {
+  test('a product apply that forgets the unprotect fails its preview and changes nothing', async (ctx) => {
     ctx.skip(skipped, skipReason);
     const { shared, cluster } = await today();
     await grantClusterAdmin();
     await up(cluster, CLUSTER_STACK, clusterProgram([M1, M2], true));
     await expect(up(shared, { project: PRODUCT, stack: 'shared' }, productShared())).rejects.toThrow(
-      'unable to delete operators-group: it is protected'
+      'operators-group cannot be deleted because it is protected'
     );
-    expect([await memberships(), [...shared.state.values()].map((r) => r.name)]).toEqual([
-      [`${M1} by ${CLUSTER_ADMIN}`, `${M2} by ${CLUSTER_ADMIN}`],
-      ['operators-group'],
+    expect([await memberships(), [...shared.state.values()].map((r) => r.name).sort()]).toEqual([
+      [
+        `${M1} by ${CLUSTER_ADMIN}`,
+        `${M1} by ${PRODUCT_ADMIN}`,
+        `${M2} by ${CLUSTER_ADMIN}`,
+        `${M2} by ${PRODUCT_ADMIN}`,
+      ],
+      ['operators-group', `operators-member-${M1}`, `operators-member-${M2}`],
     ]);
     unprotect(shared, 'operators-group');
     await up(shared, { project: PRODUCT, stack: 'shared' }, productShared());
