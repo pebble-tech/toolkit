@@ -23,6 +23,12 @@ export interface BootstrapSettings {
   importOidcProvider: boolean;
 }
 
+/** What the entry point passes besides the checked settings: the address the account's alarm topic emails. */
+export interface BootstrapArgs extends BootstrapSettings {
+  /** From stack config `alarmEmail`, read as a secret: this repository is public. */
+  alarmEmail: pulumi.Input<string>;
+}
+
 /** Every state key the bootstrap creates in an account: one per deploy env there. */
 export function stateKeys(account: DeployAccount): DeployEnv[] {
   return (['preview', 'staging', 'prod'] as const).filter((env) => deployAccount(env) === account);
@@ -206,11 +212,24 @@ export function githubOidcProviderArn(accountId: string): string {
   return `arn:aws:iam::${accountId}:oidc-provider/${new URL(GITHUB_OIDC_URL).host}`;
 }
 
+const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/** The configured alarm address, refused (without printing it) unless it looks like one. */
+function alarmAddress(value: string): string {
+  if (!EMAIL.test(value)) {
+    throw new Error(
+      'alarmEmail is not an email address: set it with `pulumi config set --secret alarmEmail <address>`'
+    );
+  }
+  return value;
+}
+
 /**
- * One account's shared bootstrap: the GitHub OIDC provider every deploy role trusts, the Pulumi state bucket, and the
- * state KMS keys. Nothing here belongs to a product; each product's `DeployRole` derives these names.
+ * One account's shared bootstrap: the GitHub OIDC provider every deploy role trusts, the Pulumi state bucket, the
+ * state KMS keys, and the SNS topic products' alarms notify. Nothing here belongs to a product; each product's
+ * `DeployRole` derives these names, and each product passes `alarmTopicArn` to its `ApiFunction`s.
  */
-export function bootstrap(args: BootstrapSettings) {
+export function bootstrap(args: BootstrapArgs) {
   const provider = new aws.Provider('aws', { region: args.region, allowedAccountIds: [args.accountId] });
 
   const oidc = new aws.iam.OpenIdConnectProvider(
@@ -231,8 +250,21 @@ export function bootstrap(args: BootstrapSettings) {
       [key, new PulumiStateKey(`state-${key}`, { key, accountId: args.accountId }, { providers: [provider] })] as const
   );
 
+  // Unencrypted, under SNS's default access policy, which lets CloudWatch alarms in this account publish. A KMS key
+  // would need a key policy that lets cloudwatch.amazonaws.com use it (alias/aws/sns does not), or alarms fail
+  // silently; a notification holds an alarm's name and state, nothing secret.
+  const alarms = new aws.sns.Topic('alarms', { name: `pebble-${args.account}-alarms`, tags }, { provider, ...keep });
+  // Not protected or retained: a new address replaces the subscription, and the old one is unsubscribed. AWS emails
+  // the address a confirmation link; nothing is delivered until its owner clicks it.
+  new aws.sns.TopicSubscription(
+    'alarms-email',
+    { topic: alarms.arn, protocol: 'email', endpoint: pulumi.output(args.alarmEmail).apply(alarmAddress) },
+    { provider }
+  );
+
   return {
     oidcProviderArn: oidc.arn,
+    alarmTopicArn: alarms.arn,
     stateBucket: bucket.bucketName,
     keyAliasArns: Object.fromEntries(keys.map(([key, stateKey]) => [key, stateKey.aliasArn])),
   };
