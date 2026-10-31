@@ -60,7 +60,8 @@ jobs:
       - name: A throwaway product
         run: |
           infra="$RUNNER_TEMP/product/infra"
-          mkdir -p "$infra"
+          # pulumi login file://… needs the directory to exist.
+          mkdir -p "$infra" "$RUNNER_TEMP/state"
           printf '{"name":"selftest-infra","private":true,"dependencies":{"@pebbletech/infra":"link:%s"}}\n' \
             "$GITHUB_WORKSPACE/packages/infra" > "$infra/package.json"
           cat > "$infra/Pulumi.yaml" << 'EOF'
