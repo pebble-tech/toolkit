@@ -330,7 +330,8 @@ product composes in this order.
 3. **List its config once**, in the entries module ([The entries module](#the-entries-module)): every stack config
    value, the variable it comes from, and the stacks that need it.
 4. **Run the stack steps with `pebble-infra`**, from `infra/`'s own `node_modules`, never through `npx`
-   ([Run the stack steps](#run-the-stack-steps)): `outputs` before `up` to migrate first, `up`, `preview`, `remove`.
+   ([Run the stack steps](#run-the-stack-steps)): `outputs` before `up` to migrate first (on a `pr-<n>` stack after
+   `prepare`, which can reset the stack and drop its database), `up`, `preview`, `remove`.
 5. **Write the workflows.** Each deploying job runs the `setup` action, a visible
    `aws-actions/configure-aws-credentials` step, then `pebble-infra` lines or the optional `pulumi` action
    ([Workflow actions](#workflow-actions)). The web-only production workflow below is one to start from.
@@ -497,7 +498,7 @@ pnpm --dir infra exec pebble-infra up staging --entries dist/entries.js --clear-
 | `configure <stack> --entries <module>` | writes the stack config from the product's entries module; values go to Pulumi through stdin |
 | `up <stack> --entries <module> [--clear-lock] [--outputs <name>]` | `prepare`, `configure`, `pulumi up` (previews with `--refresh`, tried again twice on a template1 collision), then the outputs to `$GITHUB_OUTPUT` when it is set |
 | `preview <stack> --entries <module> [--summary]` | `prepare --preview-only`, `configure`, `pulumi preview --diff`; `--summary` appends the diff to `$GITHUB_STEP_SUMMARY` |
-| `outputs <stack> [--github-output] [--if-exists] [--outputs <name>]` | prints the stack's `outputs` export with secrets hidden, or writes it to `$GITHUB_OUTPUT`; `--if-exists` exits 0 with nothing when the stack or the export does not exist yet (read before `up` to migrate first) |
+| `outputs <stack> [--github-output] [--if-exists] [--outputs <name>]` | prints the stack's `outputs` export with secrets hidden, or writes it to `$GITHUB_OUTPUT`; `--if-exists` exits 0 with nothing when the stack or the export does not exist yet (read before `up` to migrate first; on a `pr-<n>` stack after `prepare`, since a reset drops the database an earlier read would name) |
 | `remove pr-<n> --entries <module> [--clear-lock]` | destroys a preview, drops its database and role (with `previewDatabase`), removes the stack and deletes every state object it left under the S3 backend path. When the destroy fails and the state still holds anything beyond the Stage and database (a `Worker` whose delete was refused), it stops naming the types and keeps the state for another `remove` |
 | `pg-database <drop\|check> <name> [--owner <role>]` | drops a database and its role with `PG_ADMIN_URL`, or exits 3 naming the admin that could |
 
@@ -596,7 +597,8 @@ Optional: a `uses:` step in place of a `run:` line, for `up`, `preview` and `rem
 set, from the product's own `node_modules`, after `pulumi login "$PULUMI_BACKEND_URL"` when that is set. Every input
 reaches `pebble-infra` as one argument. It stops before running anything when the installed `@pebbletech/infra`'s
 major.minor is not the action's own: pin the action at the commit of the version the product installs. Read the URL
-before `up` with a `run:` line (`pebble-infra outputs <stack> --github-output --if-exists`), as below.
+before `up` with a `run:` line (`pebble-infra outputs <stack> --github-output --if-exists`), as below; on a `pr-<n>`
+stack, after a `pebble-infra prepare <stack> --entries <module> --clear-lock` line, since its reset drops the database.
 
 ```yaml
 - name: Pulumi up (prod)
@@ -737,11 +739,14 @@ What the helper reads, and nothing else. It never works out what a non-literal v
   the step has `PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}`, by `AWS_REGION` after a credentials step with
   `aws-region`, or, for a variable named in `derived`, only when all its sources are set. `derive` itself never runs.
 - **Migrate first**: in the job that runs `up`, `pebble-infra outputs <stack> --github-output --if-exists` with an
-  `id` and no `if:` comes before `up`; a read in another job does not count. Every step between it and `up` that
+  `id` and no `if:` comes before `up`; a read in another job does not count. On a `pr-<n>` stack a `pebble-infra
+  prepare <stack>` with no `if:` (not `--preview-only`) comes before the read, in an earlier step or earlier in the
+  read's own script: `prepare` resets a stack an interrupted run left and drops its database, so a read before it can
+  name that database and keep the first-deploy migration from running. Every step between the read and `up` that
   reads the URL runs under exactly `if: steps.<id>.outputs.<output> != ''`, and a step after `up` (which has an `id`)
   runs under exactly `if: steps.<id>.outputs.<output> == ''` and reads `steps.<up id>.outputs.<output>` (after the
-  `pulumi` action, `fromJSON(steps.<up id>.outputs.json).<output>`). That pair
-  marks the first deploy, when there is no stack before `up` and the read writes nothing. `up` itself has no `if:`. A
+  `pulumi` action, `fromJSON(steps.<up id>.outputs.json).<output>`). That pair marks a deploy with no database yet
+  (the first, or a `pr-<n>` stack `prepare` reset), when the read writes nothing. `up` itself has no `if:`. A
   step reads an output only inside `${{ }}` and outside a quoted string: `DATABASE_URL: steps.up.outputs.database_url`
   without `${{ }}`, or `${{ 'steps.up.outputs.database_url' }}`, reads nothing. `${{ }}` around a guard and its spacing
   do not matter; any other condition fails.
