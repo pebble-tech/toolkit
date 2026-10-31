@@ -45,6 +45,20 @@ const ENUMS: Record<string, Record<string, readonly string[]>> = {
   'aws:apigatewayv2/route:Route': { routeKey: ['$default'] }, // docs (HTTP API default route); not checked
   'aws:apigatewayv2/stage:Stage': { name: ['$default'] }, // docs (HTTP API default stage); not checked
   'aws:acm/certificate:Certificate': { validationMethod: ['DNS', 'EMAIL', 'HTTP'] }, // validated
+  'aws:cloudwatch/metricAlarm:MetricAlarm': {
+    // validated, aws 7.51.1
+    comparisonOperator: [
+      'GreaterThanOrEqualToThreshold',
+      'GreaterThanThreshold',
+      'LessThanThreshold',
+      'LessThanOrEqualToThreshold',
+      'LessThanLowerOrGreaterThanUpperThreshold',
+      'LessThanLowerThreshold',
+      'GreaterThanUpperThreshold',
+    ],
+    statistic: ['SampleCount', 'Average', 'Sum', 'Minimum', 'Maximum'], // validated
+    treatMissingData: ['breaching', 'notBreaching', 'ignore', 'missing'], // docs (PutMetricAlarm); not checked before the API call
+  },
   'aws:apigatewayv2/domainName:DomainName': {
     'domainNameConfiguration.endpointType': ['REGIONAL'], // docs ("Valid values: REGIONAL"); not checked
     'domainNameConfiguration.securityPolicy': ['TLS_1_2'], // validated

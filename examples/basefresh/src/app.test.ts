@@ -7,6 +7,11 @@ import { basefresh, type BasefreshInputs } from './app.js';
 import { bootstrap } from './bootstrap.js';
 
 const root = join(import.meta.dirname, '..');
+/** The account bootstrap's `alarmTopicArn` in each account: pbt-stg for staging, pbt-prd for prod. */
+const ALARM_TOPIC = {
+  staging: 'arn:aws:sns:ap-southeast-1:111111111111:pebble-stg-alarms',
+  prod: 'arn:aws:sns:ap-southeast-1:222222222222:pebble-prd-alarms',
+};
 const inputs = (stack: string): BasefreshInputs => ({
   apex: 'pebbletech.my',
   cloudflareZoneId: 'zone-1',
@@ -17,6 +22,7 @@ const inputs = (stack: string): BasefreshInputs => ({
     : { pgRuntime: { role: 'basefresh_app', password: 'runtime' } }),
   operators: ['pscale_api_kong'],
   authSecret: 'auth-secret',
+  ...(stack === 'staging' || stack === 'prod' ? { alarmTopicArn: ALARM_TOPIC[stack] } : {}),
   bundles: { api: join(root, 'bundles/api'), uploads: join(root, 'bundles/uploads/server.js') },
 });
 
@@ -183,6 +189,13 @@ describe('basefresh program', () => {
     expect(new Set(env((await run('prod')).resources).map((e) => JSON.stringify(e)))).toEqual(
       new Set([JSON.stringify(['prj_basefresh', ['production']])])
     );
+  });
+
+  test.each(['staging', 'prod'] as const)("%s: the API's errors alarm notifies its account's topic", async (stack) => {
+    const { resources } = await run(stack);
+    expect(
+      resources.filter((r) => r.type === 'aws:cloudwatch/metricAlarm:MetricAlarm').map((r) => r.inputs.alarmActions)
+    ).toEqual([[ALARM_TOPIC[stack]]]);
   });
 
   test('every IAM role in every stack carries a permissions boundary', async () => {

@@ -14,6 +14,8 @@ export interface BasefreshInputs {
   /** `shared`, `prod`: the PlanetScale role names in that cluster's `pebble_operators` group (config, may be empty). */
   operators?: string[];
   authSecret: pulumi.Input<string>;
+  /** Staging and prod: the account bootstrap's `alarmTopicArn`, which the API's errors alarm notifies. */
+  alarmTopicArn?: string;
   /** Built by the product (esbuild); paths relative to the project directory. */
   bundles: { api: string; uploads: string };
 }
@@ -65,6 +67,7 @@ export function basefresh(inputs: BasefreshInputs): Record<string, pulumi.Input<
     code: inputs.bundles.api,
     environment: { DATABASE_URL: runtimeUrl, NODE_ENV: 'production' },
     domain: { hostname: stage.hostname('api', inputs.apex), zoneId: inputs.cloudflareZoneId },
+    ...(inputs.alarmTopicArn ? { alarm: { topicArn: inputs.alarmTopicArn } } : {}),
   });
   const uploads = new Worker('uploads', {
     stage,

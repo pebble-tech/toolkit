@@ -15,6 +15,8 @@ export const entries: Entry[] = [
   { key: 'pgRuntimePassword', env: 'PG_RUNTIME_PASSWORD', secret: true, required: true, stacks: RUNTIME },
   { key: 'operators', env: 'PG_OPERATORS', secret: false, required: false, stacks: ['shared', 'prod'] },
   { key: 'authSecret', env: 'BETTER_AUTH_SECRET', secret: true, required: true, stacks: RUNTIME },
+  // The account bootstrap's `alarmTopicArn`; a GitHub environment secret, since the ARN holds the account id.
+  { key: 'alarmTopicArn', env: 'ALARM_TOPIC_ARN', secret: false, required: true, stacks: RUNTIME },
   { key: 'cloudflare:apiToken', env: 'CLOUDFLARE_API_TOKEN', secret: true, required: true, stacks: RUNTIME },
   { key: 'vercel:apiToken', env: 'VERCEL_API_TOKEN', secret: true, required: true, stacks: ['shared', ...RUNTIME] },
   { key: 'vercel:team', env: 'VERCEL_TEAM_ID', secret: false, required: true, stacks: ['shared', ...RUNTIME] },
