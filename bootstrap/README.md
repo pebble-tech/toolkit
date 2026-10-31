@@ -1,8 +1,8 @@
 # pebble-aws-bootstrap
 
 The shared AWS bootstrap: one Pulumi stack per account (`stg` for pbt-stg, `prd` for pbt-prd) that creates what every
-product's `DeployRole` from `@pebbletech/infra` expects to exist. Kong applies it by hand with SSO, once per account.
-Nothing in it belongs to a product.
+product's `DeployRole` from `@pebbletech/infra` expects to exist, and the topic every product's alarms notify. Kong
+applies it by hand with SSO, once per account. Nothing in it belongs to a product.
 
 | Resource | stg (pbt-stg) | prd (pbt-prd) |
 |---|---|---|
@@ -10,6 +10,7 @@ Nothing in it belongs to a product.
 | Pulumi state bucket | `pebble-stg-pulumi-state` | `pebble-prd-pulumi-state` |
 | Bucket encryption key | `alias/pebble-stg-pulumi-state` | `alias/pebble-prd-pulumi-state` |
 | State secrets keys | `alias/pebble-stg-pulumi-preview`, `alias/pebble-stg-pulumi-staging` | `alias/pebble-prd-pulumi-prod` |
+| Alarm topic, emailing `alarmEmail` | `pebble-stg-alarms` | `pebble-prd-alarms` |
 
 - The bucket is versioned, blocks all public access, encrypts with SSE-KMS under its own key (S3 Bucket Keys on), and
   deletes a superseded state file 30 days after it was replaced. Principals in the account may use the bucket key only
@@ -20,8 +21,19 @@ Nothing in it belongs to a product.
   key on prd.
 - The key alias and bucket names come from `@pebbletech/infra` (`stateKeyAlias`, `stateBucketName`), the same
   functions `DeployRole` uses. A test fails if the two ever disagree.
-- Every resource is protected and retained: `pulumi destroy`, or a change that would delete or replace one, fails;
-  after `pulumi state unprotect` a delete still leaves the resource in AWS and only drops it from the state.
+- Every resource but the email subscription is protected and retained: `pulumi destroy`, or a change that would
+  delete or replace one, fails; after `pulumi state unprotect` a delete still leaves the resource in AWS and only drops
+  it from the state. The subscription is neither, so a new `alarmEmail` replaces it. The replacement unsubscribes the
+  old address only if that address had confirmed: a pending subscription cannot be deleted, so it stays until SNS
+  drops it ([Change the alarm address](#change-the-alarm-address)).
+- The alarm topic is where products' CloudWatch alarms send notifications: each product passes the `alarmTopicArn`
+  output to its `ApiFunction`s (`alarm: { topicArn }`). It emails the `alarmEmail` address, which AWS asks to confirm
+  first: the subscription stays pending, and nothing is delivered, until the address owner clicks the link in AWS's
+  confirmation email. The topic is not encrypted and keeps SNS's default access policy, under which CloudWatch alarms
+  in the same account may publish. Encrypting it would need a customer-managed KMS key whose policy lets
+  `cloudwatch.amazonaws.com` use it; with the AWS-managed `alias/aws/sns` key, alarms fail to publish and nobody is
+  told. A notification carries an alarm's name, state and reason, nothing secret. The topic is in the stack's
+  `aws:region`; an alarm notifies a topic in its own region.
 - The program pins the AWS provider to the stack's `accountId`, so credentials for the wrong account fail before
   anything changes. The account id is stored as an encrypted config value: this repository is public, and a test
   fails if a committed stack file holds it in plain text.
@@ -63,10 +75,12 @@ Run every command from `bootstrap/`, in one shell.
    pulumi login --local
    pulumi stack init stg
    pulumi config set --secret accountId "$(aws sts get-caller-identity --query Account --output text)"
+   pulumi config set --secret alarmEmail '<the address that receives alarm emails>'
    ```
 
-   `--secret` stores the account id in `Pulumi.stg.yaml` as ciphertext under the passphrase. Step 6 re-encrypts it
-   under the KMS key before anything is committed.
+   `--secret` stores the account id and the address in `Pulumi.stg.yaml` as ciphertext under the passphrase. Step 6
+   re-encrypts them under the KMS key before anything is committed. The program refuses the committed placeholder
+   (`set-me`) and anything else that is not an email address.
 
 3. Preview. `Pulumi.stg.yaml` has `oidc.import: true`, so the existing OIDC provider is adopted, not created:
 
@@ -75,8 +89,8 @@ Run every command from `bootstrap/`, in one shell.
    ```
 
    Expect one `import` (`github-actions`, the OIDC provider) and only `create` for the rest: the AWS provider, the bucket
-   and its four settings, the bucket key, and the preview and staging keys with their aliases. No update, no
-   replace, no delete, no warning. If it is anything else, stop (see [When the preview is not what you expect](#when-the-preview-is-not-what-you-expect)).
+   and its four settings, the bucket key, the preview and staging keys with their aliases, and the alarm topic and its
+   email subscription. No update, no replace, no delete, no warning. If it is anything else, stop (see [When the preview is not what you expect](#when-the-preview-is-not-what-you-expect)).
 
 4. Apply:
 
@@ -141,13 +155,21 @@ Run every command from `bootstrap/`, in one shell.
    git commit -m "chore(bootstrap): record the pbt-stg stack"
    ```
 
-   The outputs are `oidcProviderArn`, `stateBucket` and `keyAliasArns`. `Pulumi.stg.yaml` now holds the region and
-   the import flag (off) in plain text, the KMS secrets provider, the encrypted data key, and the account id as
-   ciphertext only. Check before committing: `grep accountId -A1 Pulumi.stg.yaml` shows `secure: v1:…`, never digits.
+   The outputs are `oidcProviderArn`, `stateBucket`, `keyAliasArns` and `alarmTopicArn`. `Pulumi.stg.yaml` now holds
+   the region and the import flag (off) in plain text, the KMS secrets provider, the encrypted data key, and the
+   account id and alarm address as ciphertext only. Check before committing: `grep -A1 -e accountId -e alarmEmail
+   Pulumi.stg.yaml` shows `secure: v1:…` for both, never digits or an address.
+
+9. Confirm the subscription: AWS has emailed the address a link (subject "AWS Notification - Subscription
+   Confirmation"). Until its owner clicks it, the subscription is pending and alarms email no one.
+   `aws sns list-subscriptions-by-topic --topic-arn "$(pulumi stack output alarmTopicArn)"` shows
+   `PendingConfirmation` as the subscription ARN until then. The link works for 48 hours: SNS deletes a subscription
+   still unconfirmed after that, and it drops out of the list. To get a new link, run `pulumi up --refresh -s stg`:
+   the refresh finds the subscription gone and the update creates it again.
 
 ## Apply pbt-prd
 
-The same eight steps with these substitutions:
+The same nine steps with these substitutions:
 
 | In the stg steps | For prd |
 |---|---|
@@ -170,6 +192,41 @@ pulumi up -s stg             # or prd
 ```
 
 Rebuild first (`corepack pnpm build` at the root) if the program changed.
+
+## Add the alarm topic to an applied stack
+
+`@pebbletech/infra` 0.4.0 added the alarm topic. On a stack applied before it, once per account, after the
+[later-run login](#later-runs) and a rebuild:
+
+```sh
+pulumi config set --secret alarmEmail '<the address that receives alarm emails>'
+pulumi preview      # expect two creates: the topic and its email subscription; nothing else
+pulumi up
+pulumi stack output alarmTopicArn
+git add Pulumi.stg.yaml   # or Pulumi.prd.yaml; the address is ciphertext only
+```
+
+Then confirm the subscription (step 9 above).
+
+Each product passes `alarmTopicArn` to its `ApiFunction`s; a product
+stores it per GitHub environment (the pbt-stg topic for previews and staging, the pbt-prd topic for production), not
+in source, because the ARN holds the account id.
+
+### Change the alarm address
+
+Set `alarmEmail` again and `pulumi up`. The new subscription replaces the old one, and alarms notify no one at the new
+address until it confirms. The replacement can unsubscribe the old address only if it had confirmed. SNS refuses to
+delete a pending subscription: Pulumi drops it from the state, but it stays in SNS for up to 48 hours after it was
+created, and if the old address clicks its link in that window, it is confirmed and keeps receiving every alarm with
+nothing in the state to remove it.
+
+1. Before the change, list the subscriptions:
+   `aws sns list-subscriptions-by-topic --topic-arn "$(pulumi stack output alarmTopicArn)"`. If the current one shows
+   `PendingConfirmation`, either have its owner confirm it first, so the replacement can unsubscribe it, or wait until
+   it is 48 hours old and SNS has deleted it.
+2. Set `alarmEmail`, `pulumi up`, and confirm the new address (step 9).
+3. List the subscriptions again. Only the new address should be there; unsubscribe any other with
+   `aws sns unsubscribe --subscription-arn <its arn>`.
 
 ## When the preview is not what you expect
 

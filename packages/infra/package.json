@@ -30,6 +30,9 @@
     },
     "./package.json": "./package.json"
   },
+  "bin": {
+    "pebble-infra": "./dist/bin.js"
+  },
   "files": [
     "dist"
   ],
@@ -42,7 +45,9 @@
     "@pulumi/cloudflare": "6.23.1",
     "@pulumi/postgresql": "3.18.2",
     "@pulumi/random": "4.21.4",
-    "@pulumiverse/vercel": "5.21.1"
+    "@pulumiverse/vercel": "5.21.1",
+    "pg": "8.23.1",
+    "yaml": "2.9.1"
   },
   "peerDependencies": {
     "@pulumi/pulumi": "^3.271.0"
@@ -50,6 +55,7 @@
   "devDependencies": {
     "@pulumi/pulumi": "catalog:",
     "@types/node": "catalog:",
+    "@types/pg": "8.23.1",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },

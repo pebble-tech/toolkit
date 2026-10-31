@@ -1,0 +1,12 @@
+name: pebble-cluster-operators
+description: Each Postgres cluster's pebble_operators group and its members (stacks pebble-stg, pebble-prd-shared), owned by no product
+runtime:
+  name: nodejs
+  options:
+    # Pulumi's TypeScript peer is <7: the program is compiled with tsc (`pnpm build`) and Pulumi runs the JS.
+    typescript: false
+main: dist/index.js
+config:
+  # The handover from a product's stacks adopts the cluster's existing group: README step 2 turns this on for the
+  # first apply and step 4 turns it off once the stack holds the group. A fresh cluster leaves it off, and the program creates it.
+  pebble-cluster-operators:adoptExisting: false

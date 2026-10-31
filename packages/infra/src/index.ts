@@ -19,7 +19,13 @@ export {
   type StateKey,
 } from './stage.js';
 export { Database, OPERATORS_GROUP, type DatabaseArgs, type DatabaseRuntime } from './database.js';
-export { ApiFunction, MAX_API_TIMEOUT_SECONDS, type ApiDomain, type ApiFunctionArgs } from './api-function.js';
+export {
+  ApiFunction,
+  MAX_API_TIMEOUT_SECONDS,
+  type ApiDomain,
+  type ApiFunctionAlarm,
+  type ApiFunctionArgs,
+} from './api-function.js';
 export { Worker, type WorkerArgs, type WorkerBucket } from './worker.js';
 export {
   VercelProject,
@@ -29,3 +35,5 @@ export {
 } from './vercel-project.js';
 export { DeployRole, type DeployRoleArgs } from './deploy-role.js';
 export { Operators, type OperatorsArgs } from './operators.js';
+export { stackKind } from './names.js';
+export { configWrites, type ConfigValues, type ConfigWrite, type EntriesModule, type Entry } from './config.js';

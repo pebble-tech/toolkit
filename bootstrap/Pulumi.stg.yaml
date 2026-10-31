@@ -4,6 +4,9 @@ config:
   # turns this off once it is adopted.
   pebble-aws-bootstrap:oidc:
     import: false
+  # The address the account's alarm topic emails. Replace the placeholder with
+  # `pulumi config set --secret alarmEmail <address>` (README "Alarm email"); the program refuses it until then.
+  pebble-aws-bootstrap:alarmEmail: set-me
   pebble-aws-bootstrap:accountId:
     secure: v1:rznfZB344rO2nK5G:v33glIrz+uWOSH1DiO3gH6F478ZG6VehlF8xlw==
 secretsprovider: awskms://alias/pebble-stg-pulumi-staging?region=ap-southeast-1

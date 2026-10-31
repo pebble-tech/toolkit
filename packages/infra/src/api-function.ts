@@ -16,6 +16,22 @@ export interface ApiDomain {
   zoneId: pulumi.Input<string>;
 }
 
+/**
+ * The CloudWatch alarm on the function's `Errors` metric: what Lambda counts as a failed invocation (a crash before the
+ * handler runs, a timeout, an out-of-memory kill, a runtime failure). A handled error answered with a 500 is not one.
+ */
+export interface ApiFunctionAlarm {
+  /**
+   * SNS topic the alarm notifies, e.g. the account bootstrap's `alarmTopicArn` output. Without it the alarm still
+   * changes state in CloudWatch but notifies no one.
+   */
+  topicArn?: pulumi.Input<string>;
+  /** Errors in one period that set the alarm off. Default 1. */
+  threshold?: number;
+  /** Seconds per evaluation period, a multiple of 60. Default 300. */
+  period?: number;
+}
+
 export interface ApiFunctionArgs {
   stage: Stage;
   /** A directory or `.zip` the product's build produced (esbuild); the component does not bundle. */
@@ -38,11 +54,14 @@ export interface ApiFunctionArgs {
   permissionsBoundary?: PermissionsBoundaryArn;
   /** Name part after `<product>-<env>-`, default `api`. */
   kind?: string;
+  /** The errors alarm, `<product>-<env>-<kind>-errors`; on by default. `false` creates none. */
+  alarm?: ApiFunctionAlarm | false;
 }
 
 /**
  * A Lambda (`nodejs22.x`) behind an HTTP API on a custom domain: the default execute-api endpoint is off, the
- * certificate is regional and DNS-validated in Cloudflare, and the function role carries the permissions boundary.
+ * certificate is regional and DNS-validated in Cloudflare, the function role carries the permissions boundary, and a
+ * CloudWatch alarm watches the function's errors.
  */
 export class ApiFunction extends pulumi.ComponentResource {
   readonly functionName: string;
@@ -105,6 +124,30 @@ export class ApiFunction extends pulumi.ComponentResource {
       },
       child({ dependsOn: [basicExecution, logGroup] })
     );
+
+    if (args.alarm !== false) {
+      const alarm = args.alarm ?? {};
+      new aws.cloudwatch.MetricAlarm(
+        `${name}-errors`,
+        {
+          name: stage.name(args.kind ?? 'api', 'errors'),
+          alarmDescription: `${functionName} failed invocations: a crash before the handler runs, a timeout, an out-of-memory kill or a runtime failure`,
+          namespace: 'AWS/Lambda',
+          metricName: 'Errors',
+          dimensions: { FunctionName: fn.name },
+          statistic: 'Sum',
+          period: alarm.period ?? 300,
+          evaluationPeriods: 1,
+          threshold: alarm.threshold ?? 1,
+          comparisonOperator: 'GreaterThanOrEqualToThreshold',
+          // Lambda publishes Errors only for periods with invocations. A quiet function has no data, which stays OK.
+          treatMissingData: 'notBreaching',
+          alarmActions: alarm.topicArn === undefined ? [] : [alarm.topicArn],
+          tags,
+        },
+        child()
+      );
+    }
 
     const api = new aws.apigatewayv2.Api(
       `${name}-api`,

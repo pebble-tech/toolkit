@@ -19,15 +19,19 @@ compiled ESM (`dist/`) plus any files its `files` list names. See `README.md` fo
 
 ## Tests
 
-- Vitest, one project per package, per example and for the AWS bootstrap (`packages/*/vitest.config.ts`,
-  `examples/*/vitest.config.ts`, `bootstrap/vitest.config.ts`), tests next to the code as `src/**/*.test.ts`. `pnpm test -- <path>` narrows the run.
+- Vitest, one project per package, per example, for the AWS bootstrap and for the cluster operators program
+  (`packages/*/vitest.config.ts`, `examples/*/vitest.config.ts`, `bootstrap/vitest.config.ts`,
+  `cluster-operators/vitest.config.ts`), tests next to the code as `src/**/*.test.ts`. `pnpm test -- <path>` narrows the run.
+- The Postgres tests (`*.postgres.test.ts`, and the preview-stack tests in `packages/infra/src/cli.test.ts`) need
+  `DATABASE_URL`, a local Postgres they create and drop roles and databases in. Without it they skip, except under
+  `CI=true`, where they fail: run `CI=true DATABASE_URL=… pnpm verify` before a PR, as CI does.
 - Pure logic gets a unit test that calls it the way a consumer does.
 - Never mock owned code. Fake an external service at its boundary.
 - Pulumi components and programs run under `pulumi.runtime.setMocks` through `@pebbletech/infra/testing`
   (`runProgram`): the Pulumi engine is the one thing faked. Components, `Stage` and the provider SDKs run for real,
   and tests assert on what the engine received (types, names, inputs, `protect`, `retainOnDelete`, import ids).
-- `examples/*` and `bootstrap` tests import `@pebbletech/infra` from its source (a vitest alias), because the infra
-  pack test rebuilds `dist/` while they run. The tarball itself is proved by the pack listing test.
+- `examples/*`, `bootstrap` and `cluster-operators` tests import `@pebbletech/infra` from its source (a vitest alias),
+  because the infra pack test rebuilds `dist/` while they run. The tarball itself is proved by the pack listing test.
 - A test you add or change must fail on the code before your change and pass after it. There is no CI gate for this
   yet: run it by hand and say so in the PR.
 - oxlint runs the vitest rules: every test asserts, no conditional or standalone `expect`, no `.skip` / `.only`.
@@ -40,6 +44,10 @@ compiled ESM (`dist/`) plus any files its `files` list names. See `README.md` fo
   `publishConfig.access: public` and `license: MIT`. Tests stay out of the tarball; the pack listing in CI shows it.
 - A change to a package's published behaviour comes with a changeset (`pnpm changeset`).
 - Never run `pnpm publish`, `changeset publish` or `pnpm release` by hand; the release workflow publishes.
+- While `.changeset/pre.json` exists, releases are prereleases on npm's `next` tag, and every install command the
+  READMEs give a product names `@pebbletech/infra@next` (`package.test.ts` checks it). Leave it in place; leaving pre
+  mode is its own PR (`pnpm changeset pre exit`) that also takes `@next` out of the install lines README "Prereleases"
+  lists.
 
 ## Naming
 

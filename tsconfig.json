@@ -4,6 +4,8 @@
     { "path": "./packages/config" },
     { "path": "./packages/infra" },
     { "path": "./examples/basefresh" },
-    { "path": "./bootstrap" }
+    { "path": "./examples/web-only" },
+    { "path": "./bootstrap" },
+    { "path": "./cluster-operators" }
   ]
 }

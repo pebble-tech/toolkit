@@ -5,11 +5,13 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { parse } from 'yaml';
 
-import { bootstrap, settings, type BootstrapSettings } from './bootstrap.js';
+import { type BootstrapArgs, bootstrap, settings } from './bootstrap.js';
 
 const ACCOUNT_ID = '123456789012';
 const REGION = 'ap-southeast-1';
 const OIDC_ARN = `arn:aws:iam::${ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com`;
+/** A reserved test domain (RFC 2606): no real inbox. */
+const ALARM_EMAIL = 'alarms@example.com';
 
 /**
  * defaultMocks plus the ids and ARNs AWS returns for the bootstrap's resources, a log of KMS alias lookups, and the
@@ -29,6 +31,10 @@ function mocks(aliasLookups: string[] = [], providers = new Map<string, string>(
           return { id, state: { ...state, arn: `arn:aws:kms:${REGION}:${ACCOUNT_ID}:${args.inputs.name}` } };
         case 'aws:iam/openIdConnectProvider:OpenIdConnectProvider':
           return { id: args.id || OIDC_ARN, state: { ...state, arn: args.id || OIDC_ARN } };
+        case 'aws:sns/topic:Topic': {
+          const arn = `arn:aws:sns:${REGION}:${ACCOUNT_ID}:${args.inputs.name}`;
+          return { id: arn, state: { ...state, arn } };
+        }
         default:
           return { id, state };
       }
@@ -40,10 +46,16 @@ function mocks(aliasLookups: string[] = [], providers = new Map<string, string>(
   };
 }
 
-const stg: BootstrapSettings = { account: 'stg', accountId: ACCOUNT_ID, region: REGION, importOidcProvider: true };
-const prd: BootstrapSettings = { ...stg, account: 'prd' };
+const stg: BootstrapArgs = {
+  account: 'stg',
+  accountId: ACCOUNT_ID,
+  region: REGION,
+  importOidcProvider: true,
+  alarmEmail: ALARM_EMAIL,
+};
+const prd: BootstrapArgs = { ...stg, account: 'prd' };
 
-const run = (args: BootstrapSettings, providers?: Map<string, string>) =>
+const run = (args: BootstrapArgs, providers?: Map<string, string>) =>
   runProgram({ project: 'pebble-aws-bootstrap', stack: args.account, mocks: mocks([], providers) }, () =>
     bootstrap(args)
   );
@@ -58,7 +70,7 @@ const aliases = (resources: Registration[]) =>
     .sort();
 
 describe('pebble-aws-bootstrap', () => {
-  test('stg creates the OIDC provider, the state bucket and the preview and staging keys', async () => {
+  test('stg creates the OIDC provider, the state bucket, the preview and staging keys and the alarm topic', async () => {
     const { resources } = await run(stg);
     expect(resources.map((r) => `${r.type} ${physical(r)}`).sort()).toEqual([
       'aws:iam/openIdConnectProvider:OpenIdConnectProvider https://token.actions.githubusercontent.com',
@@ -73,6 +85,8 @@ describe('pebble-aws-bootstrap', () => {
       'aws:s3/bucketPublicAccessBlock:BucketPublicAccessBlock pebble-stg-pulumi-state',
       'aws:s3/bucketServerSideEncryptionConfiguration:BucketServerSideEncryptionConfiguration pebble-stg-pulumi-state',
       'aws:s3/bucketVersioning:BucketVersioning pebble-stg-pulumi-state',
+      'aws:sns/topic:Topic pebble-stg-alarms',
+      'aws:sns/topicSubscription:TopicSubscription alarms-email',
       'pebbletech:bootstrap:PulumiStateBucket state',
       'pebbletech:bootstrap:PulumiStateKey state-preview',
       'pebbletech:bootstrap:PulumiStateKey state-staging',
@@ -80,7 +94,7 @@ describe('pebble-aws-bootstrap', () => {
     ]);
   });
 
-  test('prd creates the OIDC provider, the state bucket and the prod key only', async () => {
+  test('prd creates the OIDC provider, the state bucket, the prod key only and the alarm topic', async () => {
     const { resources } = await run(prd);
     expect(resources.map((r) => `${r.type} ${physical(r)}`).sort()).toEqual([
       'aws:iam/openIdConnectProvider:OpenIdConnectProvider https://token.actions.githubusercontent.com',
@@ -93,17 +107,24 @@ describe('pebble-aws-bootstrap', () => {
       'aws:s3/bucketPublicAccessBlock:BucketPublicAccessBlock pebble-prd-pulumi-state',
       'aws:s3/bucketServerSideEncryptionConfiguration:BucketServerSideEncryptionConfiguration pebble-prd-pulumi-state',
       'aws:s3/bucketVersioning:BucketVersioning pebble-prd-pulumi-state',
+      'aws:sns/topic:Topic pebble-prd-alarms',
+      'aws:sns/topicSubscription:TopicSubscription alarms-email',
       'pebbletech:bootstrap:PulumiStateBucket state',
       'pebbletech:bootstrap:PulumiStateKey state-prod',
       'pulumi:providers:aws aws',
     ]);
   });
 
-  test.each([stg, prd])('$account protects and retains every cloud resource', async (args) => {
-    const { resources } = await run(args);
-    const cloud = resources.filter((r) => r.custom && !r.type.startsWith('pulumi:providers:'));
-    expect(cloud.filter((r) => !r.protect || !r.retainOnDelete).map((r) => r.urn)).toEqual([]);
-  });
+  test.each([stg, prd])(
+    '$account protects and retains every cloud resource but the email subscription, so a new address replaces it',
+    async (args) => {
+      const { resources } = await run(args);
+      const cloud = resources.filter((r) => r.custom && !r.type.startsWith('pulumi:providers:'));
+      expect(
+        cloud.filter((r) => !r.protect || !r.retainOnDelete).map((r) => [r.name, r.protect, r.retainOnDelete])
+      ).toEqual([['alarms-email', false, false]]);
+    }
+  );
 
   test('every AWS resource goes through a provider that refuses any account but the configured one', async () => {
     const providers = new Map<string, string>();
@@ -174,9 +195,10 @@ describe('pebble-aws-bootstrap', () => {
     expect(named.map(physical).filter((name) => !/^(alias\/)?pebble-/.test(name))).toEqual([]);
   });
 
-  test('outputs the provider ARN, bucket name and alias ARNs', async () => {
+  test('outputs the provider ARN, bucket name, alias ARNs and alarm topic ARN', async () => {
     const { result } = await run(prd);
     expect(await valueOf(result.oidcProviderArn)).toBe(OIDC_ARN);
+    expect(await valueOf(result.alarmTopicArn)).toBe(`arn:aws:sns:${REGION}:${ACCOUNT_ID}:pebble-prd-alarms`);
     expect(result.stateBucket).toBe('pebble-prd-pulumi-state');
     expect(await resolveAll(result.keyAliasArns)).toEqual({
       prod: `arn:aws:kms:${REGION}:${ACCOUNT_ID}:alias/pebble-prd-pulumi-prod`,
@@ -184,15 +206,63 @@ describe('pebble-aws-bootstrap', () => {
   });
 });
 
+describe('the alarm topic', () => {
+  test('emails the configured address, on a topic CloudWatch alarms can publish to', async () => {
+    const { resources } = await run(stg);
+    const topic = ofType(resources, 'aws:sns/topic:Topic')[0]!;
+    const subscription = ofType(resources, 'aws:sns/topicSubscription:TopicSubscription')[0]!;
+    // CloudWatch publishes to an unencrypted topic under its default access policy. A KMS key would need a key policy
+    // that lets cloudwatch.amazonaws.com use it (the AWS-managed alias/aws/sns key does not), and a topic policy would
+    // replace the default one.
+    expect({
+      kmsMasterKeyId: topic.inputs.kmsMasterKeyId,
+      policy: topic.inputs.policy,
+      topicPolicies: ofType(resources, 'aws:sns/topicPolicy:TopicPolicy').length,
+      subscription: [subscription.inputs.topic, subscription.inputs.protocol, subscription.inputs.endpoint],
+    }).toEqual({
+      kmsMasterKeyId: undefined,
+      policy: undefined,
+      topicPolicies: 0,
+      subscription: [`arn:aws:sns:${REGION}:${ACCOUNT_ID}:pebble-stg-alarms`, 'email', ALARM_EMAIL],
+    });
+  });
+
+  test.each(['', 'set-me', 'alarms@', '@example.com', 'two words@example.com'])(
+    'refuses %j as the address, without printing it',
+    async (alarmEmail) => {
+      const error = await run({ ...stg, alarmEmail }).then(
+        () => new Error('accepted'),
+        (reason: Error) => reason
+      );
+      expect([
+        error.message.includes('alarmEmail is not an email address'),
+        error.message.includes(alarmEmail),
+      ]).toEqual([true, alarmEmail === '']);
+    }
+  );
+
+  test.each(['stg', 'prd'] as const)(
+    'the committed %s stack file holds the address only encrypted, or the unset placeholder',
+    (stack) => {
+      const config = parse(readFileSync(new URL(`../Pulumi.${stack}.yaml`, import.meta.url), 'utf8')).config;
+      const address = config['pebble-aws-bootstrap:alarmEmail'];
+      expect(address).toEqual(expect.toBeOneOf(['set-me', { secure: expect.any(String) }]));
+    }
+  );
+});
+
 describe('the OIDC provider', () => {
   /** What a committed stack file sets, read the way the entry point reads stack config. */
   const committed = (stack: 'stg' | 'prd') => {
     const config = parse(readFileSync(new URL(`../Pulumi.${stack}.yaml`, import.meta.url), 'utf8')).config;
-    return settings(stack, {
-      accountId: ACCOUNT_ID,
-      region: config['aws:region'],
-      oidc: config['pebble-aws-bootstrap:oidc'],
-    });
+    return {
+      ...settings(stack, {
+        accountId: ACCOUNT_ID,
+        region: config['aws:region'],
+        oidc: config['pebble-aws-bootstrap:oidc'],
+      }),
+      alarmEmail: ALARM_EMAIL,
+    };
   };
 
   // README step 5 turns oidc.import off once the provider is adopted, and step 8 commits that: both states are valid.
@@ -311,6 +381,11 @@ describe('provider enum inputs', () => {
       'aws:s3/bucketLifecycleConfiguration:BucketLifecycleConfiguration',
       (r) => r.inputs.rules[0].status,
       ['Disabled', 'Enabled'],
+    ],
+    [
+      'aws:sns/topicSubscription:TopicSubscription',
+      (r) => r.inputs.protocol,
+      ['application', 'email', 'email-json', 'firehose', 'http', 'https', 'lambda', 'sms', 'sqs'],
     ],
   ];
 

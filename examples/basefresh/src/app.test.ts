@@ -7,16 +7,22 @@ import { basefresh, type BasefreshInputs } from './app.js';
 import { bootstrap } from './bootstrap.js';
 
 const root = join(import.meta.dirname, '..');
+/** The account bootstrap's `alarmTopicArn` in each account: pbt-stg for staging, pbt-prd for prod. */
+const ALARM_TOPIC = {
+  staging: 'arn:aws:sns:ap-southeast-1:111111111111:pebble-stg-alarms',
+  prod: 'arn:aws:sns:ap-southeast-1:222222222222:pebble-prd-alarms',
+};
 const inputs = (stack: string): BasefreshInputs => ({
   apex: 'pebbletech.my',
   cloudflareZoneId: 'zone-1',
   cloudflareAccountId: 'account-1',
-  pgAdminUrl: 'postgresql://postgres.abc123:admin@sin.pg.psdb.cloud:5432/postgres',
+  // shared has no database, so no admin URL.
+  ...(stack === 'shared' ? {} : { pgAdminUrl: 'postgresql://postgres.abc123:admin@sin.pg.psdb.cloud:5432/postgres' }),
   ...(stack.startsWith('pr-') || stack === 'shared'
     ? {}
     : { pgRuntime: { role: 'basefresh_app', password: 'runtime' } }),
-  operators: ['pscale_api_kong'],
   authSecret: 'auth-secret',
+  ...(stack === 'staging' || stack === 'prod' ? { alarmTopicArn: ALARM_TOPIC[stack] } : {}),
   bundles: { api: join(root, 'bundles/api'), uploads: join(root, 'bundles/uploads/server.js') },
 });
 
@@ -79,6 +85,7 @@ const RUNTIME = (env: string, suffix: string) => {
     'aws:apigatewayv2/route:Route api-route',
     'aws:apigatewayv2/stage:Stage api-stage $default',
     `aws:cloudwatch/logGroup:LogGroup api-logs /aws/lambda/basefresh-${env}-api`,
+    `aws:cloudwatch/metricAlarm:MetricAlarm api-errors basefresh-${env}-api-errors`,
     `aws:iam/role:Role api-role basefresh-${env}-api`,
     'aws:iam/rolePolicyAttachment:RolePolicyAttachment api-basic-execution',
     `aws:lambda/function:Function api basefresh-${env}-api`,
@@ -106,12 +113,8 @@ describe('basefresh program', () => {
   test('shared owns the Vercel project, its staging environment and the bypass, nothing else', async () => {
     const { resources, result } = await run('shared');
     expect(summary(resources)).toEqual([
-      'pebbletech:index:Operators operators',
       'pebbletech:index:Stage stage',
       'pebbletech:index:VercelProject web',
-      'postgresql:index/grantRole:GrantRole operators-member-pscale_api_kong',
-      'postgresql:index/role:Role operators-group pebble_operators',
-      'pulumi:providers:postgresql operators-admin',
       'vercel:index/customEnvironment:CustomEnvironment web-staging staging',
       'vercel:index/project:Project web basefresh-web',
       'vercel:index/projectProtectionBypass:ProjectProtectionBypass web-bypass',
@@ -139,24 +142,12 @@ describe('basefresh program', () => {
     expect(summary(resources)).toEqual([...DATABASE_STAGE('basefresh_stg'), ...RUNTIME('staging', '-stg')].sort());
   });
 
-  test('prod builds the same set under unsuffixed hostnames and basefresh_prd, plus the production cluster operators', async () => {
+  test('prod builds the same set under unsuffixed hostnames and basefresh_prd', async () => {
     const { resources } = await run('prod');
-    expect(summary(resources)).toEqual(
-      [
-        ...DATABASE_STAGE('basefresh_prd'),
-        ...RUNTIME('prod', ''),
-        'pebbletech:index:Operators operators',
-        'postgresql:index/grantRole:GrantRole operators-member-pscale_api_kong',
-        'postgresql:index/role:Role operators-group pebble_operators',
-        'pulumi:providers:postgresql operators-admin',
-      ].sort()
-    );
-    // The database grant to the group waits for the group this stack creates.
-    const group = resources.find((r) => r.name === 'operators-group')!;
-    expect(resources.find((r) => r.name === 'db-operators')!.dependencies).toContain(group.urn);
+    expect(summary(resources)).toEqual([...DATABASE_STAGE('basefresh_prd'), ...RUNTIME('prod', '')].sort());
   });
 
-  test('prod: everything is protected and retained except operator member grants (neither, so a removal goes through) and the two domains (protected, not retained, so a delete-first replace frees the hostname)', async () => {
+  test('prod: everything is protected and retained except the two domains (protected, not retained, so a delete-first replace frees the hostname)', async () => {
     const { resources } = await run('prod');
     const exposed = resources.filter((r) => r.custom && !r.type.startsWith('pulumi:providers:'));
     expect(
@@ -165,7 +156,6 @@ describe('basefresh program', () => {
         .map((r) => [r.name, r.protect, r.retainOnDelete])
         .sort()
     ).toEqual([
-      ['operators-member-pscale_api_kong', false, false],
       ['uploads-domain', true, false],
       ['web-domain', true, false],
     ]);
@@ -184,6 +174,13 @@ describe('basefresh program', () => {
     );
   });
 
+  test.each(['staging', 'prod'] as const)("%s: the API's errors alarm notifies its account's topic", async (stack) => {
+    const { resources } = await run(stack);
+    expect(
+      resources.filter((r) => r.type === 'aws:cloudwatch/metricAlarm:MetricAlarm').map((r) => r.inputs.alarmActions)
+    ).toEqual([[ALARM_TOPIC[stack]]]);
+  });
+
   test('every IAM role in every stack carries a permissions boundary', async () => {
     for (const stack of ['shared', 'pr-7', 'staging', 'prod']) {
       const { resources } = await run(stack);
@@ -194,7 +191,7 @@ describe('basefresh program', () => {
   });
 
   test.each(['staging', 'prod'] as const)(
-    "%s: the deploy role's IAM scope covers every role, function and log group the stack creates",
+    "%s: the deploy role's IAM scope covers every role, function, log group and alarm the stack creates",
     async (env) => {
       const { resources: roleResources } = await runProgram({ project: 'basefresh-bootstrap', stack: env }, () =>
         bootstrap(env)
@@ -214,13 +211,15 @@ describe('basefresh program', () => {
       const role = resources.find((r) => r.type === 'aws:iam/role:Role')!;
       const fn = resources.find((r) => r.type === 'aws:lambda/function:Function')!;
       const logs = resources.find((r) => r.type === 'aws:cloudwatch/logGroup:LogGroup')!;
+      const alarm = resources.find((r) => r.type === 'aws:cloudwatch/metricAlarm:MetricAlarm')!;
       expect([
         allows('RolesOnlyWithBoundary', `arn:aws:iam::123456789012:role/${role.inputs.name}`),
         allows('PassRolesToLambda', `arn:aws:iam::123456789012:role/${role.inputs.name}`),
         allows('Lambda', `arn:aws:lambda:ap-southeast-1:123456789012:function:${fn.inputs.name}`),
         allows('Logs', `arn:aws:logs:ap-southeast-1:123456789012:log-group:${logs.inputs.name}`),
+        allows('Alarms', `arn:aws:cloudwatch:ap-southeast-1:123456789012:alarm:${alarm.inputs.name}`),
         role.inputs.permissionsBoundary,
-      ]).toEqual([true, true, true, true, boundaryArn]);
+      ]).toEqual([true, true, true, true, true, boundaryArn]);
     }
   );
 });

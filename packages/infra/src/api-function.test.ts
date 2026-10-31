@@ -28,7 +28,7 @@ async function apiIn(stack: string, args: Partial<Omit<ApiFunctionArgs, 'stage'>
 }
 
 describe('ApiFunction', () => {
-  test('creates the function, its role, logs, HTTP API, regional certificate, domain and CNAMEs', async () => {
+  test('creates the function, its role, logs, errors alarm, HTTP API, regional certificate, domain and CNAMEs', async () => {
     const { resources } = await apiIn('staging');
     const children = resources.filter((r) => r.parent.endsWith('pebbletech:index:ApiFunction::api'));
     expect(children.map((r) => `${r.type} ${r.name}`).sort()).toEqual([
@@ -41,6 +41,7 @@ describe('ApiFunction', () => {
       'aws:apigatewayv2/route:Route api-route',
       'aws:apigatewayv2/stage:Stage api-stage',
       'aws:cloudwatch/logGroup:LogGroup api-logs',
+      'aws:cloudwatch/metricAlarm:MetricAlarm api-errors',
       'aws:iam/role:Role api-role',
       'aws:iam/rolePolicyAttachment:RolePolicyAttachment api-basic-execution',
       'aws:lambda/function:Function api',
@@ -136,8 +137,47 @@ describe('ApiFunction', () => {
   test('on prod every child is protected and retained', async () => {
     const { resources } = await apiIn('prod');
     const children = resources.filter((r) => r.custom);
-    expect(children).toHaveLength(15);
+    expect(children).toHaveLength(16);
     expect(children.filter((r) => !r.protect || !r.retainOnDelete).map((r) => r.name)).toEqual([]);
+  });
+
+  test("one alarm on the function's Errors notifies the topic; a function with no traffic stays OK", async () => {
+    const topicArn = 'arn:aws:sns:ap-southeast-1:123456789012:alerts';
+    const { resources } = await apiIn('staging', { alarm: { topicArn } });
+    const alarms = resources.filter((r) => r.type === 'aws:cloudwatch/metricAlarm:MetricAlarm');
+    expect(alarms.map((r) => r.inputs)).toEqual([
+      expect.objectContaining({
+        name: 'basefresh-staging-api-errors',
+        namespace: 'AWS/Lambda',
+        metricName: 'Errors',
+        dimensions: { FunctionName: 'basefresh-staging-api' },
+        statistic: 'Sum',
+        period: 300,
+        evaluationPeriods: 1,
+        threshold: 1,
+        comparisonOperator: 'GreaterThanOrEqualToThreshold',
+        treatMissingData: 'notBreaching',
+        alarmActions: [topicArn],
+        tags: { product: 'basefresh', env: 'staging', 'managed-by': 'pulumi' },
+      }),
+    ]);
+  });
+
+  test('threshold and period are arguments', async () => {
+    const { resources } = await apiIn('staging', { alarm: { threshold: 5, period: 60 } });
+    const alarm = resources.find((r) => r.type === 'aws:cloudwatch/metricAlarm:MetricAlarm')!;
+    expect([alarm.inputs.threshold, alarm.inputs.period]).toEqual([5, 60]);
+  });
+
+  test('a 0.3.x caller that passes no alarm argument still gets the alarm, with no action', async () => {
+    const { resources } = await apiIn('prod');
+    const alarm = resources.find((r) => r.type === 'aws:cloudwatch/metricAlarm:MetricAlarm')!;
+    expect([alarm.inputs.name, alarm.inputs.alarmActions]).toEqual(['basefresh-prod-api-errors', []]);
+  });
+
+  test('alarm: false creates no alarm', async () => {
+    const { resources } = await apiIn('staging', { alarm: false });
+    expect(resources.filter((r) => r.type.startsWith('aws:cloudwatch/metricAlarm'))).toEqual([]);
   });
 
   test('outputs are registered', async () => {

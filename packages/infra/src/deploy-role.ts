@@ -45,7 +45,7 @@ type Statement = Record<string, unknown>;
  * `env`, so a role cannot be pointed at another env's state or tokens. Domain globs end with the given `apex`. A `preview`
  * role deploys only `pr-<n>` stacks
  * (a database and a SQL role on PlanetScale), so its policy is the state path and its KMS key. `staging` and `prod`
- * also manage AWS resources named `<product>-<env>-*`.
+ * also manage AWS resources named `<product>-<env>-*`, CloudWatch alarms included.
  */
 export class DeployRole extends pulumi.ComponentResource {
   readonly roleArn: pulumi.Output<string>;
@@ -272,6 +272,24 @@ export class DeployRole extends pulumi.ComponentResource {
           ],
         },
         { Sid: 'LogsDescribe', Effect: 'Allow', Action: 'logs:DescribeLogGroups', Resource: '*' },
+        {
+          // ApiFunction's errors alarm, `<product>-<env>-<kind>-errors`. The AWS provider creates and updates it with
+          // PutMetricAlarm (an update ignores tags, so tag changes go through Tag/UntagResource), reads it with
+          // DescribeAlarms and ListTagsForResource, and deletes it with DeleteAlarms. Each of these but DescribeAlarms
+          // takes the `alarm` resource type (arn:aws:cloudwatch:<region>:<account>:alarm:<name>) in the CloudWatch
+          // service authorization reference; no condition is needed, the name scopes it.
+          Sid: 'Alarms',
+          Effect: 'Allow',
+          Action: [
+            'cloudwatch:PutMetricAlarm',
+            'cloudwatch:DeleteAlarms',
+            'cloudwatch:TagResource',
+            'cloudwatch:UntagResource',
+            'cloudwatch:ListTagsForResource',
+          ],
+          Resource: `arn:aws:cloudwatch:*:*:alarm:${scope}`,
+        },
+        { Sid: 'AlarmsDescribe', Effect: 'Allow', Action: 'cloudwatch:DescribeAlarms', Resource: '*' },
         {
           Sid: 'RolesOnlyWithBoundary',
           Effect: 'Allow',

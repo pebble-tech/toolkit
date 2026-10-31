@@ -1,0 +1,47 @@
+name: pebble-infra
+description: >-
+  Runs pebble-infra up, preview or remove from the product's installed @pebbletech/infra, after pulumi login when
+  PULUMI_BACKEND_URL is set. Refuses an installed @pebbletech/infra whose major.minor is not this action's.
+
+inputs:
+  command:
+    description: up, preview or remove.
+    required: true
+  stack:
+    description: The stack (shared, staging, prod or pr-<n>).
+    required: true
+  entries:
+    description: The compiled entries module, relative to infra (--entries).
+    required: true
+  clear-lock:
+    description: true passes --clear-lock (up and remove).
+    default: 'false'
+  summary:
+    description: true passes --summary (preview).
+    default: 'false'
+  infra:
+    description: The directory, from the repository root, holding Pulumi.yaml and the installed @pebbletech/infra.
+    default: infra
+
+outputs:
+  json:
+    description: >-
+      Every step output pebble-infra wrote, as one JSON object keyed as it wrote them: up writes the stack's outputs
+      export, so a later step reads fromJSON(steps.<id>.outputs.json).database_url. Secret values are masked.
+    value: ${{ toJSON(steps.cli.outputs) }}
+
+runs:
+  using: composite
+  steps:
+    - name: pebble-infra ${{ inputs.command }} ${{ inputs.stack }}
+      id: cli
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        COMMAND: ${{ inputs.command }}
+        STACK: ${{ inputs.stack }}
+        ENTRIES: ${{ inputs.entries }}
+        CLEAR_LOCK: ${{ inputs.clear-lock }}
+        SUMMARY: ${{ inputs.summary }}
+        INFRA: ${{ inputs.infra }}
+      run: bash "$GITHUB_ACTION_PATH/run.sh"

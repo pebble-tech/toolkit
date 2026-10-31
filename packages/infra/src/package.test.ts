@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
@@ -31,3 +31,18 @@ test(
     expect(packedFiles()).toEqual(['LICENSE', 'README.md', 'package.json', ...modules].sort());
   }
 );
+
+// In changesets pre mode `latest` is the last stable release, so a product copying a bare install gets a version without
+// this one's changes. Leaving pre mode makes this test ask for the tag to come out of each command again.
+test('every install command in the READMEs names the next tag exactly while the repository is in pre mode', () => {
+  const root = join(packageDir, '../..');
+  const preFile = join(root, '.changeset/pre.json');
+  const pre = existsSync(preFile) && (JSON.parse(readFileSync(preFile, 'utf8')) as { mode?: string }).mode === 'pre';
+  const installs = ['README.md', 'packages/infra/README.md'].flatMap((file) =>
+    [...readFileSync(join(root, file), 'utf8').matchAll(/pnpm [^`\n]*\badd\b[^`\n]*@pebbletech\/infra[^\s`]*/g)].map(
+      (m) => `${file}: ${m[0]}`
+    )
+  );
+  expect(installs.length).toBeGreaterThanOrEqual(3);
+  expect(installs.filter((line) => /@pebbletech\/infra@next(?:\s|$)/.test(line) !== pre)).toEqual([]);
+});
