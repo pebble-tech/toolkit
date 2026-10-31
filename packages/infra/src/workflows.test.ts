@@ -704,6 +704,39 @@ describe('the pulumi action', () => {
     expect(run(jobs)).toEqual(expected);
   });
 
+  test.each([
+    ['a literal infra directory', { infra: 'apps/infra' }],
+    ['a literal entries path with a space', { entries: 'dist/my entries.js' }],
+    ['a ref with a slash', {}, ACTION.replace(/@.*/, '@release/v1')],
+  ] as [string, Record<string, unknown>, string?][])('%s passes', (_name, inputs, uses) => {
+    expect(run({ deploy: job([before, migrate, wrapped(inputs, uses), fromJson]) })).toEqual([]);
+  });
+
+  const { entries: _entries, ...noEntries } = wrapped({}).with;
+  test.each([
+    ['no entries input', { deploy: job([before, migrate, { ...wrapped({}), with: noEntries }, fromJson]) }],
+    [
+      'an entries input that is not a literal',
+      { deploy: job([before, migrate, wrapped({ entries: '${{ inputs.entries }}' }), fromJson]) },
+    ],
+    [
+      'an infra input that is not a literal',
+      { deploy: job([before, migrate, wrapped({ infra: '${{ inputs.infra }}' }), fromJson]) },
+    ],
+    [
+      'the action path in another case',
+      { deploy: job([before, migrate, wrapped({}, ACTION.replace('/pulumi@', '/Pulumi@')), fromJson]) },
+    ],
+  ] as [string, Record<string, object>][])('%s refuses', (_name, jobs) => {
+    expect(run(jobs)).toEqual([['stack', 'p.yml#deploy']]);
+  });
+
+  test('a ref with a slash is still read: an up without the read fails', () => {
+    expect(run({ deploy: job([wrapped({}, ACTION.replace(/@.*/, '@release/v1')), fromJson]) })).toEqual([
+      ['migrate', 'p.yml#deploy'],
+    ]);
+  });
+
   test('a refusal names the step and what the helper reads', () => {
     const jobs = { deploy: job([before, migrate, wrapped({ stack: '${{ inputs.stack }}' }), fromJson]) };
     expect(check({ 'p.yml': { on: { push: {} }, jobs } })).toEqual([
@@ -716,4 +749,66 @@ describe('the pulumi action', () => {
       },
     ]);
   });
+});
+
+// Migrate first, for both forms of up: up itself runs unconditionally, and a read of an output counts only inside
+// `${{ }}`, outside a quoted string.
+describe('migrate first reads only what runs', () => {
+  const ACTION = `pebble-tech/toolkit/.github/actions/pulumi@${'0'.repeat(40)}`;
+  const group = { group: 'pulumi-staging', 'cancel-in-progress': false, queue: 'max' };
+  const [before, migrate, up, first] = migrateFirst('staging') as Record<string, any>[];
+  const wrappedUp = {
+    id: 'up',
+    uses: ACTION,
+    env: VALUES,
+    with: { command: 'up', stack: 'staging', entries: 'dist/entries.js', 'clear-lock': true },
+  };
+  const firstFrom = (value: string) => ({ ...first, env: { DATABASE_URL: value } });
+  const run = (steps: object[]) =>
+    rules(
+      check({
+        'p.yml': {
+          on: { push: {} },
+          jobs: {
+            deploy: {
+              'runs-on': 'ubuntu-latest',
+              environment: 'staging',
+              concurrency: group,
+              env: state('stg', 'staging', 'staging'),
+              steps: [credentials, ...steps],
+            },
+          },
+        },
+      })
+    );
+  const RUN_READ = 'steps.up.outputs.database_url';
+  const JSON_READ = 'fromJSON(steps.up.outputs.json).database_url';
+
+  test.each([
+    ['run', up, RUN_READ],
+    ['pulumi action', wrappedUp, JSON_READ],
+  ] as [string, object, string][])('%s form: the read as an expression passes', (_form, upStep, read) => {
+    expect(run([before, migrate, upStep, firstFrom(`\${{ ${read} }}`)])).toEqual([]);
+  });
+
+  test.each([
+    ['run', up, RUN_READ],
+    ['pulumi action', wrappedUp, JSON_READ],
+  ] as [string, object, string][])('%s form: an up under if: false fails', (_form, upStep, read) => {
+    expect(run([before, migrate, { ...upStep, if: 'false' }, firstFrom(`\${{ ${read} }}`)])).toEqual([
+      ['migrate', 'p.yml#deploy'],
+    ]);
+  });
+
+  test.each([
+    ['run, plain text', up, RUN_READ],
+    ['run, a quoted string', up, `\${{ '${RUN_READ}' }}`],
+    ['pulumi action, plain text', wrappedUp, JSON_READ],
+    ['pulumi action, a quoted string', wrappedUp, `\${{ '${JSON_READ}' }}`],
+  ] as [string, object, string][])(
+    '%s form: a first-deploy read that is not an expression fails',
+    (_form, upStep, value) => {
+      expect(run([before, migrate, upStep, firstFrom(value)])).toEqual([['migrate', 'p.yml#deploy']]);
+    }
+  );
 });

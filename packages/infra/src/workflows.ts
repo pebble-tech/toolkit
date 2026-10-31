@@ -259,10 +259,17 @@ function commands(run: string): Command[] {
   return found;
 }
 
-/** The toolkit's own actions, at any ref; GitHub matches the owner and repo in any case. */
-const TOOLKIT = /^pebble-tech\/toolkit\//i;
-const SETUP_ACTION = /^pebble-tech\/toolkit\/\.github\/actions\/setup@[^/\s]+$/i;
-const PULUMI_ACTION = /^pebble-tech\/toolkit\/\.github\/actions\/pulumi@[^/\s]+$/i;
+/**
+ * The action a `uses:` names in the toolkit repo, `setup` or `pulumi`, or `other` for any other path there; undefined
+ * outside it. GitHub matches the owner and repo in any case, the path exactly; the ref is anything after the first `@`.
+ */
+function toolkitAction(uses: string): 'setup' | 'pulumi' | 'other' | undefined {
+  const [owner, repo, ...rest] = uses.split('/');
+  if (owner?.toLowerCase() !== 'pebble-tech' || repo?.toLowerCase() !== 'toolkit' || rest.length === 0)
+    return undefined;
+  const match = /^\.github\/actions\/(setup|pulumi)@\S+$/.exec(rest.join('/'));
+  return (match?.[1] as 'setup' | 'pulumi' | undefined) ?? 'other';
+}
 const PULUMI_INPUTS = new Set(['command', 'stack', 'entries', 'clear-lock', 'summary', 'infra']);
 
 /** The `pebble-infra` command a `pulumi` action step runs, from its literal `with:` inputs; a string says why not. */
@@ -273,6 +280,13 @@ function wrapperCommand(step: WorkflowStep): Command | string {
   if (!['up', 'preview', 'remove'].includes(command ?? ''))
     return `command ${command ?? '(unset)'}, not up, preview or remove written as a literal`;
   if (stack === undefined) return 'no stack input';
+  if (entries === undefined) return 'no entries input, which pebble-infra needs';
+  for (const [name, value] of [
+    ['entries', entries],
+    ['infra', rest.infra],
+  ] as const) {
+    if (value?.includes('${{')) return `${name}: ${value}, not written as a literal`;
+  }
   const flags = new Set<string>();
   for (const name of ['clear-lock', 'summary']) {
     const value = rest[name];
@@ -280,7 +294,7 @@ function wrapperCommand(step: WorkflowStep): Command | string {
     else if (value !== undefined && value !== 'false')
       return `${name}: ${value}, not true or false written as a literal`;
   }
-  const words = [command, stack, ...(entries === undefined ? [] : ['--entries', entries]), ...flags];
+  const words = [command, stack, '--entries', entries, ...flags];
   return {
     verb: command!,
     stackArg: stack,
@@ -352,10 +366,9 @@ function collectTouches(context: Context): void {
         for (const stack of stacksOf(undefined)) push(command, stack);
       }
       const found = step.run ? commands(step.run) : [];
-      if (step.uses && TOOLKIT.test(step.uses) && !SETUP_ACTION.test(step.uses)) {
-        const wrapped = PULUMI_ACTION.test(step.uses)
-          ? wrapperCommand(step)
-          : 'a toolkit path the helper does not read';
+      const action = step.uses === undefined ? undefined : toolkitAction(step.uses);
+      if (action === 'pulumi' || action === 'other') {
+        const wrapped = action === 'pulumi' ? wrapperCommand(step) : 'a toolkit path the helper does not read';
         if (typeof wrapped === 'string') {
           add(
             'stack',
@@ -689,14 +702,18 @@ function concurrencyRule({ touches, add }: Context): void {
   }
 }
 
+/** Whether `expression` is read inside a `${{ }}` of the step, outside a quoted string. */
 const references = (step: WorkflowStep, expression: string) =>
-  JSON.stringify({ run: step.run, env: step.env, with: step.with }).includes(expression);
+  [...JSON.stringify({ run: step.run, env: step.env, with: step.with }).matchAll(/\$\{\{([\s\S]*?)\}\}/g)].some(
+    ([, body]) => body!.replace(/'(?:[^']|'')*'/g, "''").includes(expression)
+  );
 
 /**
  * In each deploying job, an unconditional `pebble-infra outputs <stack> --github-output --if-exists` in that same job
  * comes first; a read in another job does not count. Every step between it and `up` that reads the URL runs
  * under exactly `if: <read> != ''`, and a step after `up` under exactly `if: <read> == ''` migrates the first deploy
- * from `up`'s own output. Any other condition fails.
+ * from `up`'s own output; `up` itself has no `if:`. A read counts only inside `${{ }}`, outside a quoted string. Any
+ * other condition fails.
  */
 function migrateRule({ options, touches, add }: Context): void {
   if (!options.database) return;
@@ -709,6 +726,13 @@ function migrateRule({ options, touches, add }: Context): void {
   for (const up of touches.filter((t) => t.command.verb === 'up' && stacks.includes(t.kind))) {
     const { variant, stack, index } = up;
     const steps = variant.job.steps;
+    if (up.step.if !== undefined) {
+      add(
+        'migrate',
+        variant.id,
+        `${variant.label} runs up on ${stack} under if: ${up.step.if}; up runs unconditionally`
+      );
+    }
     const reads: { expression: string; from: number; step: WorkflowStep }[] = [];
     steps.forEach((step, i) => {
       const touch = touches.find((t) => t.variant === variant && t.step === step && isRead(t, stack));
