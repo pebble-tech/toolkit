@@ -357,6 +357,11 @@ describe('the handover of pebble_operators to the cluster program', () => {
       all([M1, M2], true),
     ]);
 
+    // Each admin can act only as the roles it created: neither product's admin can act as the other's owner.
+    await expect(sql(OTHER_ADMIN, `set role ${q(`${PRODUCT_DB}_owner`)}`)).rejects.toThrow('permission denied');
+    await expect(sql(PRODUCT_ADMIN, `set role ${q(`${OTHER_DB}_owner`)}`)).rejects.toThrow('permission denied');
+    expect(await sql(PRODUCT_ADMIN, `set role ${q(`${PRODUCT_DB}_owner`)}`), 'step 5: its own owner').toEqual([]);
+
     // 6. The cluster admin adds M3 and removes M1, and the removal takes effect.
     await up(cluster, CLUSTER_STACK, clusterProgram([M2, M3]));
     expect(await memberships(), 'step 6').toEqual([`${M2} by ${CLUSTER_ADMIN}`, `${M3} by ${CLUSTER_ADMIN}`]);
