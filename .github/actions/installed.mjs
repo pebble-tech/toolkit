@@ -1,9 +1,10 @@
-// The version of a package installed for a directory, found as Node finds it: <dir>/node_modules/<name>, then each
-// parent's. The setup and pulumi actions run it before anything that depends on that version.
+// The version of a package installed for a directory, found as Node finds it from the directory's real path (a
+// symlinked infra/ resolves from its target): <real dir>/node_modules/<name>, then each parent's. The setup and pulumi
+// actions run it before anything that depends on that version.
 //
 //   node installed.mjs <dir> <package>                  prints the installed version
 //   node installed.mjs <dir> <package> <package.json>   prints it, and fails unless its major.minor is that file's
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 const [dir, name, expected] = process.argv.slice(2);
@@ -23,7 +24,8 @@ const version = (file) => {
 };
 
 let found;
-for (let at = resolve(dir); ; at = dirname(at)) {
+const start = existsSync(dir) ? realpathSync(dir) : resolve(dir);
+for (let at = start; ; at = dirname(at)) {
   const file = join(at, 'node_modules', name, 'package.json');
   if (existsSync(file)) {
     found = file;

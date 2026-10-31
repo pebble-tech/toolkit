@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -43,6 +43,25 @@ describe('the Pulumi CLI version setup installs', () => {
     const infra = join(root, 'infra');
     mkdirSync(infra);
     expect(installed(infra, '@pulumi/pulumi')).toMatchObject({ status: 0, stdout: '3.199.4\n' });
+  });
+
+  // infra/ a symlink to packages/program, with one SDK in the root's node_modules and another in packages/: Node runs
+  // the program from its real path, so it loads the one under packages/.
+  test('follows a symlinked infra directory to where Node resolves the program from', () => {
+    const root = installedFor({ '@pulumi/pulumi': '3.199.4' });
+    const packages = join(root, 'packages');
+    const sdk = join(packages, 'node_modules/@pulumi/pulumi');
+    mkdirSync(sdk, { recursive: true });
+    writeFileSync(join(sdk, 'package.json'), JSON.stringify({ version: '3.250.1' }));
+    const program = join(packages, 'program');
+    mkdirSync(program);
+    writeFileSync(join(program, 'index.cjs'), "console.log(require('@pulumi/pulumi/package.json').version)");
+    symlinkSync(program, join(root, 'infra'), 'dir');
+    const runs = (dir: string) => spawnSync(process.execPath, [join(dir, 'index.cjs')], { encoding: 'utf8' }).stdout;
+    expect([program, join(root, 'infra')].map((dir) => [installed(dir, '@pulumi/pulumi').stdout, runs(dir)])).toEqual([
+      ['3.250.1\n', '3.250.1\n'],
+      ['3.250.1\n', '3.250.1\n'],
+    ]);
   });
 
   test('refuses, naming the package and the infra input, when @pulumi/pulumi is not installed', () => {
