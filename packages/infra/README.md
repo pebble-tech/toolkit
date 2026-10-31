@@ -522,8 +522,10 @@ pnpm --dir infra exec pebble-infra up staging --entries dist/entries.js --clear-
 
 ### The entries module
 
-Every stack config value the program reads, listed once. `configure` imports the compiled module; the program's own
-`readInputs` imports the same one:
+Every stack config value the program reads, listed once. `configure` imports the compiled module and writes each
+entry; the program reads each key itself with Pulumi's `Config` (`config.get`, `getSecret`, `require`), as
+[`examples/web-only/src/index.ts`](https://github.com/pebble-tech/toolkit/tree/main/examples/web-only/src/index.ts)
+does:
 
 ```ts
 // infra/src/entries.ts

@@ -3,7 +3,7 @@ import type { StageKind } from './stage.js';
 
 /**
  * One stack config value a product's program reads, and the variable it comes from. A product's entries module lists
- * every one; `pebble-infra configure` writes them and the program's `readInputs` imports the same list.
+ * every one; `pebble-infra configure` writes them, and the program reads each key with Pulumi's `config.get`.
  */
 export interface Entry {
   /** Stack config key, in the product's namespace unless it names its own (`aws:region`). */
