@@ -169,6 +169,35 @@ describe('DeployRole', () => {
     });
   });
 
+  test.each(['staging', 'prod'] as const)(
+    '%s creates, reads, tags and deletes CloudWatch alarms only under its own name',
+    async (env) => {
+      const { resources } = await roleFor(env);
+      const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
+      const alarm = (name: string) => `arn:aws:cloudwatch:ap-southeast-1:123456789012:alarm:${name}`;
+      const other = env === 'prod' ? 'staging' : 'prod';
+      const lifecycle = [
+        'cloudwatch:PutMetricAlarm',
+        'cloudwatch:DescribeAlarms',
+        'cloudwatch:ListTagsForResource',
+        'cloudwatch:TagResource',
+        'cloudwatch:UntagResource',
+        'cloudwatch:DeleteAlarms',
+      ];
+      expect({
+        own: lifecycle.map((action) => allows(policy, action, alarm(`basefresh-${env}-api-errors`))),
+        otherEnv: lifecycle
+          .filter((action) => action !== 'cloudwatch:DescribeAlarms')
+          .map((action) => allows(policy, action, alarm(`basefresh-${other}-api-errors`))),
+        otherProduct: allows(policy, 'cloudwatch:DeleteAlarms', alarm(`other-${env}-api-errors`)),
+      }).toEqual({
+        own: lifecycle.map(() => true),
+        otherEnv: [false, false, false, false, false],
+        otherProduct: false,
+      });
+    }
+  );
+
   test('a preview role allows only its state bucket and KMS key, and still publishes the boundary', async () => {
     const { resources } = await roleFor('preview');
     const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);

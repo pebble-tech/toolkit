@@ -195,7 +195,7 @@ describe('basefresh program', () => {
   });
 
   test.each(['staging', 'prod'] as const)(
-    "%s: the deploy role's IAM scope covers every role, function and log group the stack creates",
+    "%s: the deploy role's IAM scope covers every role, function, log group and alarm the stack creates",
     async (env) => {
       const { resources: roleResources } = await runProgram({ project: 'basefresh-bootstrap', stack: env }, () =>
         bootstrap(env)
@@ -215,13 +215,15 @@ describe('basefresh program', () => {
       const role = resources.find((r) => r.type === 'aws:iam/role:Role')!;
       const fn = resources.find((r) => r.type === 'aws:lambda/function:Function')!;
       const logs = resources.find((r) => r.type === 'aws:cloudwatch/logGroup:LogGroup')!;
+      const alarm = resources.find((r) => r.type === 'aws:cloudwatch/metricAlarm:MetricAlarm')!;
       expect([
         allows('RolesOnlyWithBoundary', `arn:aws:iam::123456789012:role/${role.inputs.name}`),
         allows('PassRolesToLambda', `arn:aws:iam::123456789012:role/${role.inputs.name}`),
         allows('Lambda', `arn:aws:lambda:ap-southeast-1:123456789012:function:${fn.inputs.name}`),
         allows('Logs', `arn:aws:logs:ap-southeast-1:123456789012:log-group:${logs.inputs.name}`),
+        allows('Alarms', `arn:aws:cloudwatch:ap-southeast-1:123456789012:alarm:${alarm.inputs.name}`),
         role.inputs.permissionsBoundary,
-      ]).toEqual([true, true, true, true, boundaryArn]);
+      ]).toEqual([true, true, true, true, true, boundaryArn]);
     }
   );
 });
