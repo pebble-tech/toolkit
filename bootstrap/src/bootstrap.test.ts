@@ -382,6 +382,11 @@ describe('provider enum inputs', () => {
       (r) => r.inputs.rules[0].status,
       ['Disabled', 'Enabled'],
     ],
+    [
+      'aws:sns/topicSubscription:TopicSubscription',
+      (r) => r.inputs.protocol,
+      ['application', 'email', 'email-json', 'firehose', 'http', 'https', 'lambda', 'sms', 'sqs'],
+    ],
   ];
 
   // One assertion per value, counted: deleting the per-value check fails the count, and deleting the count leaves the
