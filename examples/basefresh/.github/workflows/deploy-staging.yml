@@ -30,6 +30,8 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up pnpm, Node.js, the dependencies and the Pulumi CLI
+        # Placeholder: the all-zero SHA and the version comment are replaced after the release, by the commit
+        # tagged @pebbletech/infra@0.4.0-next.0 and that version.
         uses: pebble-tech/toolkit/.github/actions/setup@0000000000000000000000000000000000000000 # @pebbletech/infra@0.4.0
 
       - name: Build the infra program and the bundles
@@ -82,7 +84,8 @@ jobs:
           DATABASE_URL: ${{ steps.up.outputs.database_url }}
         run: pnpm db:migrate
 
-      # The web deploy to Vercel's staging environment follows here (T6).
+      # The web deploy to Vercel's staging environment goes here, left out of this example: examples/web-only's
+      # deploy-production.yml has the step for production.
 
   prod-preview:
     # What a release would change on prod. Never applies and never clears a lock (`pebble-infra preview`).
@@ -105,6 +108,8 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up pnpm, Node.js, the dependencies and the Pulumi CLI
+        # Placeholder: the all-zero SHA and the version comment are replaced after the release, by the commit
+        # tagged @pebbletech/infra@0.4.0-next.0 and that version.
         uses: pebble-tech/toolkit/.github/actions/setup@0000000000000000000000000000000000000000 # @pebbletech/infra@0.4.0
 
       - name: Build the infra program and the bundles
