@@ -167,8 +167,8 @@ product's `infra/bootstrap` builds its role from the package version it has inst
 while 0.3.x is still installed changes nothing. "Bumping" here means the dependency change landing in a release, the
 first run that applies the runtime stacks with 0.4. Before that release, in this order:
 
-1. On the upgrade branch, change `@pebbletech/infra` to 0.4 in `infra/package.json`, install, and rebuild `infra/`
-   (`pnpm --dir infra build`). Do not merge yet.
+1. On the upgrade branch, install 0.4 (`pnpm --dir infra add --save-exact @pebbletech/infra@next` until 0.4.0 is out)
+   and rebuild `infra/` (`pnpm --dir infra build`). Do not merge yet.
 2. From that build, with SSO, apply the product's `infra/bootstrap` `staging` and `prod` stacks. Each preview shows an
    update to the role's inline policy (`deploy`) and nothing else. The role only gains permissions, so a 0.3.x release
    that runs in between still works.
@@ -306,10 +306,11 @@ workflow files and its runbook. The toolkit decides no job graph and no trigger;
 product composes in this order.
 
 1. **Install** the package in `infra/`, a package of the product's pnpm workspace, and pin it exactly. Until 0.4.0 is
-   out, `@pebbletech/infra@next` is the 0.4.0-next.N prerelease.
+   out, install the `next` tag, the 0.4.0-next.N prerelease: `latest` is 0.3.2, which has no `pebble-infra`.
+   `--save-exact` records the exact prerelease version.
 
    ```sh
-   pnpm --dir infra add --save-exact @pebbletech/infra @pulumi/pulumi
+   pnpm --dir infra add --save-exact @pebbletech/infra@next @pulumi/pulumi
    ```
 
    Use pnpm. `@pulumi/pulumi` declares `typescript <7` as an optional peer; pnpm warns, but npm refuses to install it

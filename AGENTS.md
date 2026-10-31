@@ -44,8 +44,10 @@ compiled ESM (`dist/`) plus any files its `files` list names. See `README.md` fo
   `publishConfig.access: public` and `license: MIT`. Tests stay out of the tarball; the pack listing in CI shows it.
 - A change to a package's published behaviour comes with a changeset (`pnpm changeset`).
 - Never run `pnpm publish`, `changeset publish` or `pnpm release` by hand; the release workflow publishes.
-- While `.changeset/pre.json` exists, releases are prereleases on npm's `next` tag. Leave it in place; leaving pre
-  mode is its own PR (`pnpm changeset pre exit`), as README "Prereleases" says.
+- While `.changeset/pre.json` exists, releases are prereleases on npm's `next` tag, and every install command the
+  READMEs give a product names `@pebbletech/infra@next` (`package.test.ts` checks it). Leave it in place; leaving pre
+  mode is its own PR (`pnpm changeset pre exit`) that also takes `@next` out of the install lines README "Prereleases"
+  lists.
 
 ## Naming
 
