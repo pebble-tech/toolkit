@@ -36,8 +36,8 @@ only its state path and KMS key. A staging or prod deploy role can create a cust
 [packages/infra/README.md](packages/infra/README.md) has the components, the naming table and the precompile setup;
 [examples/basefresh](examples/basefresh) is a whole product program with tests.
 
-Each AWS account's shared bootstrap (GitHub OIDC provider, state bucket, state KMS keys) is the Pulumi program in
-[bootstrap/](bootstrap/README.md), applied by hand once per account.
+Each AWS account's shared bootstrap (GitHub OIDC provider, state bucket, state KMS keys, alarm topic) is the Pulumi
+program in [bootstrap/](bootstrap/README.md), applied by hand once per account.
 
 ## Develop
 

@@ -8,9 +8,9 @@ pinning a version; the guardrails are defaults it cannot turn off.
 | `Stage` | nothing; parses the stack name and names, tags and protects everything else | a product id that is not one DNS label, starts with `pebble`, or is `pr`/`staging`/`prod`/`shared`; a kind that is not one DNS label; any stack other than `pr-<n>`, `staging`, `prod`, `shared` |
 | `VercelProject` | `shared`: the project (no Git connection, private source, Vercel Authentication on previews), custom environments, the protection bypass. `staging`/`prod`: env vars (secrets `sensitive`), the domain bound to the stage's environment (replaced delete-first, because a hostname is on one project: a new `projectId` leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname), an unproxied Cloudflare CNAME | previews; the project outside `shared`; env vars or domains on `shared`; a secret-looking name in `vars` |
 | `Database` | an explicit Postgres provider on port 5432 with `sslmode=verify-full`, the owner login role, the database owned by it, the owner's grant to `pebble_operators`, the `public` revoke, and on staging/prod the runtime role's grants; `directUrl` (owner) and `pooledUrl` (runtime) as secrets. See [Database](#database) | any `owner*` argument; staging/prod without `runtime`; `runtime` on a preview; a runtime role that is the owner or the operators group; a database or owner name longer than 63 characters. The names are always derived from `stage.databaseName()` |
-| `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; a boundary other than the stage's own `<product>-<env>-boundary` in the current account (a typed `PermissionsBoundaryArn` from `Stage` or `DeployRole`, checked when it resolves, so `pulumi preview` fails). Timeouts above 29 s are clamped |
-| `Worker` | Workers script from a prebuilt module, R2 bucket `<product>-<env>-<kind>` (on prod, `adoptExisting` imports that same name instead of creating it), plain and secret bindings, custom domain (replaced delete-first, because a hostname has one custom domain: a new script name leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname) | a secret-looking name in `vars` unless listed in `plainTextAllowed`; `adoptExisting` outside prod |
-| `DeployRole` | the GitHub OIDC role for one product and env, its inline policy, and the boundary policy its roles must carry. `preview` allows the state bucket and the KMS key only. `staging` and `prod` also allow Lambda, API Gateway, ACM, logs and IAM inside `<product>-<env>`. Takes `product`, `env`, the repo and the apex (the zone name): the trusted GitHub environment, the account's OIDC provider, the state bucket and paths (`pebble-<stg\|prd>-pulumi-state/<product>/<env>`, plus `<product>/shared` for staging) and the KMS key (`alias/pebble-<stg\|prd>-pulumi-<env>`) are derived | a product id that is not one DNS label, a `pebble` product, or an apex that is not lowercase labels with no leading or trailing dot |
+| `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, a CloudWatch alarm on the function's errors (see [Errors alarm](#errors-alarm); `alarm: false` opts out), HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; a boundary other than the stage's own `<product>-<env>-boundary` in the current account (a typed `PermissionsBoundaryArn` from `Stage` or `DeployRole`, checked when it resolves, so `pulumi preview` fails). Timeouts above 29 s are clamped |
+| `Worker` | Workers script from a prebuilt module with Workers observability on (`headSamplingRate`, 0 to 1, default 1: every request), R2 bucket `<product>-<env>-<kind>` (on prod, `adoptExisting` imports that same name instead of creating it), plain and secret bindings, custom domain (replaced delete-first, because a hostname has one custom domain: a new script name leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname) | a secret-looking name in `vars` unless listed in `plainTextAllowed`; `adoptExisting` outside prod |
+| `DeployRole` | the GitHub OIDC role for one product and env, its inline policy, and the boundary policy its roles must carry. `preview` allows the state bucket and the KMS key only. `staging` and `prod` also allow Lambda, API Gateway, ACM, logs, CloudWatch alarms and IAM inside `<product>-<env>`. Takes `product`, `env`, the repo and the apex (the zone name): the trusted GitHub environment, the account's OIDC provider, the state bucket and paths (`pebble-<stg\|prd>-pulumi-state/<product>/<env>`, plus `<product>/shared` for staging) and the KMS key (`alias/pebble-<stg\|prd>-pulumi-<env>`) are derived | a product id that is not one DNS label, a `pebble` product, or an apex that is not lowercase labels with no leading or trailing dot |
 | `Operators` | the cluster's `pebble_operators` group (kept on destroy) and one membership grant per name in `members`, through the same admin provider as `Database`. See [Operators](#operators) | `pr-<n>` and `staging` (one stack per cluster owns the group: `shared` or `prod`); a second `Operators` in the same program; an empty or repeated member name; a member name with a dot (a PlanetScale login username: list the role before the dot) |
 
 Every component refuses a hostname or name outside its stage (`NamespaceError`), and every refusal is a
@@ -18,6 +18,10 @@ Every component refuses a hostname or name outside its stage (`NamespaceError`),
 `protect` and `retainOnDelete`; the Postgres provider, which is configuration rather than a cloud resource, does not.
 The two custom domains (`Worker`'s and `VercelProject`'s) are protected but not retained: they are replaced
 delete-first, and a retained domain would only leave state, so it would keep the hostname from its replacement.
+
+Every AWS resource that takes tags carries `Stage.tags`: `product`, `env` and `managed-by`. Cost per product is read
+from `product` and `env`. Do not add a tag key: the deploy role cannot update an HTTP API's tags after creation, so a
+new key would fail the next release on every existing API.
 
 ## Names
 
@@ -112,6 +116,42 @@ The admin (`ci-admin`) is needed only for that first grant, because it created t
 `REVOKE` removes only a membership the revoking role granted; for one granted by another role it prints a warning and
 leaves the membership in place.
 
+## Errors alarm
+
+`ApiFunction` creates one CloudWatch alarm, `<product>-<env>-<kind>-errors`, on the function's Lambda `Errors`
+metric. `Errors` counts what an error tracker inside the handler cannot report: a crash before the handler's code
+runs (an import or cold-start failure), a timeout, an out-of-memory kill, a runtime failure. An error the handler
+catches and answers with a 500 is a successful invocation to Lambda, so it is not counted; that one is the error
+tracker's.
+
+| Argument | Default |
+|---|---|
+| `alarm.topicArn` | none: the alarm changes state in CloudWatch and notifies no one |
+| `alarm.threshold` | `1`: one error sets it off |
+| `alarm.period` | `300` seconds, a multiple of 60; one period is evaluated |
+| `alarm: false` | creates no alarm |
+
+The sum of `Errors` over the period is compared with `>=`. Lambda publishes `Errors` only for periods with
+invocations, so a function with no traffic has no data; missing data counts as not breaching, so a quiet function stays
+`OK` rather than going to `INSUFFICIENT_DATA` or alarming. On prod the alarm is protected and retained like every
+other child.
+
+`topicArn` is the account bootstrap's `alarmTopicArn` output ([bootstrap](https://github.com/pebble-tech/toolkit/tree/main/bootstrap)):
+one SNS topic per AWS account, emailing the address its config names once that address confirms the subscription. A
+product passes it through its entries module, stored per GitHub environment because the ARN holds the account id:
+
+```ts
+// entries.ts
+{ key: 'alarmTopicArn', env: 'ALARM_TOPIC_ARN', secret: false, required: true, stacks: ['staging', 'prod'] },
+
+// the program
+new ApiFunction('api', { stage, code, domain, alarm: { topicArn: config.require('alarmTopicArn') } });
+```
+
+The deploy role creates the alarm (`DeployRole`'s `Alarms` statement, below). A role applied before 0.4.0 lacks it, so
+re-apply the product's `infra/bootstrap` `staging` and `prod` stacks before bumping, or the first release fails on
+`PutMetricAlarm`.
+
 ## Ownership
 
 - `shared`: the Vercel project and its custom environments, and the staging cluster's `Operators` when this product
@@ -147,6 +187,10 @@ Tearing down `shared` or `prod` takes an explicit step: every child there is pro
 A staging or prod deploy role can create a custom domain of any name (`POST` on `/domainnames` has no name condition), can edit routes, integrations and stages under another HTTP API's id, and can change a hostname in a sub-zone of its apex whose label ends with `-<product>-stg` or `-<product>` (for example `api-x-stg.foo-basefresh-stg.pebbletech.my`); API Gateway tag updates after creation are denied, and creation-time tags still arrive through `CreateApi`.
 
 The `preview` role's policy contains the state-bucket statements and the KMS key statement only.
+
+A staging or prod deploy role manages CloudWatch alarms named `<product>-<env>-*` (`PutMetricAlarm`, `DeleteAlarms`,
+`TagResource`, `UntagResource`, `ListTagsForResource`) and may read every alarm's configuration in the account
+(`DescribeAlarms` on `*`).
 
 `DeployRole` gates `iam:PassRole` on `iam:PassedToService` alone (PassRole has no boundary condition key); the boundary
 is enforced where roles are written: `CreateRole`, `AttachRolePolicy`, `PutRolePolicy` and
