@@ -362,8 +362,9 @@ runtime:
 main: dist/index.js
 ```
 
-Run `tsc -p infra` before every `pulumi preview` or `pulumi up`. Bundles (`ApiFunction.code`, `Worker.script`) come
-from the product's own build; the components never bundle.
+Build `infra/` (`tsc -p infra`, or its `build` script) before any `pebble-infra` step: they run the compiled program and
+import the compiled entries module. Bundles (`ApiFunction.code`, `Worker.script`) come from the product's own build;
+the components never bundle.
 
 ### A web-only production workflow
 
@@ -530,7 +531,7 @@ import type { ConfigValues, Entry } from '@pebbletech/infra';
 const RUNTIME = ['staging', 'prod'] as const;
 export const entries: Entry[] = [
   { key: 'aws:region', env: 'AWS_REGION', secret: false, required: true, stacks: ['shared', 'preview', ...RUNTIME] },
-  { key: 'pgAdminUrl', env: 'PG_ADMIN_URL', secret: true, required: true, stacks: ['shared', 'preview', ...RUNTIME] },
+  { key: 'pgAdminUrl', env: 'PG_ADMIN_URL', secret: true, required: true, stacks: ['preview', ...RUNTIME] },
   { key: 'pgRuntimeUrl', env: 'DATABASE_RUNTIME_URL', secret: true, required: true, stacks: RUNTIME },
   { key: 'pgRuntimeRole', env: 'PG_RUNTIME_ROLE', secret: false, required: true, stacks: RUNTIME },
 ];
