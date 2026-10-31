@@ -70,7 +70,8 @@ Changesets drives versions; `.github/workflows/release.yml` publishes.
    changesets (versions and `CHANGELOG.md`).
 3. Merging that PR runs the workflow again with nothing pending; it runs `pnpm release` (`changeset publish`), which
    runs `pnpm publish --access public` for every package whose version is not on npm yet (`prepack` builds `dist/`
-   first) and creates a `<name>@<version>` git tag for each. The action pushes the tags and opens a GitHub release per
+   first), on npm's `latest` dist-tag, or on `next` while the repository is in pre mode ([Prereleases](#prereleases)),
+   and creates a `<name>@<version>` git tag for each. The action pushes the tags and opens a GitHub release per
    package.
 
 Authentication: npm trusted publishing, with no token. Every published package has a trusted publisher on npmjs.com
