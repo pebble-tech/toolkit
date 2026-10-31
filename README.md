@@ -83,9 +83,10 @@ versions a package as `<version>-next.<n>` (each later merge with a changeset ra
 publishes it to npm's `next` dist-tag, so `latest` and every product that did not opt in stay where they are.
 
 `@pebbletech/infra` 0.4 is in pre mode until base-app's recomposition on the prerelease is green. Then, on a branch,
-run `pnpm changeset pre exit`, commit the changed `.changeset/pre.json`, and merge: the next version PR versions
-`0.4.0` and deletes the pre-mode files, and merging it publishes `0.4.0` to `latest`. Products then move from the
-`next` version to `0.4.0`, and their action pins to the commit tagged `@pebbletech/infra@0.4.0`.
+run `pnpm changeset pre exit`, commit the changed `.changeset/pre.json` with the `@pebbletech/infra@next` line taken out
+of `packages/infra/README.md` "Use it", and merge: the next version PR versions `0.4.0` and deletes the pre-mode files,
+and merging it publishes `0.4.0` to `latest`. Products then move from the `next` version to `0.4.0`, and their action
+pins to the commit tagged `@pebbletech/infra@0.4.0`.
 
 ## License
 
