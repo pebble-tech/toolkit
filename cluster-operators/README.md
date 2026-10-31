@@ -175,8 +175,9 @@ The product side of step 3, once per cluster, in base-app at its current main:
 - `infra/src/app.test.ts`: the `shared` and `prod` resource lists lose the `Operators` entries, and the test that the
   group is applied before the database grant goes; `db-operators` stays. `infra/src/config.test.ts`: the `shared`
   case no longer reads the admin URL.
-- `docs/deployment.md` (stacks table, database roles, "Operators") and `docs/runbooks/phase-2-cutover.md`
-  ("Operators"): the group is the cluster stack's; adding a person means `pulumi config set --secret members` in this
+- `docs/deployment.md` (stacks table, database roles, "Operators"), `docs/platforms/github-pulumi-vercel-deploy.md`
+  (the `infra/operators.json` line) and `docs/runbooks/phase-2-cutover.md` ("Operators"; the cutover records stay as
+  history): the group is the cluster stack's; adding a person means `pulumi config set --secret members` in this
   program, applied by Kong.
 - Order: step 3 for `pebble-stg` lands with the merge that deploys `shared`; for `pebble-prd-shared` with the release
   that applies `prod`. Both after this program's step 2 on that cluster, and each right after its unprotect.
