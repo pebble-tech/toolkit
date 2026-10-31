@@ -765,6 +765,36 @@ describe('preview stacks (Postgres)', () => {
     expect([result.code, result.stderr.split('\n').at(-2)]).toEqual([0, 'stack pr-81006: reset']);
   });
 
+  // Why a preview workflow prepares before it reads the URL: read first, it names the database the reset drops.
+  test('after an interrupted update, the URL read before prepare names a database the reset drops; after, nothing', async (ctx) => {
+    ctx.skip(noPostgres, noPostgresReason);
+    const p = product();
+    const url = 'postgresql://acme_pr_81011:pw@localhost:5432/acme_pr_81011';
+    const values = { ...SECRETS, PG_ADMIN_URL: adminUrl() };
+    p.plan([
+      { result: 'ok', outputs: { databaseUrl: url } },
+      {
+        result: 'interrupt',
+        resources: ['pulumi:pulumi:Stack', 'pebbletech:index:Stage'],
+        pending: ['postgresql:index/database:Database'],
+      },
+    ]);
+    await p.run(['up', 'pr-81011', '--entries', 'entries.mjs'], values);
+    // The fake program creates no database: this is the one the complete update made.
+    await sql('create database acme_pr_81011');
+    await p.run(['up', 'pr-81011', '--entries', 'entries.mjs'], values);
+    const read = () => p.run(['outputs', 'pr-81011', '--if-exists']);
+    const early = await read();
+    const prepared = await p.run(['prepare', 'pr-81011', '--entries', 'entries.mjs', '--clear-lock'], values);
+    const late = await read();
+    expect([
+      JSON.parse(early.stdout),
+      prepared.stderr.split('\n').at(-2),
+      await databaseExists('acme_pr_81011'),
+      [late.code, late.stdout],
+    ]).toEqual([{ databaseUrl: url }, 'stack pr-81011: reset', false, [0, '']]);
+  });
+
   test('the preview reset refuses a state holding a Worker, names its types, and removes nothing', async (ctx) => {
     ctx.skip(noPostgres, noPostgresReason);
     const p = product();
