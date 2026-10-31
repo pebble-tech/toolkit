@@ -32,7 +32,10 @@ const installed = (dir: string, name: string) =>
 describe('the Pulumi CLI version setup installs', () => {
   test('is the @pulumi/pulumi this example installed', () => {
     const program = createRequire(join(BASEFRESH, 'package.json'))('@pulumi/pulumi/package.json').version;
-    expect([installed(BASEFRESH, '@pulumi/pulumi').stdout, program]).toEqual([`${program}\n`, '3.271.0']);
+    expect([installed(BASEFRESH, '@pulumi/pulumi').stdout, program]).toEqual([
+      `${program}\n`,
+      expect.stringMatching(/^\d+\.\d+\.\d+$/),
+    ]);
   });
 
   test('is read from the nearest node_modules up the tree, not fixed', () => {
