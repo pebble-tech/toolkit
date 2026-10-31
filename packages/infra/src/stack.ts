@@ -127,8 +127,12 @@ function must(ctx: StackContext, args: string[], input?: string): string {
   return result.stdout;
 }
 
+/** False only on Pulumi's missing-stack error; any other failure (a backend that cannot be read) throws. */
 function exists(ctx: StackContext, stack: string): boolean {
-  return ctx.run('pulumi', ['stack', 'select', stack]).ok;
+  const result = ctx.run('pulumi', ['stack', 'select', stack]);
+  if (result.ok) return true;
+  if (result.stderr.includes(`no stack named '${stack}' found`)) return false;
+  throw new Error(`pulumi stack select ${stack} failed:\n${result.stderr}`);
 }
 
 function deployment(ctx: StackContext, stack: string): Deployment {

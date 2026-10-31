@@ -31,12 +31,17 @@ class World {
   stacks = new Map<string, { resources: number; pending: number; locked: boolean; updated: boolean }>();
   objects = new Set<string>();
   databases = new Set<string>();
+  /** Every command run, as `<command> <first two args>`. */
+  commands: string[] = [];
+  /** What `pulumi stack select` prints when the backend cannot be read; unset, the backend answers. */
+  backendError?: string;
 
   private stackFile = (stack: string) => `${ROOT}/stacks/acme/${stack}.json`;
   private fail = (stderr: string) => ({ ok: false, stdout: '', stderr });
   private ok = (stdout = '') => ({ ok: true, stdout, stderr: '' });
 
   run: Runner = (command, args) => {
+    this.commands.push(`${command} ${args.slice(0, 2).join(' ')}`);
     if (command === 'node') {
       if (args[1] === 'check') return this.ok();
       this.databases.delete(args[2]!);
@@ -49,7 +54,8 @@ class World {
     const state = this.stacks.get(stack);
     switch (args[0] === 'stack' ? verb : args[0]) {
       case 'stack select':
-        return state ? this.ok() : this.fail(`no stack named '${stack}' found`);
+        if (this.backendError) return this.fail(this.backendError);
+        return state ? this.ok() : this.fail(`error: no stack named '${stack}' found\n`);
       case 'stack init':
         if (state) return this.fail(`stack '${stack}' already exists`);
         this.stacks.set(stack, { resources: 0, pending: 0, locked: false, updated: false });
@@ -190,6 +196,47 @@ describe('remove (the preview close job)', () => {
         `${ROOT}/history/acme/pr-70/pr-70-up.history.json`,
         'acme_pr_70',
       ],
+    ]);
+  });
+});
+
+// What `pulumi stack select` prints when the backend cannot be read (the S3 form of a checkpoint read that fails).
+const BACKEND_ERROR =
+  'error: failed to load checkpoint: blob (key ".pulumi/stacks/acme/pr-7.json") (code=Unknown): AccessDenied: Access Denied\n';
+
+describe('a backend that cannot be read is not a missing stack', () => {
+  test("remove stops with Pulumi's error: no destroy, no stack rm, no drop, no state object deleted", () => {
+    const world = new World();
+    const ctx = context(world);
+    prepare(ctx, 'pr-7');
+    world.up('pr-7');
+    const objects = [...world.objects];
+    world.backendError = BACKEND_ERROR;
+    world.commands = [];
+    expect(() => remove(ctx, 'pr-7', { clearLock: true })).toThrow(
+      `pulumi stack select pr-7 failed:\n${BACKEND_ERROR}`
+    );
+    expect([world.commands, [...world.objects], world.databases.has('acme_pr_7')]).toEqual([
+      ['pulumi stack select'],
+      objects,
+      true,
+    ]);
+  });
+
+  test("prepare stops with Pulumi's error: no database drop, no stack init", () => {
+    const world = new World();
+    const ctx = context(world);
+    prepare(ctx, 'pr-7');
+    world.up('pr-7');
+    world.backendError = BACKEND_ERROR;
+    world.commands = [];
+    expect(() => prepare(ctx, 'pr-7', { clearLock: true })).toThrow(
+      `pulumi stack select pr-7 failed:\n${BACKEND_ERROR}`
+    );
+    expect([world.commands, world.databases.has('acme_pr_7'), world.stacks.get('pr-7')!.resources]).toEqual([
+      ['pulumi stack select'],
+      true,
+      8,
     ]);
   });
 });
