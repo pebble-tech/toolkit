@@ -11,7 +11,7 @@ pinning a version; the guardrails are defaults it cannot turn off.
 | `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, a CloudWatch alarm on the function's errors (see [Errors alarm](#errors-alarm); `alarm: false` opts out), HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; a boundary other than the stage's own `<product>-<env>-boundary` in the current account (a typed `PermissionsBoundaryArn` from `Stage` or `DeployRole`, checked when it resolves, so `pulumi preview` fails). Timeouts above 29 s are clamped |
 | `Worker` | Workers script from a prebuilt module with Workers observability on (`headSamplingRate`, 0 to 1, default 1: every request), R2 bucket `<product>-<env>-<kind>` (on prod, `adoptExisting` imports that same name instead of creating it), plain and secret bindings, custom domain (replaced delete-first, because a hostname has one custom domain: a new script name leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname) | a secret-looking name in `vars` unless listed in `plainTextAllowed`; `adoptExisting` outside prod |
 | `DeployRole` | the GitHub OIDC role for one product and env, its inline policy, and the boundary policy its roles must carry. `preview` allows the state bucket and the KMS key only. `staging` and `prod` also allow Lambda, API Gateway, ACM, logs, CloudWatch alarms and IAM inside `<product>-<env>`. Takes `product`, `env`, the repo and the apex (the zone name): the trusted GitHub environment, the account's OIDC provider, the state bucket and paths (`pebble-<stg\|prd>-pulumi-state/<product>/<env>`, plus `<product>/shared` for staging) and the KMS key (`alias/pebble-<stg\|prd>-pulumi-<env>`) are derived | a product id that is not one DNS label, a `pebble` product, or an apex that is not lowercase labels with no leading or trailing dot |
-| `Operators` | the cluster's `pebble_operators` group (kept on destroy) and one membership grant per name in `members`, through the same admin provider as `Database`. See [Operators](#operators) | `pr-<n>` and `staging` (one stack per cluster owns the group: `shared` or `prod`); a second `Operators` in the same program; an empty or repeated member name; a member name with a dot (a PlanetScale login username: list the role before the dot) |
+| `Operators` | the cluster's `pebble_operators` group (kept on destroy) and one membership grant per name in `members`, through the same admin provider as `Database`. Used by the cluster's operators program (`cluster`, which can adopt the existing group); a product's `shared` or `prod` stack (`stage`) is the 0.3.x form. See [Operators](#operators) | both or neither of `stage` and `cluster`; a cluster name that is not `pebble-` and kebab words; with `stage`, `pr-<n>` and `staging`, and `adoptExisting`; a second `Operators` in the same program; an empty or repeated member name; a member name with a dot (a PlanetScale login username: list the role before the dot) |
 
 Every component refuses a hostname or name outside its stage (`NamespaceError`), and every refusal is a
 `GuardrailError` subclass. On `prod` (and `shared`, which owns production's Vercel project) every child resource gets
@@ -46,15 +46,16 @@ granted what runtimes need, and owns nothing.
 |---|---|---|---|
 | owner: `<database>` on a preview, `<database>_owner` on staging and prod | the component, with a generated password; no CREATEDB, CREATEROLE or SUPERUSER | owns the database; `directUrl` | owns the database; `directUrl` (port 5432) for migrations and the seed |
 | runtime: `runtime.role` | PlanetScale (`pscale`), passed in with its password | none: the owner is also the runtime | CONNECT; USAGE on `public`; SELECT, INSERT, UPDATE, DELETE on all tables; USAGE, SELECT, UPDATE on all sequences; the same on tables and sequences the owner creates later; owns nothing; `pooledUrl` (pooler, port 6432) |
-| admin: the `adminUrl` user | you, with CREATEDB and CREATEROLE | member of the owner | member of the owner |
-| operators: `pebble_operators` (`OPERATORS_GROUP`), NOLOGIN | `Operators`, from one stack per cluster | member of the owner | member of the owner |
+| admin: the `adminUrl` user | Kong, with CREATEDB and CREATEROLE: the product's preview admin on `pr-<n>`, its admin on staging and prod ([Credentials and ownership](#credentials-and-ownership)) | member of the owner | member of the owner |
+| operators: `pebble_operators` (`OPERATORS_GROUP`), NOLOGIN | the cluster's operators program, which no product owns | member of the owner | member of the owner |
 
 PUBLIC's CONNECT on the database is revoked on every stage. A role name or password for the owner is never an
 argument: `owner` (renamed to `runtime` in 0.3.0), `ownerRole` and `ownerPassword` are refused.
 
 `pebble_operators` is one group per cluster, shared by every product and stack on it; it is a constant, not an
 argument. Membership gives connect, change and drop on every toolkit-managed database on that cluster, present and
-future. [`Operators`](#operators) creates it and its members.
+future. The cluster's operators program creates it and its members ([Operators](#operators)); a `Database` only
+grants its own owner role to it, which needs no right on the group itself.
 
 Both memberships in the owner ignore `withAdminOption`: postgresql 3.18.2 reads a membership without its grantor, and
 on PostgreSQL 16+ the admin's implicit ADMIN OPTION row in a role it created would otherwise make `pulumi up --refresh`
@@ -72,49 +73,60 @@ const db = new Database('db', {
 
 ## Operators
 
-Membership of `pebble_operators` is code. `Operators` creates the group and grants it to each name in `members`;
-removing a name revokes that membership on the next apply. Use one `Operators` per cluster, in the program of the one
-product that owns the group there ([below](#a-second-product-on-a-cluster)): in `shared` for the staging cluster and in
-`prod` for the production cluster. A program takes one; a second is refused, naming the first, because two lists
-would manage the same memberships. Apply it before any other stack on a fresh cluster, and in `prod`
-construct it before `Database`: a `Database` on a cluster without the group fails at its `db-operators` grant with
-`role "pebble_operators" does not exist`.
+Membership of `pebble_operators` is code, in one place per cluster: the cluster's operators program,
+[`cluster-operators/`](../../cluster-operators/README.md) in this repository, one stack per cluster (`pebble-stg`,
+`pebble-prd-shared`), applied by hand with the cluster admin. No product owns it. A product program constructs no
+`Operators`: its `Database` grants its owner role to the group with the product's own admin, and its people are added
+to the cluster stack's list. On a fresh cluster, apply the cluster stack before any product stack: a `Database` on a
+cluster without the group fails at its `db-operators` grant with `role "pebble_operators" does not exist`.
 
 ```ts
-new Operators('operators', {
-  stage,
-  adminUrl: config.requireSecret('pgAdminUrl'),
-  members: config.getObject<string[]>('operators') ?? [],
-});
+// cluster-operators/src/cluster-operators.ts
+new Operators('operators', { cluster: 'pebble-stg', adminUrl, members, adoptExisting });
 ```
 
 `members` are SQL role names. PlanetScale shows a role's login username as `<role>.<branch>` (for example
-`pscale_api_44lpekcp7tl0.main`); copy the part before the dot (`pscale_api_44lpekcp7tl0`). A name with a dot is
-refused, because the grant would fail at apply with `role "<role>.<branch>" does not exist`. Read them from stack config
-(`pulumi config set --path 'operators[0]' <role>`), so the names are not committed in source. The group is kept when
-the stack is destroyed, because other stacks' databases are granted to it. The member grants are not protected, even
-on `shared` and `prod`, so a removal goes through.
+`pscale_api_xxxxxxxxxxxx.main`); copy the part before the dot. A name with a dot is refused, because the grant would
+fail at apply with `role "<role>.<branch>" does not exist`. The cluster stack keeps them as a secret in its stack
+file, so no name is committed in plain text. Removing a name revokes that membership on the next apply. The group is
+protected and kept when the stack is destroyed, because every product's databases are granted to it; the member grants
+are not protected, so a removal goes through. `adoptExisting` imports a group that already exists, for the handover
+below; a program takes one `Operators`, and a second is refused, naming the first.
+
+On PostgreSQL 16+ a `REVOKE` removes only the membership row the revoking role granted; for a row another role
+granted it prints a warning and leaves the membership in place. So every member's row must be the cluster admin's own.
+Before it registers anything, the cluster program reads the group's memberships: one that gives access, was granted
+by another role, and belongs to a name not on its list is refused, naming the role that can revoke it; one for a name
+on the list is a warning, because removing that name later would not take it away.
+
+Grant by hand only in an emergency, as the cluster admin, and add the name to the list on the next apply:
+
+```sql
+GRANT pebble_operators TO "<their role>";
+```
+
+Never grant it `WITH ADMIN OPTION` to a person: a membership they grant is one only they can revoke.
 
 ### A second product on a cluster
 
-The group belongs to the cluster, but `Operators` lives in a product's program, so exactly one product's stacks own it
-on each cluster. On `pebble-stg` and `pebble-prd-shared` that product is base-app: its `shared` stack owns the group
-on `pebble-stg` and its `prod` stack on `pebble-prd-shared`, and its list is the cluster's list. A second product on
-either cluster constructs no `Operators` (its `Database` grants its owner to the existing group), and its people are
-added to base-app's list. A second `Operators` on the same cluster would fail at apply creating a group that already
-exists, and if the group were imported instead, removing a name from one list would revoke a membership the other
-list still holds. Moving the group into a per-cluster program that no product owns is planned for 1.0.
+The group belongs to the cluster, and the cluster's operators program holds it and its list. A second product on a
+cluster constructs no `Operators`. Its `Database` grants its owner to the existing group with the product's own admin,
+which holds nothing on the group: granting a role it created needs ADMIN OPTION on that role only. Its people are added
+to the cluster stack's `members`.
 
-Grant by hand only in an emergency: the list does not know about a hand grant, so the next apply neither removes nor
-reports it. The fallback when no stack can run is one line, run as the admin:
+A product stack that constructs `Operators` on a cluster whose group exists fails at apply creating it
+(`role "pebble_operators" already exists`). A product stack that keeps its 0.3.x `Operators` after the handover goes on
+granting with the product's admin; the cluster stack then refuses any of those memberships that its list does not
+hold, so two lists never disagree silently.
 
-```sql
-GRANT pebble_operators TO "<their role>" WITH ADMIN OPTION;  -- that person can then GRANT and REVOKE it too
-```
+### The 0.3.x form, until the handover
 
-The admin (`ci-admin`) is needed only for that first grant, because it created the group. On PostgreSQL 16+ a
-`REVOKE` removes only a membership the revoking role granted; for one granted by another role it prints a warning and
-leaves the membership in place.
+Until a cluster's operators program has taken the group over, the product whose stacks created it keeps its 0.3.x
+`Operators` (`stage`: `shared` for the staging cluster, `prod` for the production cluster) and its list is the
+cluster's list. This form still works unchanged. The handover moves the group and every membership to the cluster
+stack with no gap in anyone's access, then removes `Operators` from the product's stacks without deleting the group:
+[cluster-operators README, "Hand the group over"](../../cluster-operators/README.md#hand-the-group-over). Afterwards
+the product's `shared` stack needs no admin URL: drop `shared` from its `pgAdminUrl` entry.
 
 ## Errors alarm
 
@@ -191,18 +203,21 @@ alarms a later release would remove.
 
 ## Ownership
 
-- `shared`: the Vercel project and its custom environments, and the staging cluster's `Operators` when this product
-  owns the group ([A second product on a cluster](#a-second-product-on-a-cluster)). Apply it before
-  `staging`, `prod` and previews. It has no deploy role
-  of its own. The staging role applies it, so its state lives at `<product>/shared` in `pebble-stg-pulumi-state` and
-  its secrets use the staging key (`stateKeyAlias('shared')` is `alias/pebble-stg-pulumi-staging`).
-- `pr-<n>`: a database and its owner role. Previews pass env to `vercel deploy`.
+- `shared`: the Vercel project and its custom environments. Apply it before `staging`, `prod` and previews. It has no
+  deploy role of its own. The staging role applies it, so its state lives at `<product>/shared` in
+  `pebble-stg-pulumi-state` and its secrets use the staging key (`stateKeyAlias('shared')` is
+  `alias/pebble-stg-pulumi-staging`). Until the handover, the product that created a cluster's group also applies the
+  staging cluster's `Operators` here ([The 0.3.x form](#the-03x-form-until-the-handover)).
+- `pr-<n>`: a database and its owner role, created by the product's preview admin. Previews pass env to
+  `vercel deploy`.
 - `staging`, `prod`: database, its owner role and the runtime role's grants (the runtime role itself is
-  PlanetScale's), API, Worker, web env vars and domain. `prod` also applies the production cluster's `Operators`,
-  under the same rule.
+  PlanetScale's), API, Worker, web env vars and domain, with the product's admin. Until the handover, `prod` of the
+  product that created the production cluster's group also applies its `Operators`.
 - `infra/bootstrap` (a separate project, applied by hand with SSO): one `DeployRole` per env (`preview`, `staging`,
   `prod`). `ApiFunction` defaults its boundary to `<product>-<env>-boundary` in the current account, the policy the
   deploy role created.
+- Not the product's: each AWS account's bootstrap ([bootstrap/](../../bootstrap/README.md)) and each cluster's
+  `pebble_operators` ([cluster-operators/](../../cluster-operators/README.md)), both applied by hand.
 
 `staging` and `prod` look the shared project up by name. The state of `shared` is a second backend, and prod's state
 is in another account. `shared` must already exist. The name is the project that stack created (`<product>-web`,
@@ -233,6 +248,56 @@ A staging or prod deploy role manages CloudWatch alarms named `<product>-<env>-*
 is enforced where roles are written: `CreateRole`, `AttachRolePolicy`, `PutRolePolicy` and
 `PutRolePermissionsBoundary` on `role/<product>-<env>-*` require the env's boundary, and `DeleteRolePermissionsBoundary`
 is denied.
+
+## Credentials and ownership
+
+Every Postgres role belongs to the admin that created it. On PostgreSQL 16+ a non-superuser that creates a role is
+granted ADMIN OPTION on it by the bootstrap superuser, so it alone can grant the role, act as it and drop it, and no
+other admin can take that away. A membership belongs to the role that granted it: only that role revokes it. Kong
+mints every admin; the roles a stack creates belong to whichever admin the stack's `adminUrl` names. Hence:
+
+- **One admin per product per cluster.** A product's `staging`, `prod` (and, in the 0.3.x form, `shared`) stacks use
+  its admin on that cluster, a PlanetScale role inheriting `postgres` (CREATEDB and CREATEROLE). It owns, through the
+  roles it created, every database the product has there.
+- **A separate preview admin**, used only by `pr-<n>` stacks, in the `preview` GitHub environment and nowhere else.
+  It holds nothing on the staging database's owner role, so a preview credential can create and drop preview
+  databases and cannot act as staging's owner.
+- **The cluster admin**, used only by the cluster's operators program, held by Kong, never in a GitHub environment. It
+  holds ADMIN OPTION on `pebble_operators` with no access through it, and no right on any product's database.
+- **Never share an admin across products.** An admin can act as every role it created, so a shared admin gives each
+  product the other's databases.
+- **Replace a password, not an admin.** A new admin role cannot act as, grant or drop the roles the old one created,
+  and the old one cannot be dropped while a grant it made still stands (Postgres refuses, naming the membership).
+  `pebble-infra` refuses to drop a preview whose role another admin created, naming that admin. On a cluster whose
+  group a product's admin created, the cluster admin's ADMIN OPTION rests on that admin's grant: never run
+  `DROP OWNED BY` it or `REVOKE ... CASCADE` from it, which take that ADMIN OPTION and the databases' grants to the group
+  ([cluster-operators README](../../cluster-operators/README.md#replace-an-admin)).
+
+Moving a product's previews to a new preview admin while previews are open leaves each open one to the old admin: the
+close job refuses it and names the admin that can drop it. Switch when no preview is open, or keep the old admin's URL
+until the open ones close.
+
+### Mint a product's admins
+
+Kong, once per product and cluster, with the `pscale` CLI. The first two are on the staging cluster, the third on the
+production cluster; `<product>` is the product id:
+
+```sh
+url() { jq -r '"postgresql://\(.username):\(.password | @uri)@\(.access_host_url):5432/postgres?sslmode=verify-full"' <<<"$1"; }
+preview="$(pscale role create pebble-stg main <product>-preview-admin --org pebble-tech --inherited-roles postgres --format json)"
+staging="$(pscale role create pebble-stg main <product>-admin --org pebble-tech --inherited-roles postgres --format json)"
+production="$(pscale role create pebble-prd-shared main <product>-admin --org pebble-tech --inherited-roles postgres --format json)"
+url "$preview" | gh secret set PG_ADMIN_URL --env preview --repo pebble-tech/<repo>
+url "$staging" | gh secret set PG_ADMIN_URL --env staging --repo pebble-tech/<repo>
+url "$production" | gh secret set PG_ADMIN_URL --env production --repo pebble-tech/<repo>
+unset preview staging production
+```
+
+Check each, connected with its URL: `select current_user, rolcreatedb, rolcreaterole, rolsuper from pg_roles where
+rolname = current_user` shows `t`, `t`, `f`, and `current_user` is the username without its `.<branch>` suffix. These
+are assumptions from the first product's cutover (an admin inheriting `postgres` has CREATEDB and CREATEROLE); check
+them on the first admin you mint. Keep each URL in the password manager: a lost password is reset on the same role, never replaced
+by a new one.
 
 ## Use it
 
