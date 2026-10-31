@@ -1,0 +1,103 @@
+name: Actions
+
+# The setup and pulumi actions in .github/actions, run as a product's workflow runs them, with no cloud: the Pulumi
+# state is a local file backend. Runs on a pull request that changes the actions, the package whose version they read,
+# or the lockfile that sets the Pulumi version.
+
+on:
+  pull_request:
+    paths:
+      - .github/actions/**
+      - .github/workflows/actions.yml
+      - packages/infra/**
+      - pnpm-lock.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  pulumi:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup, the Pulumi CLI version from basefresh's installed @pulumi/pulumi
+        uses: ./.github/actions/setup
+        with:
+          infra: examples/basefresh
+
+      - name: The pulumi on PATH is setup's, at that version, and the plugin token is set
+        run: |
+          expected="v$(node -p "require('./examples/basefresh/node_modules/@pulumi/pulumi/package.json').version")"
+          test "$(command -v pulumi)" = "$HOME/.pulumi/bin/pulumi"
+          test "$(pulumi version)" = "$expected"
+          test -n "${GITHUB_TOKEN:-}"
+          echo "pulumi $(pulumi version) from $(command -v pulumi)"
+
+      - name: Build @pebbletech/infra
+        run: pnpm --filter @pebbletech/infra build
+
+      # A product's infra/ installing this checkout's @pebbletech/infra, with a program in Pulumi YAML that creates
+      # nothing, so `up` needs no provider and no cloud.
+      - name: A throwaway product
+        run: |
+          infra="$RUNNER_TEMP/product/infra"
+          mkdir -p "$infra"
+          printf '{"name":"selftest-infra","private":true,"dependencies":{"@pebbletech/infra":"link:%s"}}\n' \
+            "$GITHUB_WORKSPACE/packages/infra" > "$infra/package.json"
+          cat > "$infra/Pulumi.yaml" << 'EOF'
+          name: selftest
+          runtime: yaml
+          config:
+            greeting:
+              type: string
+          outputs:
+            outputs:
+              greeting: ${greeting}
+              databaseUrl: postgresql://example.invalid/selftest
+          EOF
+          printf '%s\n' "export const entries = [{ key: 'greeting', env: 'GREETING', secret: false, required: true, stacks: ['staging'] }];" \
+            > "$infra/entries.mjs"
+          pnpm --dir "$infra" install --offline
+
+      - name: pebble-infra up through the pulumi action
+        id: up
+        uses: ./.github/actions/pulumi
+        env:
+          PULUMI_BACKEND_URL: file://${{ runner.temp }}/state
+          PULUMI_SECRETS_PROVIDER: passphrase
+          PULUMI_CONFIG_PASSPHRASE: selftest
+          PEBBLE_INFRA_VALUES: '{"GREETING":"hello from the values"}'
+        with:
+          command: up
+          stack: staging
+          entries: entries.mjs
+          clear-lock: true
+          infra: ${{ runner.temp }}/product/infra
+
+      - name: The action handed on what up wrote
+        env:
+          GREETING: ${{ fromJSON(steps.up.outputs.json).greeting }}
+          DATABASE_URL: ${{ fromJSON(steps.up.outputs.json).database_url }}
+        run: |
+          test "$GREETING" = 'hello from the values'
+          test "$DATABASE_URL" = 'postgresql://example.invalid/selftest'
+
+  no-pulumi:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup without the Pulumi CLI
+        uses: ./.github/actions/setup
+        with:
+          pulumi: false
+
+      - name: Node.js from .nvmrc and pnpm are set up; no Pulumi CLI and no token from setup
+        run: |
+          test "$(node --version | cut -d. -f1)" = "v$(cat .nvmrc)"
+          pnpm --version
+          test ! -e "$HOME/.pulumi/bin/pulumi"
+          test -z "${GITHUB_TOKEN:-}"
