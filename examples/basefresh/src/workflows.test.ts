@@ -179,6 +179,30 @@ describe('basefresh workflows', () => {
       ]);
     });
 
+    test('prod’s first-release migration reads steps.up.outputs, which the pulumi action does not set', () => {
+      const workflows = broken(
+        'deploy-production.yml',
+        '${{ fromJSON(steps.up.outputs.json).database_url }}',
+        '${{ steps.up.outputs.database_url }}'
+      );
+      expect(checkWorkflows(checks(workflows))).toEqual([
+        {
+          rule: 'migrate',
+          job: 'deploy-production.yml#deploy',
+          message: expect.stringContaining('that reads fromJSON(steps.up.outputs.json).database_url'),
+        },
+      ]);
+    });
+
+    test('the pulumi action’s clear-lock is not a literal', () => {
+      const workflows = broken(
+        'deploy-production.yml',
+        'clear-lock: true',
+        'clear-lock: ${{ github.event.release.prerelease }}'
+      );
+      expect(found(workflows)).toEqual([['stack', 'deploy-production.yml#deploy']]);
+    });
+
     test('prepare --preview-only clears a lock', () => {
       const workflows = broken(
         'deploy-staging.yml',

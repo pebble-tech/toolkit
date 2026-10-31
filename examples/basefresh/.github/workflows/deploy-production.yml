@@ -35,37 +35,12 @@ jobs:
     env:
       PULUMI_BACKEND_URL: s3://pebble-prd-pulumi-state/basefresh/prod?region=ap-southeast-1
       PULUMI_SECRETS_PROVIDER: awskms://alias/pebble-prd-pulumi-prod?region=ap-southeast-1
-      # Pulumi downloads provider plugins from GitHub releases; the token lifts the unauthenticated rate limit.
-      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      # T2: the toolkit's setup action replaces this step and the next four.
-      - name: Install pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          run_install: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - name: Cache Pulumi plugins
-        uses: actions/cache@v5
-        with:
-          path: ~/.pulumi/plugins
-          key: ${{ runner.os }}-pulumi-plugins-${{ hashFiles('pnpm-lock.yaml') }}
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install the Pulumi CLI
-        run: |
-          curl -fsSL https://get.pulumi.com | sh -s -- --version 3.271.0
-          echo "$HOME/.pulumi/bin" >> "$GITHUB_PATH"
+      - name: Set up pnpm, Node.js, the dependencies and the Pulumi CLI
+        uses: pebble-tech/toolkit/.github/actions/setup@0000000000000000000000000000000000000000 # @pebbletech/infra@0.4.0
 
       - name: Build the infra program and the bundles
         run: pnpm --dir infra build
@@ -88,16 +63,23 @@ jobs:
           DATABASE_URL: ${{ steps.before.outputs.database_url }}
         run: pnpm db:migrate
 
+      # The toolkit's pulumi action runs `pebble-infra up prod --entries dist/entries.js --clear-lock` from infra/'s
+      # node_modules, and hands on what up writes as one JSON object.
       - name: Pulumi up (prod)
         id: up
+        uses: pebble-tech/toolkit/.github/actions/pulumi@0000000000000000000000000000000000000000 # @pebbletech/infra@0.4.0
         env:
           PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}
-        run: pnpm --dir infra exec pebble-infra up prod --entries dist/entries.js --clear-lock
+        with:
+          command: up
+          stack: prod
+          entries: dist/entries.js
+          clear-lock: true
 
       - name: Migrate prod's new database (first release)
         if: steps.before.outputs.database_url == ''
         env:
-          DATABASE_URL: ${{ steps.up.outputs.database_url }}
+          DATABASE_URL: ${{ fromJSON(steps.up.outputs.json).database_url }}
         run: pnpm db:migrate
 
       # The web deploy to Vercel's production target follows here (T6).
@@ -111,20 +93,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      # T2: the toolkit's setup action, without the Pulumi CLI, replaces this step and the next two.
-      - name: Install pnpm
-        uses: pnpm/action-setup@v5
+      - name: Set up pnpm, Node.js and the dependencies
+        uses: pebble-tech/toolkit/.github/actions/setup@0000000000000000000000000000000000000000 # @pebbletech/infra@0.4.0
         with:
-          run_install: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          pulumi: false
 
       - name: Read-only smoke
         env:

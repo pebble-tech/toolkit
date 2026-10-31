@@ -30,37 +30,12 @@ jobs:
     env:
       PULUMI_BACKEND_URL: s3://pebble-stg-pulumi-state/basefresh/preview?region=ap-southeast-1
       PULUMI_SECRETS_PROVIDER: awskms://alias/pebble-stg-pulumi-preview?region=ap-southeast-1
-      # Pulumi downloads provider plugins from GitHub releases; the token lifts the unauthenticated rate limit.
-      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      # T2: the toolkit's setup action replaces this step and the next four.
-      - name: Install pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          run_install: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - name: Cache Pulumi plugins
-        uses: actions/cache@v5
-        with:
-          path: ~/.pulumi/plugins
-          key: ${{ runner.os }}-pulumi-plugins-${{ hashFiles('pnpm-lock.yaml') }}
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install the Pulumi CLI
-        run: |
-          curl -fsSL https://get.pulumi.com | sh -s -- --version 3.271.0
-          echo "$HOME/.pulumi/bin" >> "$GITHUB_PATH"
+      - name: Set up pnpm, Node.js, the dependencies and the Pulumi CLI
+        uses: pebble-tech/toolkit/.github/actions/setup@0000000000000000000000000000000000000000 # @pebbletech/infra@0.4.0
 
       - name: Build the infra program
         run: pnpm --dir infra build
@@ -110,36 +85,12 @@ jobs:
     env:
       PULUMI_BACKEND_URL: s3://pebble-stg-pulumi-state/basefresh/preview?region=ap-southeast-1
       PULUMI_SECRETS_PROVIDER: awskms://alias/pebble-stg-pulumi-preview?region=ap-southeast-1
-      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      # T2: the toolkit's setup action replaces this step and the next four.
-      - name: Install pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          run_install: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - name: Cache Pulumi plugins
-        uses: actions/cache@v5
-        with:
-          path: ~/.pulumi/plugins
-          key: ${{ runner.os }}-pulumi-plugins-${{ hashFiles('pnpm-lock.yaml') }}
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install the Pulumi CLI
-        run: |
-          curl -fsSL https://get.pulumi.com | sh -s -- --version 3.271.0
-          echo "$HOME/.pulumi/bin" >> "$GITHUB_PATH"
+      - name: Set up pnpm, Node.js, the dependencies and the Pulumi CLI
+        uses: pebble-tech/toolkit/.github/actions/setup@0000000000000000000000000000000000000000 # @pebbletech/infra@0.4.0
 
       - name: Build the infra program
         run: pnpm --dir infra build
