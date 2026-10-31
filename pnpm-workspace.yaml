@@ -2,6 +2,7 @@ packages:
   - packages/*
   - examples/*
   - bootstrap
+  - cluster-operators
 allowBuilds:
   # protobufjs (through @pulumi/pulumi) only prints a version-scheme warning from postinstall
   protobufjs: false
