@@ -139,8 +139,8 @@ function product(name = 'acme') {
         : [];
     },
     lock(stack: string) {
-      mkdirSync(join(stateRoot, 'locks', 'acme', stack), { recursive: true });
-      writeFileSync(join(stateRoot, 'locks', 'acme', stack, 'held-by-a-laptop.json'), '{}');
+      mkdirSync(join(stateRoot, 'locks', 'organization', 'acme', stack), { recursive: true });
+      writeFileSync(join(stateRoot, 'locks', 'organization', 'acme', stack, 'held-by-a-laptop.json'), '{}');
     },
   };
 }
@@ -171,7 +171,7 @@ describe('prepare', () => {
       result.code,
       matching(p.commands().slice(before), /cancel/),
       p.stateObjects().filter((o) => o.startsWith('locks/')),
-    ]).toEqual([0, [], ['locks/acme/prod/held-by-a-laptop.json']]);
+    ]).toEqual([0, [], ['locks/organization/acme/prod/held-by-a-laptop.json']]);
   });
 
   test('with --clear-lock cancels the lock a cancelled deploy left', async () => {

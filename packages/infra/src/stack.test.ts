@@ -63,7 +63,8 @@ class World {
         return this.ok();
       case 'cancel':
         if (state) state.locked = false;
-        for (const key of this.objects) if (key.startsWith(`${ROOT}/locks/acme/${stack}/`)) this.objects.delete(key);
+        for (const key of this.objects)
+          if (key.startsWith(`${ROOT}/locks/organization/acme/${stack}/`)) this.objects.delete(key);
         return this.ok();
       case 'stack export': {
         if (!state) return this.fail('no stack');
@@ -121,10 +122,11 @@ class World {
     if (interrupt === 'before-up') return;
     state.updated = true;
     this.objects.add(`${ROOT}/history/acme/${stack}/${stack}-up.history.json`);
+    this.objects.add(`${ROOT}/backups/acme/${stack}/${stack}.1793436208520024000.json`);
     if (interrupt !== 'none') {
       state.locked = true;
       state.pending = 1;
-      this.objects.add(`${ROOT}/locks/acme/${stack}/lock.json`);
+      this.objects.add(`${ROOT}/locks/organization/acme/${stack}/lock.json`);
       if (interrupt === 'after-database') this.databases.add(database);
       return;
     }
@@ -143,9 +145,11 @@ class World {
 }
 
 function context(world: World): StackContext {
+  const projectDir = mkdtempSync(join(tmpdir(), 'pebble-infra-stack-'));
+  writeFileSync(join(projectDir, 'Pulumi.yaml'), 'name: acme\nruntime: nodejs\n');
   return {
     run: world.run,
-    projectDir: mkdtempSync(join(tmpdir(), 'pebble-infra-stack-')),
+    projectDir,
     product: 'acme',
     previewDatabase: true,
     backendUrl: BACKEND,
@@ -194,9 +198,28 @@ describe('remove (the preview close job)', () => {
         'stack pr-70',
         `${ROOT}/stacks/acme/pr-70.json`,
         `${ROOT}/history/acme/pr-70/pr-70-up.history.json`,
+        `${ROOT}/backups/acme/pr-70/pr-70.1793436208520024000.json`,
         'acme_pr_70',
       ],
     ]);
+  });
+
+  test("another Pulumi project's stack of the same name under the same path keeps every object", () => {
+    const world = new World();
+    const ctx = context(world);
+    // The layouts Pulumi's DIY backend writes for a project `other` (stacks, history, backups, locks).
+    const other = [
+      `${ROOT}/backups/other/pr-7/pr-7.1793436208520024000.json`,
+      `${ROOT}/history/other/pr-7/pr-7-1793436208519115000.history.json`,
+      `${ROOT}/locks/organization/other/pr-7/0b7e3d1c.json`,
+      `${ROOT}/stacks/other/pr-7.json`,
+      `${ROOT}/stacks/other/pr-7.json.bak`,
+    ];
+    for (const key of other) world.objects.add(key);
+    prepare(ctx, 'pr-7');
+    world.up('pr-7', 'after-database');
+    remove(ctx, 'pr-7', { clearLock: true });
+    expect([...world.objects].sort()).toEqual(other);
   });
 });
 

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
@@ -94,9 +94,11 @@ function context(destroyOutput = '', resources = 0) {
     return { ok: true, stdout: '', stderr: '' };
   };
   const log: string[] = [];
+  const projectDir = mkdtempSync(join(tmpdir(), 'pebble-infra-remove-'));
+  writeFileSync(join(projectDir, 'Pulumi.yaml'), 'name: acme\nruntime: nodejs\n');
   const ctx: StackContext = {
     run,
-    projectDir: mkdtempSync(join(tmpdir(), 'pebble-infra-remove-')),
+    projectDir,
     product: 'acme',
     previewDatabase: true,
     backendUrl: 's3://acme-state/acme/preview?region=xx-test-1',

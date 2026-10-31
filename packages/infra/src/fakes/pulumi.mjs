@@ -26,7 +26,7 @@ const project = /^name:\s*(\S+)/m.exec(readFileSync('Pulumi.yaml', 'utf8'))[1];
 const backend = new URL(process.env.PULUMI_BACKEND_URL);
 const root = join(process.env.FAKE_S3, backend.hostname, backend.pathname, '.pulumi');
 const stackFile = (stack) => join(root, 'stacks', project, `${stack}.json`);
-const lockDir = (stack) => join(root, 'locks', project, stack);
+const lockDir = (stack) => join(root, 'locks', 'organization', project, stack);
 const write = (file, text) => {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, text);

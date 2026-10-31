@@ -30,6 +30,7 @@ import {
   prepare,
   processRunner,
   processStreamer,
+  pulumiProject,
   pulumiUp,
   remove,
   stackOutputs,
@@ -124,9 +125,7 @@ function projectName(cwd: string): string {
   const file = join(cwd, 'Pulumi.yaml');
   if (!existsSync(file))
     throw new Error(`no Pulumi.yaml in ${cwd}: run from the directory holding it, or pass --product`);
-  const match = /^name:[ \t]*["']?([^"'\s#]+)["']?[ \t]*(?:#.*)?$/m.exec(readFileSync(file, 'utf8'));
-  if (!match) throw new Error(`${file} has no name`);
-  return match[1]!;
+  return pulumiProject(cwd);
 }
 
 const KINDS = new Set(['preview', 'staging', 'prod', 'shared']);

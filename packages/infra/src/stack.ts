@@ -327,9 +327,24 @@ function stateLocation(backendUrl: string): { bucket: string; prefix: string } {
   return { bucket: url.hostname, prefix: `${url.pathname.replace(/^\/|\/$/g, '')}/.pulumi/` };
 }
 
-/** Deletes any object Pulumi left for `stack` under the backend path (backups, history, locks), then checks. */
+/** Pulumi.yaml's `name` in `dir`: the Pulumi project, which scopes its stacks in the backend. */
+export function pulumiProject(dir: string): string {
+  const file = join(dir, 'Pulumi.yaml');
+  const match = /^name:[ \t]*["']?([^"'\s#]+)["']?[ \t]*(?:#.*)?$/m.exec(readFileSync(file, 'utf8'));
+  if (!match) throw new Error(`${file} has no name`);
+  return match[1]!;
+}
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Deletes any object Pulumi left for `stack` of this project under the backend path, in each layout its DIY backend
+ * writes (`stacks/<project>/<stack>.json`, `history/` and `backups/<project>/<stack>/`,
+ * `locks/organization/<project>/<stack>/`), then checks. Another project's stack of the same name is left alone.
+ */
 function sweepState(ctx: StackContext, stack: string, { bucket, prefix }: { bucket: string; prefix: string }): void {
-  const own = new RegExp(`/${stack}(\\.json|/)`);
+  const [path, project, name] = [prefix, pulumiProject(ctx.projectDir), stack].map(escapeRegExp);
+  const own = new RegExp(`^${path}(?:stacks|history|backups|locks/organization)/${project}/${name}(\\.json|/)`);
   const list = () => {
     const result = ctx.run('aws', ['s3', 'ls', `s3://${bucket}/${prefix}`, '--recursive']);
     // `aws s3 ls` exits 1 with no output when nothing is under the prefix; anything on stderr is a real failure.
