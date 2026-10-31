@@ -111,3 +111,77 @@ describe('Operators', () => {
     );
   });
 });
+
+function clusterOperators(args: { cluster: string; members: string[]; adoptExisting?: boolean }, stack = args.cluster) {
+  return runProgram({ project: 'pebble-cluster-operators', stack }, () => {
+    new Operators('operators', { adminUrl: ADMIN_URL, ...args });
+  });
+}
+
+describe('Operators in the cluster program', () => {
+  test('a cluster owns the group, protected and kept, with one unprotected grant per member', async () => {
+    const { resources } = await clusterOperators({ cluster: 'pebble-stg', members: ['pscale_api_alice'] });
+    const group = resources.find((r) => r.name === 'operators-group')!;
+    expect([group.inputs, group.protect, group.retainOnDelete, group.ignoreChanges, group.importId]).toEqual([
+      { name: 'pebble_operators', login: false },
+      true,
+      true,
+      ['roles'],
+      '',
+    ]);
+    expect(grants(resources).map((r) => [r.inputs, r.protect, r.retainOnDelete, r.ignoreChanges])).toEqual([
+      [{ role: 'pscale_api_alice', grantRole: 'pebble_operators' }, false, false, ['withAdminOption']],
+    ]);
+    expect(resources.find((r) => r.type === 'pebbletech:index:Operators')!.outputs).toEqual({
+      group: 'pebble_operators',
+      members: ['pscale_api_alice'],
+      cluster: 'pebble-stg',
+    });
+  });
+
+  test('adoptExisting imports the existing group by its name instead of creating it', async () => {
+    const { resources } = await clusterOperators({ cluster: 'pebble-prd-shared', members: [], adoptExisting: true });
+    expect(resources.filter((r) => r.importId !== '').map((r) => [r.name, r.importId])).toEqual([
+      ['operators-group', 'pebble_operators'],
+    ]);
+  });
+
+  test('member names are checked as for a product stack', async () => {
+    await expect(clusterOperators({ cluster: 'pebble-stg', members: ['pscale_api_bob.main'] })).rejects.toThrow(
+      'operator member "pscale_api_bob.main" is a login username, not a role'
+    );
+  });
+
+  test.each(['stg', 'pebble', 'pebble_stg', 'Pebble-stg', 'pebble-stg-'])(
+    'refuses the cluster name %j: a cluster stack is pebble- and kebab words',
+    async (cluster) => {
+      await expect(clusterOperators({ cluster, members: [] }, 'pebble-stg')).rejects.toThrow(
+        `cluster "${cluster}" must be pebble- and lowercase kebab words, such as pebble-stg`
+      );
+    }
+  );
+
+  test('refuses both a stage and a cluster, and neither', async () => {
+    const both = runProgram({ project: 'basefresh', stack: 'shared' }, () => {
+      const stage = new Stage('stage', { product: 'basefresh' });
+      new Operators('operators', { stage, cluster: 'pebble-stg', adminUrl: ADMIN_URL, members: [] });
+    });
+    await expect(both).rejects.toThrow('Operators takes a stage or a cluster, not both');
+    const neither = runProgram({ project: 'basefresh', stack: 'shared' }, () => {
+      new Operators('operators', { adminUrl: ADMIN_URL, members: [] });
+    });
+    await expect(neither).rejects.toThrow(
+      'Operators needs a stage (a product program) or a cluster (the cluster program)'
+    );
+  });
+
+  test('refuses adoptExisting in a product stack: only the cluster program takes the group over', async () => {
+    const program = runProgram({ project: 'basefresh', stack: 'prod' }, () => {
+      const stage = new Stage('stage', { product: 'basefresh' });
+      new Operators('operators', { stage, adoptExisting: true, adminUrl: ADMIN_URL, members: [] });
+    });
+    await expect(program).rejects.toThrow(
+      "adoptExisting is for the cluster's operators program (cluster), not a product stack"
+    );
+  });
+});
