@@ -3,6 +3,7 @@
 import type { ConfigValues, Entry } from '@pebbletech/infra';
 
 const ALL = ['shared', 'preview', 'staging', 'prod'] as const;
+const DATABASE = ['preview', 'staging', 'prod'] as const;
 const RUNTIME = ['staging', 'prod'] as const;
 
 export const entries: Entry[] = [
@@ -10,7 +11,7 @@ export const entries: Entry[] = [
   { key: 'apex', env: 'APEX', secret: false, required: true, stacks: ALL },
   { key: 'cloudflareZoneId', env: 'CLOUDFLARE_ZONE_ID', secret: false, required: true, stacks: ALL },
   { key: 'cloudflareAccountId', env: 'CLOUDFLARE_ACCOUNT_ID', secret: false, required: true, stacks: ALL },
-  { key: 'pgAdminUrl', env: 'PG_ADMIN_URL', secret: true, required: true, stacks: ALL },
+  { key: 'pgAdminUrl', env: 'PG_ADMIN_URL', secret: true, required: true, stacks: DATABASE },
   { key: 'pgRuntimeRole', env: 'PG_RUNTIME_ROLE', secret: false, required: true, stacks: RUNTIME },
   { key: 'pgRuntimePassword', env: 'PG_RUNTIME_PASSWORD', secret: true, required: true, stacks: RUNTIME },
   { key: 'authSecret', env: 'BETTER_AUTH_SECRET', secret: true, required: true, stacks: RUNTIME },

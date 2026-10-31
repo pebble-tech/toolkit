@@ -16,7 +16,8 @@ const inputs = (stack: string): BasefreshInputs => ({
   apex: 'pebbletech.my',
   cloudflareZoneId: 'zone-1',
   cloudflareAccountId: 'account-1',
-  pgAdminUrl: 'postgresql://postgres.abc123:admin@sin.pg.psdb.cloud:5432/postgres',
+  // shared has no database, so no admin URL.
+  ...(stack === 'shared' ? {} : { pgAdminUrl: 'postgresql://postgres.abc123:admin@sin.pg.psdb.cloud:5432/postgres' }),
   ...(stack.startsWith('pr-') || stack === 'shared'
     ? {}
     : { pgRuntime: { role: 'basefresh_app', password: 'runtime' } }),

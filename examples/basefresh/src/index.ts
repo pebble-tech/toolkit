@@ -11,7 +11,7 @@ export const outputs = basefresh({
   apex: config.require('apex'),
   cloudflareZoneId: config.require('cloudflareZoneId'),
   cloudflareAccountId: config.require('cloudflareAccountId'),
-  pgAdminUrl: config.requireSecret('pgAdminUrl'),
+  pgAdminUrl: config.getSecret('pgAdminUrl'),
   ...(runtimeRole ? { pgRuntime: { role: runtimeRole, password: config.requireSecret('pgRuntimePassword') } } : {}),
   authSecret: config.getSecret('authSecret') ?? '',
   ...(alarmTopicArn ? { alarmTopicArn } : {}),
