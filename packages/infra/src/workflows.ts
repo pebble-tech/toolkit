@@ -226,6 +226,8 @@ interface Command {
   stackArg?: string;
   flags: Set<string>;
   text: string;
+  /** Run by the toolkit's `pulumi` action, whose step outputs come as one JSON object, `outputs.json`. */
+  wrapped?: boolean;
 }
 
 const VALUE_FLAGS = new Set(['--entries', '--outputs', '--product', '--owner']);
@@ -255,6 +257,37 @@ function commands(run: string): Command[] {
     }
   }
   return found;
+}
+
+/** The toolkit's own actions, at any ref; GitHub matches the owner and repo in any case. */
+const TOOLKIT = /^pebble-tech\/toolkit\//i;
+const SETUP_ACTION = /^pebble-tech\/toolkit\/\.github\/actions\/setup@[^/\s]+$/i;
+const PULUMI_ACTION = /^pebble-tech\/toolkit\/\.github\/actions\/pulumi@[^/\s]+$/i;
+const PULUMI_INPUTS = new Set(['command', 'stack', 'entries', 'clear-lock', 'summary', 'infra']);
+
+/** The `pebble-infra` command a `pulumi` action step runs, from its literal `with:` inputs; a string says why not. */
+function wrapperCommand(step: WorkflowStep): Command | string {
+  const { command, stack, entries, ...rest } = step.with;
+  const unknown = Object.keys(rest).filter((key) => !PULUMI_INPUTS.has(key));
+  if (unknown.length > 0) return `with ${unknown.join(', ')}, which the action does not take`;
+  if (!['up', 'preview', 'remove'].includes(command ?? ''))
+    return `command ${command ?? '(unset)'}, not up, preview or remove written as a literal`;
+  if (stack === undefined) return 'no stack input';
+  const flags = new Set<string>();
+  for (const name of ['clear-lock', 'summary']) {
+    const value = rest[name];
+    if (value === 'true') flags.add(`--${name}`);
+    else if (value !== undefined && value !== 'false')
+      return `${name}: ${value}, not true or false written as a literal`;
+  }
+  const words = [command, stack, ...(entries === undefined ? [] : ['--entries', entries]), ...flags];
+  return {
+    verb: command!,
+    stackArg: stack,
+    flags,
+    text: `pebble-infra ${words.join(' ')}`,
+    wrapped: true,
+  };
 }
 
 /** `pulumi <command>` run directly, other than logging in or reading the CLI's own state. */
@@ -318,15 +351,27 @@ function collectTouches(context: Context): void {
         const command = { verb: 'declared', flags: new Set(['--clear-lock']), text: `uses: ${step.uses}` };
         for (const stack of stacksOf(undefined)) push(command, stack);
       }
-      if (!step.run) return;
-      for (const command of rawPulumi(step.run)) {
+      const found = step.run ? commands(step.run) : [];
+      if (step.uses && TOOLKIT.test(step.uses) && !SETUP_ACTION.test(step.uses)) {
+        const wrapped = PULUMI_ACTION.test(step.uses)
+          ? wrapperCommand(step)
+          : 'a toolkit path the helper does not read';
+        if (typeof wrapped === 'string') {
+          add(
+            'stack',
+            variant.id,
+            `${variant.label} step ${stepName(step, index)} runs ${step.uses}: ${wrapped}. The helper reads the toolkit's setup action, and its pulumi action with a literal command, stack, entries, clear-lock, summary and infra`
+          );
+        } else found.push(wrapped);
+      }
+      for (const command of rawPulumi(step.run ?? '')) {
         add(
           'stack',
           variant.id,
           `${variant.label} step ${stepName(step, index)} runs \`pulumi ${command}\` directly; run it through pebble-infra, whose stack and lock the checks read`
         );
       }
-      for (const command of commands(step.run)) {
+      for (const command of found) {
         if (command.stackArg === undefined) continue;
         const stacks = stacksOf(known(command.stackArg) ? command.stackArg : undefined);
         if (stacks.length === 0) {
@@ -694,17 +739,17 @@ function migrateRule({ options, touches, add }: Context): void {
       );
     }
     const expression = migrate[0]!.expression;
+    // The pulumi action hands on every output pebble-infra wrote as one JSON object.
+    const id = up.step.id ?? '<up id>';
+    const fromUp = up.command.wrapped
+      ? `fromJSON(steps.${id}.outputs.json).${output}`
+      : `steps.${id}.outputs.${output}`;
     const first = steps
       .slice(index + 1)
-      .some(
-        (step) =>
-          up.step.id &&
-          references(step, `steps.${up.step.id}.outputs.${output}`) &&
-          bare(step.if) === `${expression} == ''`
-      );
+      .some((step) => up.step.id && references(step, fromUp) && bare(step.if) === `${expression} == ''`);
     if (!first) {
       fail(
-        `never migrates ${stack}'s first deploy: after up (which needs an id), add a step under exactly \`if: ${expression} == ''\` that reads steps.${up.step.id ?? '<up id>'}.outputs.${output}`
+        `never migrates ${stack}'s first deploy: after up (which needs an id), add a step under exactly \`if: ${expression} == ''\` that reads ${fromUp}`
       );
     }
   }

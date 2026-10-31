@@ -617,3 +617,103 @@ describe('review probes, round 2', () => {
     ]);
   });
 });
+
+// The toolkit's pulumi action, read as the pebble-infra command its literal inputs make; every rule then applies as to
+// a run: line.
+describe('the pulumi action', () => {
+  const ACTION = `pebble-tech/toolkit/.github/actions/pulumi@${'0'.repeat(40)}`;
+  const group = { group: 'pulumi-staging', 'cancel-in-progress': false, queue: 'max' };
+  const wrapped = (inputs: Record<string, unknown>, uses = ACTION) => ({
+    id: 'up',
+    uses,
+    env: VALUES,
+    with: { command: 'up', stack: 'staging', entries: 'dist/entries.js', 'clear-lock': true, ...inputs },
+  });
+  const [before, migrate, , first] = migrateFirst('staging') as Record<string, any>[];
+  const fromJson = { ...first, env: { DATABASE_URL: '${{ fromJSON(steps.up.outputs.json).database_url }}' } };
+  const job = (steps: object[], extra: object = {}) => ({
+    'runs-on': 'ubuntu-latest',
+    environment: 'staging',
+    concurrency: group,
+    env: state('stg', 'staging', 'staging'),
+    steps: [credentials, ...steps],
+    ...extra,
+  });
+  const reader = (step: object, extra: object = {}) =>
+    job([step], { needs: 'deploy', ...extra }) as ReturnType<typeof job>;
+  const run = (jobs: Record<string, object>) => rules(check({ 'p.yml': { on: { push: {} }, jobs } }));
+
+  test('an up through the action, migrating first and reading its output from the JSON, passes', () => {
+    expect(run({ deploy: job([before, migrate, wrapped({}), fromJson]) })).toEqual([]);
+  });
+
+  test.each([
+    ['an up without the migrate-first read', { deploy: job([wrapped({}), fromJson]) }, [['migrate', 'p.yml#deploy']]],
+    [
+      'an up whose first-deploy migration reads steps.up.outputs, which the action does not set',
+      { deploy: job([before, migrate, wrapped({}), first]) },
+      [['migrate', 'p.yml#deploy']],
+    ],
+    [
+      'a preview with clear-lock: true',
+      {
+        deploy: job([before, migrate, wrapped({}), fromJson]),
+        preview: reader(wrapped({ command: 'preview', 'clear-lock': true })),
+      },
+      [['lock', 'p.yml#preview']],
+    ],
+    [
+      'an up clearing staging’s lock outside the group the other job on staging holds',
+      {
+        deploy: job([before, migrate, wrapped({}), fromJson], { concurrency: { ...group, group: 'release-staging' } }),
+        preview: reader({ env: VALUES, run: 'pebble-infra preview staging --entries e.js' }),
+      },
+      [['lock', 'p.yml#deploy']],
+    ],
+    [
+      'a stack input that is not a literal',
+      { deploy: job([before, migrate, wrapped({ stack: '${{ inputs.stack }}' }), fromJson]) },
+      [['stack', 'p.yml#deploy']],
+    ],
+    [
+      'a clear-lock input that is not a literal',
+      { deploy: job([before, migrate, wrapped({ 'clear-lock': "${{ github.event_name == 'push' }}" }), fromJson]) },
+      [['stack', 'p.yml#deploy']],
+    ],
+    [
+      'a command input that is not up, preview or remove',
+      { deploy: job([before, migrate, wrapped({ command: 'destroy' }), fromJson]) },
+      [['stack', 'p.yml#deploy']],
+    ],
+    [
+      'an input the action does not take',
+      { deploy: job([before, migrate, wrapped({ 'preview-only': true }), fromJson]) },
+      [['stack', 'p.yml#deploy']],
+    ],
+    [
+      'another path in the toolkit repo',
+      { deploy: job([before, migrate, wrapped({}, ACTION.replace('/pulumi@', '/pulumi/@')), fromJson]) },
+      [['stack', 'p.yml#deploy']],
+    ],
+    [
+      'the owner and repo in another case, which GitHub runs as the same action',
+      { deploy: job([wrapped({}, ACTION.replace('pebble-tech/toolkit', 'Pebble-Tech/Toolkit')), fromJson]) },
+      [['migrate', 'p.yml#deploy']],
+    ],
+  ] as [string, Record<string, object>, string[][]][])('%s fails', (_name, jobs, expected) => {
+    expect(run(jobs)).toEqual(expected);
+  });
+
+  test('a refusal names the step and what the helper reads', () => {
+    const jobs = { deploy: job([before, migrate, wrapped({ stack: '${{ inputs.stack }}' }), fromJson]) };
+    expect(check({ 'p.yml': { on: { push: {} }, jobs } })).toEqual([
+      {
+        rule: 'stack',
+        job: 'p.yml#deploy',
+        message: expect.stringContaining(
+          'step #4 runs `pebble-infra up ${{ inputs.stack }} --entries dist/entries.js --clear-lock` and its stack is not shared'
+        ),
+      },
+    ]);
+  });
+});
