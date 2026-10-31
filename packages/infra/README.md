@@ -471,8 +471,10 @@ What it assumes of the product:
 - The root `package.json` has a `db:migrate` script reading `DATABASE_URL`, and `vercel` as a dev dependency.
 - The `production` GitHub environment sets `AWS_DEPLOY_ROLE_ARN`, `PG_ADMIN_URL`, `PG_RUNTIME_ROLE`,
   `PG_RUNTIME_PASSWORD`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_API_TOKEN`, `VERCEL_API_TOKEN` and `VERCEL_TEAM_ID`.
-- The toolkit's two actions are pinned at the commit tagged `@pebbletech/infra@<version>` for the version `infra/`
-  installs, in place of the all-zero SHA.
+- The toolkit's two actions are pinned at the commit tagged `@pebbletech/infra@<version>` for the exact version
+  `infra/` installs: on each `uses:` line, replace both the all-zero SHA and the `# @pebbletech/infra@0.4.0` comment,
+  which Renovate reads as the current version. While 0.4 is a prerelease the tag and the comment are
+  `@pebbletech/infra@0.4.0-next.N`.
 
 [`examples/web-only`](https://github.com/pebble-tech/toolkit/tree/main/examples/web-only) holds this workflow, its
 program and the test that runs `checkWorkflows` on it. [`examples/basefresh`](https://github.com/pebble-tech/toolkit/tree/main/examples/basefresh)
