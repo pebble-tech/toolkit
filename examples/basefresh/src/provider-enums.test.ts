@@ -125,7 +125,6 @@ async function everyStack(): Promise<Registration[]> {
         cloudflareAccountId: 'account-1',
         pgAdminUrl: 'postgresql://postgres.abc123:admin@sin.pg.psdb.cloud:5432/postgres',
         ...(stack === 'staging' || stack === 'prod' ? { pgRuntime: { role: 'basefresh_app', password: 'pw' } } : {}),
-        operators: ['pscale_api_kong'],
         authSecret: 'auth-secret',
         bundles: { api: join(root, 'bundles/api'), uploads: join(root, 'bundles/uploads/server.js') },
       })

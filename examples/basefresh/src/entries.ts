@@ -13,7 +13,6 @@ export const entries: Entry[] = [
   { key: 'pgAdminUrl', env: 'PG_ADMIN_URL', secret: true, required: true, stacks: ALL },
   { key: 'pgRuntimeRole', env: 'PG_RUNTIME_ROLE', secret: false, required: true, stacks: RUNTIME },
   { key: 'pgRuntimePassword', env: 'PG_RUNTIME_PASSWORD', secret: true, required: true, stacks: RUNTIME },
-  { key: 'operators', env: 'PG_OPERATORS', secret: false, required: false, stacks: ['shared', 'prod'] },
   { key: 'authSecret', env: 'BETTER_AUTH_SECRET', secret: true, required: true, stacks: RUNTIME },
   // The account bootstrap's `alarmTopicArn`; a GitHub environment secret, since the ARN holds the account id.
   { key: 'alarmTopicArn', env: 'ALARM_TOPIC_ARN', secret: false, required: true, stacks: RUNTIME },

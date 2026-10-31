@@ -1,4 +1,4 @@
-import { ApiFunction, Database, Operators, Stage, VercelProject, Worker } from '@pebbletech/infra';
+import { ApiFunction, Database, Stage, VercelProject, Worker } from '@pebbletech/infra';
 import * as pulumi from '@pulumi/pulumi';
 import * as vercel from '@pulumiverse/vercel';
 
@@ -11,8 +11,6 @@ export interface BasefreshInputs {
   pgAdminUrl: pulumi.Input<string>;
   /** Staging and prod: the PlanetScale-made role runtimes connect as through the pooler, and its password (secret). */
   pgRuntime?: { role: string; password: pulumi.Input<string> };
-  /** `shared`, `prod`: the PlanetScale role names in that cluster's `pebble_operators` group (config, may be empty). */
-  operators?: string[];
   authSecret: pulumi.Input<string>;
   /** Staging and prod: the account bootstrap's `alarmTopicArn`, which the API's errors alarm notifies. */
   alarmTopicArn?: string;
@@ -21,9 +19,9 @@ export interface BasefreshInputs {
 }
 
 /**
- * basefresh's whole `infra/` program. `shared` owns the Vercel project and the staging cluster's operators group;
- * `pr-<n>` owns a database only; `staging` and `prod` own a database, the API, the uploads Worker and the web env and
- * domain, and `prod` also owns the production cluster's operators group.
+ * basefresh's whole `infra/` program. `shared` owns the Vercel project; `pr-<n>` owns a database only; `staging` and
+ * `prod` own a database, the API, the uploads Worker and the web env and domain. Each cluster's `pebble_operators` group
+ * belongs to the toolkit's cluster operators program, not to a product: the `Database` only grants its owner to it.
  */
 export function basefresh(inputs: BasefreshInputs): Record<string, pulumi.Input<unknown>> {
   const stage = new Stage('stage', { product: 'basefresh' });
@@ -38,9 +36,6 @@ export function basefresh(inputs: BasefreshInputs): Record<string, pulumi.Input<
         devCommand: 'cd ../.. && pnpm dev:web',
       },
     });
-    // One Operators per cluster: `shared` for the staging cluster, `prod` for the production cluster. basefresh owns the
-    // group only because it is alone on its cluster; on a cluster another product owns, it constructs no Operators.
-    new Operators('operators', { stage, adminUrl: inputs.pgAdminUrl, members: inputs.operators ?? [] });
     return {
       projectId: web.projectId,
       customEnvironmentIds: web.customEnvironmentIds,
@@ -56,8 +51,6 @@ export function basefresh(inputs: BasefreshInputs): Record<string, pulumi.Input<
   // shared's state is another backend, and prod's state is in another account, so look the project up by name.
   // shared must already exist. The name is the one VercelProject creates there: `<product>-web`.
   const project = vercel.getProjectOutput({ name: `${stage.product}-web` });
-  // The production cluster's operators group, before the Database that grants its owner to it.
-  if (stage.isProd) new Operators('operators', { stage, adminUrl: inputs.pgAdminUrl, members: inputs.operators ?? [] });
   const database = new Database('db', { stage, adminUrl: inputs.pgAdminUrl, runtime: inputs.pgRuntime });
   const runtimeUrl = database.pooledUrl!;
   const webUrl = `https://${stage.hostname('app', inputs.apex)}`;

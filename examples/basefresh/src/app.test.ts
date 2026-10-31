@@ -20,7 +20,6 @@ const inputs = (stack: string): BasefreshInputs => ({
   ...(stack.startsWith('pr-') || stack === 'shared'
     ? {}
     : { pgRuntime: { role: 'basefresh_app', password: 'runtime' } }),
-  operators: ['pscale_api_kong'],
   authSecret: 'auth-secret',
   ...(stack === 'staging' || stack === 'prod' ? { alarmTopicArn: ALARM_TOPIC[stack] } : {}),
   bundles: { api: join(root, 'bundles/api'), uploads: join(root, 'bundles/uploads/server.js') },
@@ -113,12 +112,8 @@ describe('basefresh program', () => {
   test('shared owns the Vercel project, its staging environment and the bypass, nothing else', async () => {
     const { resources, result } = await run('shared');
     expect(summary(resources)).toEqual([
-      'pebbletech:index:Operators operators',
       'pebbletech:index:Stage stage',
       'pebbletech:index:VercelProject web',
-      'postgresql:index/grantRole:GrantRole operators-member-pscale_api_kong',
-      'postgresql:index/role:Role operators-group pebble_operators',
-      'pulumi:providers:postgresql operators-admin',
       'vercel:index/customEnvironment:CustomEnvironment web-staging staging',
       'vercel:index/project:Project web basefresh-web',
       'vercel:index/projectProtectionBypass:ProjectProtectionBypass web-bypass',
@@ -146,24 +141,12 @@ describe('basefresh program', () => {
     expect(summary(resources)).toEqual([...DATABASE_STAGE('basefresh_stg'), ...RUNTIME('staging', '-stg')].sort());
   });
 
-  test('prod builds the same set under unsuffixed hostnames and basefresh_prd, plus the production cluster operators', async () => {
+  test('prod builds the same set under unsuffixed hostnames and basefresh_prd', async () => {
     const { resources } = await run('prod');
-    expect(summary(resources)).toEqual(
-      [
-        ...DATABASE_STAGE('basefresh_prd'),
-        ...RUNTIME('prod', ''),
-        'pebbletech:index:Operators operators',
-        'postgresql:index/grantRole:GrantRole operators-member-pscale_api_kong',
-        'postgresql:index/role:Role operators-group pebble_operators',
-        'pulumi:providers:postgresql operators-admin',
-      ].sort()
-    );
-    // The database grant to the group waits for the group this stack creates.
-    const group = resources.find((r) => r.name === 'operators-group')!;
-    expect(resources.find((r) => r.name === 'db-operators')!.dependencies).toContain(group.urn);
+    expect(summary(resources)).toEqual([...DATABASE_STAGE('basefresh_prd'), ...RUNTIME('prod', '')].sort());
   });
 
-  test('prod: everything is protected and retained except operator member grants (neither, so a removal goes through) and the two domains (protected, not retained, so a delete-first replace frees the hostname)', async () => {
+  test('prod: everything is protected and retained except the two domains (protected, not retained, so a delete-first replace frees the hostname)', async () => {
     const { resources } = await run('prod');
     const exposed = resources.filter((r) => r.custom && !r.type.startsWith('pulumi:providers:'));
     expect(
@@ -172,7 +155,6 @@ describe('basefresh program', () => {
         .map((r) => [r.name, r.protect, r.retainOnDelete])
         .sort()
     ).toEqual([
-      ['operators-member-pscale_api_kong', false, false],
       ['uploads-domain', true, false],
       ['web-domain', true, false],
     ]);
