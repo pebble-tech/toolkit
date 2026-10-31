@@ -129,7 +129,7 @@ tracker's.
 | `alarm.topicArn` | none: the alarm changes state in CloudWatch and notifies no one |
 | `alarm.threshold` | `1`: one error sets it off |
 | `alarm.period` | `300` seconds, a multiple of 60; one period is evaluated |
-| `alarm: false` | creates no alarm |
+| `alarm: false` | creates no alarm. On a prod stack whose alarm is already applied, follow [Remove an applied prod alarm](#remove-an-applied-prod-alarm) |
 
 The sum of `Errors` over the period is compared with `>=`. Lambda publishes `Errors` only for periods with
 invocations, so a function with no traffic has no data; missing data counts as not breaching, so a quiet function stays
@@ -148,9 +148,46 @@ product passes it through its entries module, stored per GitHub environment beca
 new ApiFunction('api', { stage, code, domain, alarm: { topicArn: config.require('alarmTopicArn') } });
 ```
 
-The deploy role creates the alarm (`DeployRole`'s `Alarms` statement, below). A role applied before 0.4.0 lacks it, so
-re-apply the product's `infra/bootstrap` `staging` and `prod` stacks before bumping, or the first release fails on
-`PutMetricAlarm`.
+### Upgrade to 0.4
+
+The deploy role creates the alarm (`DeployRole`'s `Alarms` statement, below). A role applied from 0.3.x lacks it, and a
+product's `infra/bootstrap` builds its role from the package version it has installed, so re-applying that bootstrap
+while 0.3.x is still installed changes nothing. "Bumping" here means the dependency change landing in a release, the
+first run that applies the runtime stacks with 0.4. Before that release, in this order:
+
+1. On the upgrade branch, change `@pebbletech/infra` to 0.4 in `infra/package.json`, install, and rebuild `infra/`
+   (`pnpm --dir infra build`). Do not merge yet.
+2. From that build, with SSO, apply the product's `infra/bootstrap` `staging` and `prod` stacks. Each preview shows an
+   update to the role's inline policy (`deploy`) and nothing else. The role only gains permissions, so a 0.3.x release
+   that runs in between still works.
+3. Apply the account bootstrap with `alarmEmail` set
+   ([bootstrap](https://github.com/pebble-tech/toolkit/tree/main/bootstrap), "Add the alarm topic to an applied
+   stack"), and click the link in AWS's confirmation email.
+4. Wire the topic: store each account's `alarmTopicArn` as a secret of the GitHub environments that deploy there, add
+   the entry, and pass `alarm: { topicArn }` to each `ApiFunction`, on the same branch.
+5. Only then merge and release, so the runtime stacks apply with the new role already in place. Releasing first fails
+   the first `up` on `cloudwatch:PutMetricAlarm`.
+
+### Remove an applied prod alarm
+
+`alarm: false` before the alarm is first created means it is never created. Once a prod stack has applied it, the alarm
+is protected and retained like every prod child. Then `alarm: false`, or a rollback to 0.3.x (which does not declare
+the alarm), fails the release with `cannot be deleted because it is protected`. Unprotecting alone is not enough:
+removal then shows `delete[retain]`, which drops the alarm from the state and leaves it running in CloudWatch. To remove
+it, with prod admin SSO and `pulumi login` to the prod stack's backend, right before the release that removes it:
+
+```sh
+pulumi stack --show-urns -s prod | grep metricAlarm   # the alarm's URN, ending in ::<name>-errors
+pulumi state unprotect '<urn>' -s prod
+pulumi state delete '<urn>' -s prod
+```
+
+Then release the change (`alarm: false`, or the 0.3.x pin). Its preview shows nothing for the alarm. Last, delete the
+alarm in the prod account: `aws cloudwatch delete-alarms --alarm-names <product>-prod-<kind>-errors`. If a release
+that still declares the alarm runs between the state delete and that change, it creates the alarm again; repeat the
+steps. On staging and previews the alarm is not protected, so `alarm: false` or a rollback deletes it. A full rollback
+reverts the runtime stacks first and the role bootstraps last: a role re-applied from 0.3.x can no longer delete the
+alarms a later release would remove.
 
 ## Ownership
 
