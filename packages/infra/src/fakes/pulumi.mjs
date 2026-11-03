@@ -147,10 +147,15 @@ switch (verb) {
     }
     if (step.result === 'interrupt') {
       write(join(lockDir(stack), `${randomUUID()}.json`), '{}');
+      // The Stack keeps the outputs an earlier update gave it: an interrupted update never registers new ones.
+      const resources = (step.resources ?? []).map((type, index) => resource(stack, type, index));
+      const previous = deployment.resources?.[0]?.outputs;
+      if (previous && resources[0]?.type === 'pulumi:pulumi:Stack')
+        resources[0] = { ...resources[0], outputs: previous };
       save(stack, {
         ...deployment,
         secrets_providers: secretsProviders,
-        resources: (step.resources ?? []).map((type, index) => resource(stack, type, index)),
+        resources,
         pending_operations: (step.pending ?? []).map((type, index) => ({
           resource: resource(stack, type, `p${index}`),
           type: 'creating',

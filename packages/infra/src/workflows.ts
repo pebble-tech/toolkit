@@ -736,7 +736,8 @@ const references = (step: WorkflowStep, expression: string) =>
  * comes first; a read in another job does not count. Every step between it and `up` that reads the URL runs
  * under exactly `if: <read> != ''`, and a step after `up` under exactly `if: <read> == ''` migrates the first deploy
  * from `up`'s own output; `up` itself has no `if:`. A read counts only inside `${{ }}`, outside a quoted string. Any
- * other condition fails.
+ * other condition fails. On a `pr-<n>` stack an unconditional `pebble-infra prepare <stack>` (not `--preview-only`)
+ * in the same job comes before the read: prepare can reset the stack an interrupted run left and drop its database.
  */
 function migrateRule({ options, touches, add }: Context): void {
   if (!options.database) return;
@@ -756,13 +757,32 @@ function migrateRule({ options, touches, add }: Context): void {
         `${variant.label} runs up on ${stack} under if: ${up.step.if}; up runs unconditionally`
       );
     }
-    const reads: { expression: string; from: number; step: WorkflowStep }[] = [];
+    const reads: { expression: string; from: number; step: WorkflowStep; touch: Touch }[] = [];
     steps.forEach((step, i) => {
       const touch = touches.find((t) => t.variant === variant && t.step === step && isRead(t, stack));
       if (i < index && step.id && touch)
-        reads.push({ expression: `steps.${step.id}.outputs.${output}`, from: i + 1, step });
+        reads.push({ expression: `steps.${step.id}.outputs.${output}`, from: i + 1, step, touch });
     });
     const fail = (message: string) => add('migrate', variant.id, `${variant.label} ${message}`);
+    // Touches are collected in run order, so a prepare earlier in the read's own script counts too.
+    const prepared = (read: Touch) =>
+      touches
+        .slice(0, touches.indexOf(read))
+        .some(
+          (t) =>
+            t.variant === variant &&
+            t.stack === stack &&
+            t.command.verb === 'prepare' &&
+            !t.command.flags.has('--preview-only') &&
+            t.step.if === undefined
+        );
+    for (const { step, from, touch } of up.kind === 'preview' ? reads : []) {
+      if (!prepared(touch)) {
+        fail(
+          `reads ${stack}'s ${output} (step ${stepName(step, from - 1)}) before any unconditional \`pebble-infra prepare ${stack}\` in this job: on a pr-<n> stack prepare can reset the stack an interrupted run left and drop its database, so prepare first and read after`
+        );
+      }
+    }
     const migrate = reads.flatMap(({ expression, from }) =>
       steps
         .slice(from, index)

@@ -132,6 +132,21 @@ describe('basefresh workflows', () => {
       ]);
     });
 
+    test('a preview reads the database URL before it prepares the PR stack, which can reset it', () => {
+      const workflows = broken(
+        'preview.yml',
+        '          pnpm --dir infra exec pebble-infra prepare "pr-${{ github.event.pull_request.number }}" --entries dist/entries.js --clear-lock\n',
+        ''
+      );
+      expect(checkWorkflows(checks(workflows))).toEqual([
+        {
+          rule: 'migrate',
+          job: 'preview.yml#deploy',
+          message: expect.stringContaining('before any unconditional `pebble-infra prepare pr-'),
+        },
+      ]);
+    });
+
     test('a job reads a secret its environment does not set', () => {
       const workflows = broken(
         'deploy-production.yml',
