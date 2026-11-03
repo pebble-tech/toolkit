@@ -15,6 +15,21 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # The same Postgres service as verify.yml: `pnpm verify` below runs the preview-stack tests, which fail without it.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       # The action pushes the version commit and tags through the GitHub API with its own token, so install and
       # verify scripts get no persisted write credential.
@@ -36,6 +51,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Verify (lint, format, typecheck, build, tests)
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
         run: pnpm verify
 
       # Pending changesets: open or update the "Version packages" PR.

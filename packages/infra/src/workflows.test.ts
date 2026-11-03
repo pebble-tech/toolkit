@@ -36,8 +36,16 @@ const credentials = {
 };
 const VALUES = { PEBBLE_INFRA_VALUES: '${{ toJSON(secrets) }}' };
 
-/** Read the URL, migrate when there is one, up, and migrate a first deploy from up's own output. */
+/** Prepare a PR stack, read the URL, migrate when there is one, up, and migrate a first deploy from up's own output. */
 const migrateFirst = (stack: string, read = 'steps.before.outputs.database_url') => [
+  ...(stack.replace(/^"/, '').startsWith('pr-')
+    ? [
+        {
+          env: VALUES,
+          run: `pnpm --dir infra exec pebble-infra prepare ${stack} --entries dist/entries.js --clear-lock`,
+        },
+      ]
+    : []),
   ...(read.startsWith('steps.before')
     ? [{ id: 'before', run: `pnpm --dir infra exec pebble-infra outputs ${stack} --github-output --if-exists` }]
     : []),
@@ -325,6 +333,53 @@ describe('checkWorkflows on workflows shaped differently', () => {
 
     test('a product with no database is not asked to migrate', () => {
       expect(check({ 'd.yml': job([up]) }, { database: false })).toEqual([]);
+    });
+  });
+
+  // On a pr-<n> stack, prepare resets a stack an interrupted run left and drops its database: a URL read before it can
+  // name the database about to be dropped, and its non-empty value keeps the first-deploy migration from running.
+  describe('a PR stack prepares before it reads', () => {
+    const job = (steps: object[]) => ({
+      on: { pull_request: {} },
+      jobs: {
+        deploy: {
+          'runs-on': 'ubuntu-latest',
+          environment: 'preview',
+          concurrency: { group: 'preview-1', 'cancel-in-progress': true },
+          env: state('stg', 'preview', 'preview'),
+          steps: [credentials, ...steps],
+        },
+      },
+    });
+    const [prepare, before, ...rest] = migrateFirst('pr-1') as Record<string, any>[];
+    const run = (steps: object[]) => check({ 'p.yml': job(steps) }, { secrets: { preview: TABLE } });
+
+    test("prepare, then the read, passes; so does a prepare earlier inside the read's step", () => {
+      expect([
+        run([prepare, before, ...rest]),
+        run([{ ...before, env: VALUES, run: `${prepare.run}\n${before.run}` }, ...rest]),
+      ]).toEqual([[], []]);
+    });
+
+    test('the read before prepare fails, naming the job', () => {
+      expect(run([before, prepare, ...rest])).toEqual([
+        {
+          rule: 'migrate',
+          job: 'p.yml#deploy',
+          message: expect.stringContaining(
+            "reads pr-1's database_url (step #2) before any unconditional `pebble-infra prepare pr-1` in this job"
+          ),
+        },
+      ]);
+    });
+
+    test.each([
+      ['no prepare', [before]],
+      ['a prepare --preview-only', [{ run: 'pebble-infra prepare pr-1 --preview-only' }, before]],
+      ['a prepare under if:', [{ ...prepare, if: "github.event.action == 'opened'" }, before]],
+      ["a prepare later inside the read's step", [{ ...before, env: VALUES, run: `${before.run}\n${prepare.run}` }]],
+    ] as [string, object[]][])('%s before the read fails', (_name, steps) => {
+      expect(rules(run([...steps, ...rest]))).toEqual([['migrate', 'p.yml#deploy']]);
     });
   });
 
