@@ -4,7 +4,7 @@ import * as pulumi from '@pulumi/pulumi';
 
 import { MissingDomainError } from './errors.js';
 import { boundedRole } from './iam.js';
-import type { PermissionsBoundaryArn, Stage } from './stage.js';
+import { alarmTopicName, deployAccount, type PermissionsBoundaryArn, type Stage } from './stage.js';
 
 /** HTTP API integrations give up at 30 s; the function must finish first. */
 export const MAX_API_TIMEOUT_SECONDS = 29;
@@ -22,8 +22,9 @@ export interface ApiDomain {
  */
 export interface ApiFunctionAlarm {
   /**
-   * SNS topic the alarm notifies, e.g. the account bootstrap's `alarmTopicArn` output. Without it the alarm still
-   * changes state in CloudWatch but notifies no one.
+   * SNS topic the alarm notifies. Defaults on staging and prod to the account bootstrap's topic,
+   * `pebble-<stg|prd>-alarms` in the account and region the AWS provider points at; on a preview, to none: the alarm
+   * still changes state in CloudWatch but notifies no one.
    */
   topicArn?: pulumi.Input<string>;
   /** Errors in one period that set the alarm off. Default 1. */
@@ -127,6 +128,7 @@ export class ApiFunction extends pulumi.ComponentResource {
 
     if (args.alarm !== false) {
       const alarm = args.alarm ?? {};
+      const topicArn = alarm.topicArn ?? (stage.isPreview ? undefined : this.accountAlarmTopicArn(stage));
       new aws.cloudwatch.MetricAlarm(
         `${name}-errors`,
         {
@@ -142,7 +144,7 @@ export class ApiFunction extends pulumi.ComponentResource {
           comparisonOperator: 'GreaterThanOrEqualToThreshold',
           // Lambda publishes Errors only for periods with invocations. A quiet function has no data, which stays OK.
           treatMissingData: 'notBreaching',
-          alarmActions: alarm.topicArn === undefined ? [] : [alarm.topicArn],
+          alarmActions: topicArn === undefined ? [] : [topicArn],
           tags,
         },
         child()
@@ -257,6 +259,13 @@ export class ApiFunction extends pulumi.ComponentResource {
       hostname,
       url: this.url,
     });
+  }
+
+  /** `arn:aws:sns:<region>:<account>:pebble-<stg|prd>-alarms`, through the provider this component's children use. */
+  private accountAlarmTopicArn(stage: Stage): pulumi.Output<string> {
+    const { accountId } = aws.getCallerIdentityOutput({}, { parent: this });
+    const { region } = aws.getRegionOutput({}, { parent: this });
+    return pulumi.interpolate`arn:aws:sns:${region}:${accountId}:${alarmTopicName(deployAccount(stage.deployEnv))}`;
   }
 }
 

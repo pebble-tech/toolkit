@@ -1,6 +1,7 @@
 export * from './errors.js';
 export {
   Stage,
+  alarmTopicName,
   assertProduct,
   boundaryPolicyName,
   deployAccount,

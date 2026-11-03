@@ -64,6 +64,11 @@ export function stateBucketName(account: DeployAccount): string {
   return `pebble-${account}-pulumi-state`;
 }
 
+/** The account's alarm topic, `pebble-<stg|prd>-alarms` (the shared bootstrap creates it); `ApiFunction` notifies it. */
+export function alarmTopicName(account: DeployAccount): string {
+  return `pebble-${account}-alarms`;
+}
+
 /**
  * `alias/pebble-<stg|prd>-pulumi-<env>`, one key per deploy env, created by the shared bootstrap. `shared` has no role
  * of its own: the staging deploy role applies it, so it uses the staging key.
