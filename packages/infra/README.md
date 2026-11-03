@@ -154,6 +154,10 @@ confirms the subscription. The component builds its ARN from the deploying crede
 (`sts:GetCallerIdentity`, which needs no permission) and the provider's region, so a product stores and passes
 nothing. Pass `topicArn` only to notify another topic.
 
+The bootstrap creates the topic in one region, its own `aws:region` (`ap-southeast-1` for pbt-stg and pbt-prd), and
+a CloudWatch alarm notifies only a topic in its own region. The default is right only when the product deploys in the
+bootstrap's region. A product in another region passes `topicArn` for a topic in that region, or `alarm: false`.
+
 The account bootstrap must create the topic before the first `up` that creates an alarm. If the topic does not exist,
 whether CloudWatch refuses the alarm or accepts it and fails each notification is unverified: the `PutMetricAlarm` API
 reference lists no error for a missing action target, and it has not been tried against AWS.

@@ -24,7 +24,8 @@ export interface ApiFunctionAlarm {
   /**
    * SNS topic the alarm notifies. Defaults on staging and prod to the account bootstrap's topic,
    * `pebble-<stg|prd>-alarms` in the account and region the AWS provider points at; on a preview, to none: the alarm
-   * still changes state in CloudWatch but notifies no one.
+   * still changes state in CloudWatch but notifies no one. The bootstrap creates the topic only in its own region;
+   * a product deployed in another region passes a topic in that region here.
    */
   topicArn?: pulumi.Input<string>;
   /** Errors in one period that set the alarm off. Default 1. */
