@@ -40,8 +40,8 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up pnpm, Node.js, the dependencies and the Pulumi CLI
-        # The commit tagged @pebbletech/infra@0.4.0-next.0, the version infra/ installs.
-        uses: pebble-tech/toolkit/.github/actions/setup@0cfc827892b940552bc2d8ab05e489ac61db08a4 # @pebbletech/infra@0.4.0-next.0
+        # The commit tagged @pebbletech/infra@0.4.0, the version infra/ installs.
+        uses: pebble-tech/toolkit/.github/actions/setup@9f712c2b4449efcd832ab7815578e9c2db123a7d # @pebbletech/infra@0.4.0
 
       - name: Build the infra program and the bundles
         run: pnpm --dir infra build
@@ -68,8 +68,8 @@ jobs:
       # node_modules, and hands on what up writes as one JSON object.
       - name: Pulumi up (prod)
         id: up
-        # The commit tagged @pebbletech/infra@0.4.0-next.0, the version infra/ installs.
-        uses: pebble-tech/toolkit/.github/actions/pulumi@0cfc827892b940552bc2d8ab05e489ac61db08a4 # @pebbletech/infra@0.4.0-next.0
+        # The commit tagged @pebbletech/infra@0.4.0, the version infra/ installs.
+        uses: pebble-tech/toolkit/.github/actions/pulumi@9f712c2b4449efcd832ab7815578e9c2db123a7d # @pebbletech/infra@0.4.0
         env:
           PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}
         with:
@@ -97,8 +97,8 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up pnpm, Node.js and the dependencies
-        # The commit tagged @pebbletech/infra@0.4.0-next.0, the version infra/ installs.
-        uses: pebble-tech/toolkit/.github/actions/setup@0cfc827892b940552bc2d8ab05e489ac61db08a4 # @pebbletech/infra@0.4.0-next.0
+        # The commit tagged @pebbletech/infra@0.4.0, the version infra/ installs.
+        uses: pebble-tech/toolkit/.github/actions/setup@9f712c2b4449efcd832ab7815578e9c2db123a7d # @pebbletech/infra@0.4.0
         with:
           pulumi: false
 
