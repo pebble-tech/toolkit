@@ -26,11 +26,12 @@ applies it by hand with SSO, once per account. Nothing in it belongs to a produc
   it from the state. The subscription is neither, so a new `alarmEmail` replaces it. The replacement unsubscribes the
   old address only if that address had confirmed: a pending subscription cannot be deleted, so it stays until SNS
   drops it ([Change the alarm address](#change-the-alarm-address)).
-- The alarm topic is where products' CloudWatch alarms send notifications: each product passes the `alarmTopicArn`
-  output to its `ApiFunction`s (`alarm: { topicArn }`). It emails the `alarmEmail` address, which AWS asks to confirm
-  first: the subscription stays pending, and nothing is delivered, until the address owner clicks the link in AWS's
-  confirmation email. The topic is not encrypted and keeps SNS's default access policy, under which CloudWatch alarms
-  in the same account may publish. Encrypting it would need a customer-managed KMS key whose policy lets
+- The alarm topic is where products' CloudWatch alarms send notifications: on staging and prod, a product's
+  `ApiFunction`s notify it by default, with the ARN built from the account and region they deploy to. The bootstrap
+  and `ApiFunction` take the name from the same function, `alarmTopicName` in `@pebbletech/infra`. It emails the
+  `alarmEmail` address, which AWS asks to confirm first: the subscription stays pending, and nothing is delivered,
+  until the address owner clicks the link in AWS's confirmation email. The topic is not encrypted and keeps SNS's
+  default access policy, under which CloudWatch alarms in the same account may publish. Encrypting it would need a customer-managed KMS key whose policy lets
   `cloudwatch.amazonaws.com` use it; with the AWS-managed `alias/aws/sns` key, alarms fail to publish and nobody is
   told. A notification carries an alarm's name, state and reason, nothing secret. The topic is in the stack's
   `aws:region`; an alarm notifies a topic in its own region.
@@ -206,11 +207,8 @@ pulumi stack output alarmTopicArn
 git add Pulumi.stg.yaml   # or Pulumi.prd.yaml; the address is ciphertext only
 ```
 
-Then confirm the subscription (step 9 above).
-
-Each product passes `alarmTopicArn` to its `ApiFunction`s; a product
-stores it per GitHub environment (the pbt-stg topic for previews and staging, the pbt-prd topic for production), not
-in source, because the ARN holds the account id.
+Then confirm the subscription (step 9 above). Products store nothing: their staging and prod `ApiFunction`s notify
+the topic of the account they deploy to by default. `alarmTopicArn` stays an output for `aws sns` commands.
 
 ### Change the alarm address
 

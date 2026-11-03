@@ -1,3 +1,4 @@
+import * as aws from '@pulumi/aws';
 import * as pulumi from '@pulumi/pulumi';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,7 +14,7 @@ import {
   PermissionsBoundaryError,
   Stage,
 } from './index.js';
-import { runProgram } from './testing.js';
+import { defaultMocks, runProgram } from './testing.js';
 
 const code = mkdtempSync(join(tmpdir(), 'pebbletech-infra-api-'));
 writeFileSync(join(code, 'index.js'), 'export const handler = async () => ({ statusCode: 200 });\n');
@@ -169,10 +170,40 @@ describe('ApiFunction', () => {
     expect([alarm.inputs.threshold, alarm.inputs.period]).toEqual([5, 60]);
   });
 
-  test('a 0.3.x caller that passes no alarm argument still gets the alarm, with no action', async () => {
+  test.each([
+    ['staging', 'basefresh-staging-api-errors', ['arn:aws:sns:ap-southeast-1:123456789012:pebble-stg-alarms']],
+    ['prod', 'basefresh-prod-api-errors', ['arn:aws:sns:ap-southeast-1:123456789012:pebble-prd-alarms']],
+    ['pr-7', 'basefresh-pr-7-api-errors', []],
+  ])("with no topicArn, %s's alarm notifies its account's topic (none on a preview)", async (stack, name, actions) => {
+    const { resources } = await apiIn(stack, { alarm: { threshold: 2 } });
+    const alarm = resources.find((r) => r.type === 'aws:cloudwatch/metricAlarm:MetricAlarm')!;
+    expect([alarm.inputs.name, alarm.inputs.threshold, alarm.inputs.alarmActions]).toEqual([name, 2, actions]);
+  });
+
+  test("a 0.3.x caller that passes no alarm argument gets the alarm, notifying the account's topic", async () => {
     const { resources } = await apiIn('prod');
     const alarm = resources.find((r) => r.type === 'aws:cloudwatch/metricAlarm:MetricAlarm')!;
-    expect([alarm.inputs.name, alarm.inputs.alarmActions]).toEqual(['basefresh-prod-api-errors', []]);
+    expect(alarm.inputs.alarmActions).toEqual(['arn:aws:sns:ap-southeast-1:123456789012:pebble-prd-alarms']);
+  });
+
+  test('the default topic is in the account and region of the provider the function is created with', async () => {
+    // Calls through the explicit provider answer another account and region than the default provider's.
+    const mocks: pulumi.runtime.Mocks = {
+      ...defaultMocks,
+      call(args) {
+        if (!args.provider?.includes('::pulumi:providers:aws::other::')) return defaultMocks.call(args);
+        if (args.token === 'aws:index/getRegion:getRegion') return { name: 'eu-west-1', region: 'eu-west-1' };
+        if (args.token === 'aws:index/getCallerIdentity:getCallerIdentity') return { accountId: '111111111111' };
+        return defaultMocks.call(args);
+      },
+    };
+    const { resources } = await runProgram({ project: 'basefresh', stack: 'prod', mocks }, () => {
+      const provider = new aws.Provider('other', { region: 'eu-west-1' });
+      const stage = new Stage('stage', { product: 'basefresh' }, { providers: [provider] });
+      return new ApiFunction('api', { stage, code, domain: domainFor(stage) }, { providers: [provider] });
+    });
+    const alarm = resources.find((r) => r.type === 'aws:cloudwatch/metricAlarm:MetricAlarm')!;
+    expect(alarm.inputs.alarmActions).toEqual(['arn:aws:sns:eu-west-1:111111111111:pebble-prd-alarms']);
   });
 
   test('alarm: false creates no alarm', async () => {

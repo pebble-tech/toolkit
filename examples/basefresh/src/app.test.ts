@@ -7,10 +7,10 @@ import { basefresh, type BasefreshInputs } from './app.js';
 import { bootstrap } from './bootstrap.js';
 
 const root = join(import.meta.dirname, '..');
-/** The account bootstrap's `alarmTopicArn` in each account: pbt-stg for staging, pbt-prd for prod. */
+/** The account bootstrap's topic in the account the mocked provider answers: pbt-stg's for staging, pbt-prd's for prod. */
 const ALARM_TOPIC = {
-  staging: 'arn:aws:sns:ap-southeast-1:111111111111:pebble-stg-alarms',
-  prod: 'arn:aws:sns:ap-southeast-1:222222222222:pebble-prd-alarms',
+  staging: 'arn:aws:sns:ap-southeast-1:123456789012:pebble-stg-alarms',
+  prod: 'arn:aws:sns:ap-southeast-1:123456789012:pebble-prd-alarms',
 };
 const inputs = (stack: string): BasefreshInputs => ({
   apex: 'pebbletech.my',
@@ -22,7 +22,6 @@ const inputs = (stack: string): BasefreshInputs => ({
     ? {}
     : { pgRuntime: { role: 'basefresh_app', password: 'runtime' } }),
   authSecret: 'auth-secret',
-  ...(stack === 'staging' || stack === 'prod' ? { alarmTopicArn: ALARM_TOPIC[stack] } : {}),
   bundles: { api: join(root, 'bundles/api'), uploads: join(root, 'bundles/uploads/server.js') },
 });
 

@@ -138,7 +138,7 @@ tracker's.
 
 | Argument | Default |
 |---|---|
-| `alarm.topicArn` | none: the alarm changes state in CloudWatch and notifies no one |
+| `alarm.topicArn` | staging and prod: the account bootstrap's topic, `arn:aws:sns:<region>:<account>:pebble-<stg\|prd>-alarms`, with the account and region of the AWS provider the function is created with. Previews: none, the alarm changes state in CloudWatch and notifies no one |
 | `alarm.threshold` | `1`: one error sets it off |
 | `alarm.period` | `300` seconds, a multiple of 60; one period is evaluated |
 | `alarm: false` | creates no alarm. On a prod stack whose alarm is already applied, follow [Remove an applied prod alarm](#remove-an-applied-prod-alarm) |
@@ -148,17 +148,19 @@ invocations, so a function with no traffic has no data; missing data counts as n
 `OK` rather than going to `INSUFFICIENT_DATA` or alarming. On prod the alarm is protected and retained like every
 other child.
 
-`topicArn` is the account bootstrap's `alarmTopicArn` output ([bootstrap](https://github.com/pebble-tech/toolkit/tree/main/bootstrap)):
-one SNS topic per AWS account, emailing the address its config names once that address confirms the subscription. A
-product passes it through its entries module, stored per GitHub environment because the ARN holds the account id:
+The default topic is the account bootstrap's ([bootstrap](https://github.com/pebble-tech/toolkit/tree/main/bootstrap)):
+one SNS topic per AWS account, `alarmTopicName('stg' | 'prd')`, emailing the address its config names once that address
+confirms the subscription. The component builds its ARN from the deploying credentials' account
+(`sts:GetCallerIdentity`, which needs no permission) and the provider's region, so a product stores and passes
+nothing. Pass `topicArn` only to notify another topic.
 
-```ts
-// entries.ts
-{ key: 'alarmTopicArn', env: 'ALARM_TOPIC_ARN', secret: false, required: true, stacks: ['staging', 'prod'] },
+The bootstrap creates the topic in one region, its own `aws:region` (`ap-southeast-1` for pbt-stg and pbt-prd), and
+a CloudWatch alarm notifies only a topic in its own region. The default is right only when the product deploys in the
+bootstrap's region. A product in another region passes `topicArn` for a topic in that region, or `alarm: false`.
 
-// the program
-new ApiFunction('api', { stage, code, domain, alarm: { topicArn: config.require('alarmTopicArn') } });
-```
+The account bootstrap must create the topic before the first `up` that creates an alarm. If the topic does not exist,
+whether CloudWatch refuses the alarm or accepts it and fails each notification is unverified: the `PutMetricAlarm` API
+reference lists no error for a missing action target, and it has not been tried against AWS.
 
 ### Upgrade to 0.4
 
@@ -174,11 +176,9 @@ first run that applies the runtime stacks with 0.4. Before that release, in this
    that runs in between still works.
 3. Apply the account bootstrap with `alarmEmail` set
    ([bootstrap](https://github.com/pebble-tech/toolkit/tree/main/bootstrap), "Add the alarm topic to an applied
-   stack"), and click the link in AWS's confirmation email.
-4. Wire the topic: store each account's `alarmTopicArn` as a secret of the GitHub environments that deploy there, add
-   the entry, and pass `alarm: { topicArn }` to each `ApiFunction`, on the same branch.
-5. Only then merge and release, so the runtime stacks apply with the new role already in place. Releasing first fails
-   the first `up` on `cloudwatch:PutMetricAlarm`.
+   stack"), and click the link in AWS's confirmation email. Staging and prod alarms notify this topic by default.
+4. Only then merge and release, so the runtime stacks apply with the new role and the topic already in place. Releasing
+   before step 2 fails the first `up` on `cloudwatch:PutMetricAlarm`.
 
 ### Remove an applied prod alarm
 
@@ -337,9 +337,9 @@ product composes in this order.
    ([Workflow actions](#workflow-actions)). The web-only production workflow below is one to start from.
 6. **Check them in a test** with `checkWorkflows` from `@pebbletech/infra/testing`, experimental in 0.4
    ([Check the workflows](#check-the-workflows)), with the product's GitHub environment secrets as data.
-7. **Wire the alarm topic** if the program has an `ApiFunction`: each account bootstrap's `alarmTopicArn`, stored per
-   GitHub environment and passed as `alarm: { topicArn }` ([Errors alarm](#errors-alarm)). Without it the alarm
-   notifies no one. A product on 0.3.x first follows [Upgrade to 0.4](#upgrade-to-04).
+7. **Check the alarm topic exists** if the program has an `ApiFunction`: on staging and prod its errors alarm notifies
+   the account bootstrap's topic by default ([Errors alarm](#errors-alarm)), so that bootstrap is applied with
+   `alarmEmail` first. A product on 0.3.x first follows [Upgrade to 0.4](#upgrade-to-04).
 8. **Leave `pebble_operators` to the cluster.** A product program constructs no `Operators`; its people are added to the
    cluster operators program's list ([Operators](#operators)). On a fresh cluster that program is applied before any
    product stack.

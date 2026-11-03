@@ -1,4 +1,11 @@
-import { deployAccount, stateBucketName, stateKeyAlias, type DeployAccount, type DeployEnv } from '@pebbletech/infra';
+import {
+  alarmTopicName,
+  deployAccount,
+  stateBucketName,
+  stateKeyAlias,
+  type DeployAccount,
+  type DeployEnv,
+} from '@pebbletech/infra';
 import * as aws from '@pulumi/aws';
 import * as pulumi from '@pulumi/pulumi';
 
@@ -227,7 +234,7 @@ function alarmAddress(value: string): string {
 /**
  * One account's shared bootstrap: the GitHub OIDC provider every deploy role trusts, the Pulumi state bucket, the
  * state KMS keys, and the SNS topic products' alarms notify. Nothing here belongs to a product; each product's
- * `DeployRole` derives these names, and each product passes `alarmTopicArn` to its `ApiFunction`s.
+ * `DeployRole` derives these names, and its `ApiFunction`s on staging and prod notify the topic by its name.
  */
 export function bootstrap(args: BootstrapArgs) {
   const provider = new aws.Provider('aws', { region: args.region, allowedAccountIds: [args.accountId] });
@@ -253,7 +260,7 @@ export function bootstrap(args: BootstrapArgs) {
   // Unencrypted, under SNS's default access policy, which lets CloudWatch alarms in this account publish. A KMS key
   // would need a key policy that lets cloudwatch.amazonaws.com use it (alias/aws/sns does not), or alarms fail
   // silently; a notification holds an alarm's name and state, nothing secret.
-  const alarms = new aws.sns.Topic('alarms', { name: `pebble-${args.account}-alarms`, tags }, { provider, ...keep });
+  const alarms = new aws.sns.Topic('alarms', { name: alarmTopicName(args.account), tags }, { provider, ...keep });
   // Not protected or retained: a new address replaces the subscription. Only a confirmed old address is unsubscribed;
   // SNS refuses to delete a pending one, which stays for up to 48 hours and can still be confirmed (README: "Change the
   // alarm address"). AWS emails the address a confirmation link; nothing is delivered until its owner clicks it.
