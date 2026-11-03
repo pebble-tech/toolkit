@@ -22,10 +22,8 @@ groups. [packages/config/README.md](packages/config/README.md) has the example a
 ## Use `@pebbletech/infra`
 
 ```sh
-pnpm --dir infra add --save-exact @pebbletech/infra@next @pulumi/pulumi
+pnpm --dir infra add --save-exact @pebbletech/infra @pulumi/pulumi
 ```
-
-`@next` is the 0.4.0-next.N prerelease ([Prereleases](#prereleases)); `latest` is still 0.3.2, without `pebble-infra`.
 
 A product's `infra/` program builds every stage from one `Stage` (`pr-<n>`, `staging`, `prod`, plus `shared` for the
 Vercel project). Names stay inside `<product>-<env>`, roles carry a permissions boundary, APIs need a custom domain,
@@ -85,7 +83,7 @@ While `.changeset/pre.json` exists the repository is in changesets pre mode, wit
 versions a package as `<version>-next.<n>` (each later merge with a changeset raises `n`), and `changeset publish`
 publishes it to npm's `next` dist-tag, so `latest` and every product that did not opt in stay where they are.
 
-`@pebbletech/infra` 0.4 is in pre mode until base-app's recomposition on the prerelease is green. Then, on a branch,
+A prerelease stays in pre mode until a product's recomposition on it is green. Then, on a branch,
 run `pnpm changeset pre exit` and, in the same commit as the changed `.changeset/pre.json`, take the `next` tag back out
 of every install line a product copies (`package.test.ts` fails until each one is changed):
 
