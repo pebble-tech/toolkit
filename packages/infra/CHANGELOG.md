@@ -1,5 +1,53 @@
 # @pebbletech/infra
 
+## 0.4.0-next.0
+
+### Minor Changes
+
+- d84634c: `pebble_operators` gets a home no product owns, and the README writes down who holds which Postgres credential.
+  
+  - `Operators` takes `cluster` (a `pebble-` cluster name) instead of `stage`, for the toolkit's new cluster operators program (`cluster-operators/`, one stack per cluster, applied by hand with a cluster admin no product uses). With `cluster` the group is protected and kept, as on prod, and `adoptExisting` imports a group that already exists. `stage` and `cluster` together, neither, or `adoptExisting` with `stage` are refused. A 0.3.x call with `stage` (`shared` or `prod`) is unchanged.
+  - README "Credentials and ownership": one admin per product per cluster, a separate preview admin used only by previews, the cluster admin for the operators program, never an admin shared across products, and what "a role belongs to the admin that created it" means when an admin is replaced, with the `pscale` commands to mint a product's admins. "Operators" and "A second product on a cluster" describe the cluster program; a product program constructs no `Operators`.
+  - The handover from a product's stacks to the cluster program keeps every member's access at every step and is in `cluster-operators/README.md`. Until a cluster's handover, the product whose stacks created its group keeps its 0.3.x `Operators`.
+- 7ce7ec5: A product's failures that its error tracker cannot see now reach someone, with no new code.
+  
+  - `ApiFunction` creates one CloudWatch alarm, `<product>-<env>-<kind>-errors`, on the function's Lambda `Errors`: a crash before the handler runs, a timeout, an out-of-memory kill, a runtime failure. Defaults: one error in 300 seconds sets it off, and a function with no traffic stays `OK`. `alarm: { topicArn, threshold, period }` sets it; `alarm: false` creates none. Without `topicArn` the alarm notifies the account bootstrap's topic on staging and prod (`pebble-<stg|prd>-alarms` in the account and region it deploys to) and no one on previews. On prod it is protected and retained like every other child: once applied there, `alarm: false` or a rollback to 0.3.x fails until the alarm is unprotected and removed from the state by hand, and the alarm itself is deleted in AWS (README, "Remove an applied prod alarm").
+  - `Worker` turns Workers observability on; `headSamplingRate` (0 to 1, default 1) sets how many requests it records.
+  - `DeployRole` (staging and prod) may create, read, tag and delete CloudWatch alarms named `<product>-<env>-*`, and read every alarm's configuration in the account.
+  - The account bootstrap (`bootstrap/`) creates one SNS topic per account, `pebble-<stg|prd>-alarms` (`alarmTopicName`), emailing the address in its `alarmEmail` config, and exports `alarmTopicArn`.
+  - New exports: `ApiFunctionAlarm`, `alarmTopicName`. Nothing was removed or renamed; a 0.3.x caller that passes nothing new gets the alarm, notifying the account's topic on staging and prod.
+  
+  A product's `infra/bootstrap` builds its deploy role from the package version it has installed, so the role bootstraps must be applied from 0.4 before the first release that applies the runtime stacks with 0.4. In this order (README, "Upgrade to 0.4"):
+  
+  1. On the upgrade branch, change `@pebbletech/infra` to 0.4, install, and rebuild `infra/`. Do not merge yet.
+  2. From that build, with SSO, apply the product's `infra/bootstrap` `staging` and `prod` stacks: each deploy role gains the CloudWatch statement. Re-applying them while 0.3.x is still installed changes nothing.
+  3. Apply the account bootstrap's `stg` and `prd` stacks with `alarmEmail` set (`bootstrap/README.md`, "Add the alarm topic to an applied stack"), and click the link in AWS's confirmation email: until then the subscription is pending and nothing is delivered. The alarm notifies this topic on staging and prod by default, so this step comes before the release; a product stores and passes nothing for it.
+  4. Only then merge and release. Releasing before step 2 fails the first `up` on `cloudwatch:PutMetricAlarm`. Expect one new resource per `ApiFunction` in the release's preview, `aws:cloudwatch/metricAlarm:MetricAlarm <name>-errors`, plus an update to each `Worker`'s script for observability.
+- e95c056: `pebble-infra`, the stack steps a product's workflows run around `pulumi up`, ships as a `bin` of the package. Run it from the product's own `node_modules` (`pnpm --dir infra exec pebble-infra <command>`): `prepare`, `configure`, `up`, `preview`, `outputs`, `remove` and `pg-database drop|check`. The README's "Run the stack steps" has the commands.
+  
+  - Every product fact comes from the product: the id from `Pulumi.yaml`'s `name` (or `--product`), the config entries from its own compiled module (`--entries`), the values from `PEBBLE_INFRA_VALUES` (a JSON object such as `toJSON(secrets)`) or the environment. `aws:region` is an ordinary entry with no default.
+  - Lock clearing is explicit: only `--clear-lock` runs `pulumi cancel`; `prepare --preview-only` and `preview` never clear, create, remove or reset a stack.
+  - A product's previews reach Postgres only when its entries module exports `previewDatabase = true`; `prepare` and `remove` on a `pr-<n>` stack take `--entries` for it (`prepare --preview-only` does not, since it never reaches Postgres), and the recovery commands a refusal prints include it. A product without a preview database needs no `PG_ADMIN_URL`.
+  - The preview reset refuses a stack that holds anything beyond its Stage and database (a `Worker`, a Vercel project), naming the types. `remove` does the same when `pulumi destroy` fails, keeping the state instead of force-removing it.
+  - Only Pulumi's missing-stack error counts as a stack that does not exist: any other `pulumi stack select` failure (a backend that cannot be read) stops `prepare` and `remove` before they drop, create or remove anything. `remove` sweeps only the state objects of this Pulumi project (`Pulumi.yaml`'s `name`), so another project's stack of the same name under the same backend path keeps its state.
+  - `up` retries only the template1 collision two previews hit when they create databases at once; any other failure stops at once.
+  - Secret outputs are masked with `::add-mask::`, escaped as `@actions/core` escapes command data, before they are written to `$GITHUB_OUTPUT`.
+  - New exports: `Entry`, `EntriesModule`, `ConfigValues`, `ConfigWrite`, `configWrites` and `stackKind`. Nothing was removed or renamed.
+  - The package now depends on `pg`, which only the CLI's database script loads; the component entry does not.
+- 4742a50: Two composite actions in the toolkit repo, pinned by commit SHA next to this version. `setup` installs pnpm and Node.js from the product's `packageManager` and `.nvmrc`, runs `pnpm install --frozen-lockfile`, and installs the Pulumi CLI at the version of the product's installed `@pulumi/pulumi`, with its plugin cache and `GITHUB_TOKEN` for plugin downloads (`pulumi: false` skips the CLI). `pulumi` is an optional `uses:` step for `pebble-infra up|preview|remove`; it refuses an installed `@pebbletech/infra` of another major.minor, and hands on what `pebble-infra` writes as one JSON output, `json`. `checkWorkflows` reads a `pulumi` action step as the `pebble-infra` command its literal inputs make (`entries` required), and refuses any other input, value or toolkit path. In the migrate rule, `up` may not carry an `if:`, and an output counts as read only inside `${{ }}`, outside a quoted string. The README's "Workflow actions" has both.
+- 653e900: `@pebbletech/infra/testing` gains `checkWorkflows`, which checks a product's own workflow files and returns every violation by job and rule; `loadWorkflow` parses one file. The product gives its data: workflow paths, product id, region, entries module, a secrets table per GitHub environment, the deploy-role secret's name, which stacks own a database, what its `derive` reads, and any stacks the helper cannot read. It reads only literal values from a narrow, documented subset of workflow text and fails on anything outside it; the README's "Check the workflows" has the subset and the rules.
+  
+  - Each job on a stack runs in the environment its deploy role trusts, assumes exactly the named role secret, and logs in to that stack's state and key.
+  - Every secret a job reads, anywhere in the job or through the entries a `PEBBLE_INFRA_VALUES: ${{ toJSON(secrets) }}` step needs, is in its environment's table, and the table lists nothing no job reads. Naming `secrets` other than as `secrets.NAME` (or the whole `toJSON(secrets)`) fails.
+  - Locks: on a long-lived stack whose lock a job clears, every job holds one literal, never-cancelled group; every job on one `pr-<n>` stack, `remove` included, shares one group, which may cancel; matrix copies and jobs of one run need a job-level group, `needs` or `max-parallel: 1`; `preview` and `prepare --preview-only` never clear a lock. A shared long-lived group sets `queue: max`.
+  - A deploy migrates before `up`, from an unconditional `pebble-infra outputs --if-exists` in the same job, under exactly the documented guard, with a step after `up` under the opposite guard for the first deploy.
+  - The package now depends on `yaml`, which only the testing entry loads. `runProgram`, `defaultMocks` and the other testing exports are unchanged.
+
+### Patch Changes
+
+- 12e4732: On a `pr-<n>` stack, a preview workflow runs `pebble-infra prepare <stack> --entries <module> --clear-lock` before it reads the database URL with `outputs --if-exists`. `prepare` resets a preview stack an interrupted run left and drops its database, so a URL read before it named the database about to be dropped, and its non-empty value kept the first-deploy migration from running on the new one. The README's migrate-first passages and the basefresh preview workflow now prepare first, and `checkWorkflows`'s `migrate` rule fails a job that reads a `pr-<n>` stack's URL before an unconditional `prepare` of that stack in the same job. Long-lived stacks are unchanged: their `prepare` stops on pending operations instead of resetting.
+- 8d6d85b: `checkWorkflows` is marked experimental, and the README lists its two known gaps: a literal matrix `include` with two entries on one stack, and a secret read after a quoted `}}` in the same expression.
+
 ## 0.3.2
 
 ### Patch Changes
