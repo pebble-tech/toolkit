@@ -1,6 +1,43 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
+  "extends": ["config:recommended", ":semanticCommits", ":prConcurrentLimit10"],
+  "timezone": "Asia/Kuala_Lumpur",
+  "schedule": ["before 6am on monday"],
+  "minimumReleaseAge": "3 days",
+  "labels": ["dependencies"],
+  "postUpdateOptions": ["pnpmDedupe"],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "schedule": ["at any time"],
+    "minimumReleaseAge": "0 days",
+    "labels": ["dependencies", "security"]
+  },
+  "packageRules": [
+    {
+      "description": "Pulumi SDK and providers move together; @pebbletech/infra ships the providers to every product",
+      "matchPackageNames": ["/^@pulumi\\//", "/^@pulumiverse\\//"],
+      "groupName": "pulumi"
+    },
+    {
+      "description": "Lint, format, type, test and release tooling",
+      "matchPackageNames": ["oxlint", "oxfmt", "typescript", "vitest", "/^@vitest\\//", "lint-staged", "simple-git-hooks", "/^@changesets\\//"],
+      "groupName": "tooling"
+    },
+    {
+      "description": "Patch and minor updates for everything else, one PR",
+      "matchUpdateTypes": ["minor", "patch"],
+      "matchPackageNames": ["!/^@pulumi\\//", "!/^@pulumiverse\\//", "!oxlint", "!oxfmt", "!typescript", "!vitest", "!/^@vitest\\//", "!lint-staged", "!simple-git-hooks", "!/^@changesets\\//"],
+      "groupName": "minor and patch"
+    },
+    {
+      "description": "Majors stay one PR each so the changelog is read",
+      "matchUpdateTypes": ["major"],
+      "groupName": null
+    },
+    {
+      "description": "Node and pnpm pins move on purpose, not by bot",
+      "matchPackageNames": ["node", "pnpm", "@types/node"],
+      "enabled": false
+    }
   ]
 }
