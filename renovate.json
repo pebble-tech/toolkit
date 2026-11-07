@@ -35,8 +35,8 @@
       "groupName": null
     },
     {
-      "description": "Node and pnpm pins move on purpose, not by bot",
-      "matchPackageNames": ["node", "pnpm", "@types/node"],
+      "description": "Node and pnpm pins move on purpose, not by bot; by dep name, so setup-node's node-version input is covered too",
+      "matchDepNames": ["node", "pnpm", "@types/node"],
       "enabled": false
     }
   ]
