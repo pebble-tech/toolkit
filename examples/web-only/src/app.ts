@@ -9,8 +9,6 @@ export interface NotesInputs {
   cloudflareZoneId?: string;
   /** `pr-<n>`, staging and prod: the product's admin URL on the cluster (secret). */
   pgAdminUrl?: pulumi.Input<string>;
-  /** Staging and prod: the PlanetScale-made role runtimes connect as, and its password (secret). */
-  pgRuntime?: { role: string; password: pulumi.Input<string> };
 }
 
 /**
@@ -30,7 +28,8 @@ export function notes(inputs: NotesInputs): Record<string, pulumi.Input<unknown>
     return { databaseUrl: database.directUrl };
   }
 
-  const database = new Database('db', { stage, adminUrl: inputs.pgAdminUrl!, runtime: inputs.pgRuntime });
+  // The database's runtime role (`<database>_runtime`) is made with it; the web app connects as it, pooled.
+  const database = new Database('db', { stage, adminUrl: inputs.pgAdminUrl! });
   // shared's state is another backend, so look the project up by the name shared gave it.
   const project = vercel.getProjectOutput({ name: `${stage.product}-web` });
   const web = new VercelProject('web', {
