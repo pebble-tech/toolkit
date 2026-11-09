@@ -16,12 +16,20 @@ async function databaseIn(stack: string, args: Extra = {}, product = 'basefresh'
       database,
       directUrl: await valueOf(database.directUrl),
       pooledUrl: database.pooledUrl ? await valueOf(database.pooledUrl) : undefined,
+      pooledWaitsFor: database.pooledUrl ? await dependencies(database.pooledUrl) : [],
       secret: [
         await pulumi.isSecret(database.directUrl),
         database.pooledUrl ? await pulumi.isSecret(database.pooledUrl) : undefined,
       ],
     };
   });
+}
+
+/** The names of the resources an output waits for. */
+async function dependencies(output: pulumi.Output<string>): Promise<string[]> {
+  const all = await (output as unknown as { allResources(): Promise<Set<pulumi.Resource>> }).allResources();
+  const urns = await Promise.all([...all].map((resource) => valueOf(resource.urn)));
+  return urns.map((urn) => urn.split('::').at(-1)!).sort();
 }
 
 /** `type name`, one line per child of the Database component. */
@@ -373,6 +381,26 @@ describe('Database', () => {
     ]);
     expect(result.secret).toEqual([true, true]);
   });
+
+  test.each([
+    ['the made role', {}],
+    ['a passed role', { runtime: RUNTIME }],
+  ])(
+    'the pooled URL waits for every grant to %s, so no consumer gets it before the role can log in',
+    async (_, args) => {
+      const { result } = await databaseIn('staging', args);
+      expect(result.pooledWaitsFor).toEqual(
+        expect.arrayContaining([
+          'db-runtime-connect',
+          'db-runtime-default-sequences',
+          'db-runtime-default-tables',
+          'db-runtime-schema',
+          'db-runtime-sequences',
+          'db-runtime-tables',
+        ])
+      );
+    }
+  );
 
   test('on prod the made runtime role and its password are protected and retained too', async () => {
     const { resources } = await databaseIn('prod');

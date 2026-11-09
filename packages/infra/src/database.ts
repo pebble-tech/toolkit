@@ -241,10 +241,14 @@ export class Database extends pulumi.ComponentResource {
       runtime = { role: role.name, password: runtimePassword.result };
     }
 
+    // The runtime role's grants. The pooled URL waits for them, so no consumer gets it before the role can log in.
+    const runtimeGrants: pulumi.CustomResource[] = [];
     if (runtime) {
       const role = runtime.role;
       const grant = (kind: string, args: Omit<postgresql.GrantArgs, 'database' | 'role'>) =>
-        new postgresql.Grant(`${name}-runtime-${kind}`, { database: database.name, role, ...args }, withProvider());
+        runtimeGrants.push(
+          new postgresql.Grant(`${name}-runtime-${kind}`, { database: database.name, role, ...args }, withProvider())
+        );
       grant('connect', { objectType: 'database', privileges: ['CONNECT'] });
       grant('schema', { objectType: 'schema', schema: SCHEMA, privileges: ['USAGE'] });
       grant('tables', { objectType: 'table', schema: SCHEMA, privileges: TABLE_PRIVILEGES });
@@ -254,7 +258,7 @@ export class Database extends pulumi.ComponentResource {
         ['table', TABLE_PRIVILEGES],
         ['sequence', SEQUENCE_PRIVILEGES],
       ] as const) {
-        new postgresql.DefaultPrivileges(
+        const defaults = new postgresql.DefaultPrivileges(
           `${name}-runtime-default-${kind}s`,
           {
             database: database.name,
@@ -266,6 +270,7 @@ export class Database extends pulumi.ComponentResource {
           },
           withProvider()
         );
+        runtimeGrants.push(defaults);
       }
     }
 
@@ -290,7 +295,7 @@ export class Database extends pulumi.ComponentResource {
       runtime && runtimeRole
         ? pulumi.secret(
             pulumi
-              .all([admin, runtime.password, database.name])
+              .all([admin, runtime.password, database.name, pulumi.all(runtimeGrants.map((grant) => grant.id))])
               .apply(([a, password, db]) =>
                 connectionUrl(a, runtimeRole, password, db, args.pooler?.host ?? a.host, args.pooler?.port ?? 6432)
               )

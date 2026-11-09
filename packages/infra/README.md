@@ -545,6 +545,7 @@ const RUNTIME = ['staging', 'prod'] as const;
 export const entries: Entry[] = [
   { key: 'aws:region', env: 'AWS_REGION', secret: false, required: true, stacks: ['shared', 'preview', ...RUNTIME] },
   { key: 'pgAdminUrl', env: 'PG_ADMIN_URL', secret: true, required: true, stacks: ['preview', ...RUNTIME] },
+  // base-app passes an existing runtime role. A product whose `Database` makes the role lists neither entry.
   { key: 'pgRuntimeUrl', env: 'DATABASE_RUNTIME_URL', secret: true, required: true, stacks: RUNTIME },
   { key: 'pgRuntimeRole', env: 'PG_RUNTIME_ROLE', secret: false, required: true, stacks: RUNTIME },
 ];
