@@ -127,8 +127,12 @@ export class DeployRole extends pulumi.ComponentResource {
 
     const { bucket, paths } = state;
     const roles = `arn:aws:iam::*:role/${scope}`;
-    const tagged = (prefix: 'aws:RequestTag' | 'aws:ResourceTag') => ({
-      StringLike: { [`${prefix}/product`]: product, [`${prefix}/env`]: env },
+    const ownTags = (prefix: 'aws:RequestTag' | 'aws:ResourceTag') => ({
+      [`${prefix}/product`]: product,
+      [`${prefix}/env`]: env,
+    });
+    const tagged = (...prefixes: ('aws:RequestTag' | 'aws:ResourceTag')[]) => ({
+      StringLike: Object.assign({}, ...prefixes.map(ownTags)),
     });
     const stateStatements = (kmsKeyArn: string): Statement[] => [
       {
@@ -158,22 +162,27 @@ export class DeployRole extends pulumi.ComponentResource {
       // The apex is literal. `*` still matches a dot, so a name in a sub-zone of the apex whose label ends with
       // `-<product>[-stg]` matches too.
       const domainSuffix = env === 'staging' ? 'stg' : '';
-      const domainNames = `arn:aws:apigateway:*::/domainnames/*-${product}${domainSuffix ? `-${domainSuffix}` : ''}.${apex}`;
+      const hostnames = `*-${product}${domainSuffix ? `-${domainSuffix}` : ''}.${apex}`;
+      const domainNames = `arn:aws:apigateway:*::/domainnames/${hostnames}`;
       // The domain glob ends at the apex, so it does not cover Create/Get/Update/DeleteApiMapping.
       const domainResources = [domainNames, `${domainNames}/apimappings`, `${domainNames}/apimappings/*`];
       const apiName = `${product}-${env}-*`;
+      // Checked against pbt-stg (TEC-347): routes, integrations and stages carry their HTTP API's tags for
+      // aws:ResourceTag, so the product/env tags confine every /apis/* call to this product's APIs. Creating a
+      // resource with tags also asks for the tag write: POST /tags/<api arn> on CreateApi, PUT /tags/<domain arn> on
+      // CreateDomainName, apigateway:TagResource on CreateStage.
       const httpApi: Statement[] = [
         {
           Sid: 'HttpApiCreate',
           Effect: 'Allow',
           Action: 'apigateway:POST',
           Resource: 'arn:aws:apigateway:*::/apis',
-          Condition: { StringLike: { 'apigateway:Request/ApiName': apiName } },
+          Condition: { StringLike: { 'apigateway:Request/ApiName': apiName, ...ownTags('aws:RequestTag') } },
         },
         {
-          // Resource/ApiName is on the API and absent on routes, integrations and stages, so IfExists lets those
-          // through. Request/ApiName is present on UpdateApi when the request sets Name, so a rename stays inside
-          // <product>-<env>-*. Residual: an edit under another API's id still succeeds.
+          // Request/ApiName is present on UpdateApi when the request sets Name, so a rename stays inside
+          // <product>-<env>-*. Request tags, when the call sends any, must be this product's, so a stage cannot be
+          // tagged as another product's and retagging an API goes nowhere.
           Sid: 'HttpApi',
           Effect: 'Allow',
           Action: [
@@ -187,17 +196,26 @@ export class DeployRole extends pulumi.ComponentResource {
           ],
           Resource: 'arn:aws:apigateway:*::/apis/*',
           Condition: {
-            StringLikeIfExists: {
-              'apigateway:Resource/ApiName': apiName,
-              'apigateway:Request/ApiName': apiName,
-            },
+            StringLike: ownTags('aws:ResourceTag'),
+            StringLikeIfExists: { 'apigateway:Request/ApiName': apiName, ...ownTags('aws:RequestTag') },
           },
         },
         {
+          // CreateDomainName has no name condition key; the request must carry this product's tags.
           Sid: 'HttpApiDomainCreate',
           Effect: 'Allow',
           Action: 'apigateway:POST',
           Resource: 'arn:aws:apigateway:*::/domainnames',
+          Condition: tagged('aws:RequestTag'),
+        },
+        {
+          // The tag write of a create. On a resource being created the resource tags are the request's; on one that
+          // exists they are absent here, so this grant tags nothing that already exists.
+          Sid: 'HttpApiTagsOnCreate',
+          Effect: 'Allow',
+          Action: ['apigateway:POST', 'apigateway:PUT'],
+          Resource: 'arn:aws:apigateway:*::/tags/*',
+          Condition: tagged('aws:RequestTag', 'aws:ResourceTag'),
         },
         {
           // POST on `/apimappings` is CreateApiMapping; GET, PATCH and DELETE on `/apimappings/*` are the read,
@@ -207,8 +225,7 @@ export class DeployRole extends pulumi.ComponentResource {
           Action: ['apigateway:GET', 'apigateway:POST', 'apigateway:PUT', 'apigateway:PATCH', 'apigateway:DELETE'],
           Resource: domainResources,
         },
-        // No /tags/* grant. The API Gateway V2 reference does not list aws:ResourceTag/${TagKey} for
-        // TagResource or UntagResource. CreateApi still sends tags; a later tag update is denied.
+        // No other /tags/* grant: a tag change on an existing API, stage or domain is denied.
       ];
       return [
         {
@@ -238,11 +255,21 @@ export class DeployRole extends pulumi.ComponentResource {
           Resource: '*',
         },
         {
+          // Only for this product and env's hostnames, every name on the certificate.
           Sid: 'CertificatesCreateTagged',
           Effect: 'Allow',
-          Action: ['acm:RequestCertificate', 'acm:AddTagsToCertificate'],
+          Action: 'acm:RequestCertificate',
           Resource: '*',
-          Condition: tagged('aws:RequestTag'),
+          Condition: { ...tagged('aws:RequestTag'), 'ForAllValues:StringLike': { 'acm:DomainNames': hostnames } },
+        },
+        {
+          // Tags only on this product's own certificates, so another product's certificate cannot be retagged and
+          // then deleted.
+          Sid: 'CertificatesTagOwn',
+          Effect: 'Allow',
+          Action: 'acm:AddTagsToCertificate',
+          Resource: '*',
+          Condition: tagged('aws:RequestTag', 'aws:ResourceTag'),
         },
         {
           Sid: 'CertificatesChangeOwn',

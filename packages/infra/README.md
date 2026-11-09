@@ -236,7 +236,7 @@ const customEnvironmentId = stage.isProd
 Tearing down `shared` or `prod` takes an explicit step: every child there is protected, so run
 `pulumi state unprotect --all -s <stack>` before `pulumi destroy -s <stack>`.
 
-A staging or prod deploy role can create a custom domain of any name (`POST` on `/domainnames` has no name condition), can edit routes, integrations and stages under another HTTP API's id, and can change a hostname in a sub-zone of its apex whose label ends with `-<product>-stg` or `-<product>` (for example `api-x-stg.foo-basefresh-stg.pebbletech.my`); API Gateway tag updates after creation are denied, and creation-time tags still arrive through `CreateApi`.
+A staging or prod deploy role works only on HTTP APIs (with their routes, integrations and stages) tagged with its own `product` and `env`, creates APIs and custom domains only with those tags, and requests certificates only for its own hostnames. Two limits remain. `POST` on `/domainnames` has no name condition, so the role can create a domain of another product's hostname with that product's certificate before that product has created it. And it can change a hostname in a sub-zone of its apex whose label ends with `-<product>-stg` or `-<product>` (for example `api-x-stg.foo-basefresh-stg.pebbletech.my`). API Gateway tag changes after creation are denied.
 
 The `preview` role's policy contains the state-bucket statements and the KMS key statement only.
 
