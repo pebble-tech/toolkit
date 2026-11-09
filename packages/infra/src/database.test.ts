@@ -316,12 +316,71 @@ describe('Database', () => {
     }
   );
 
-  test('refuses staging and prod without a runtime role, and a runtime role on a preview', async () => {
-    await expect(databaseIn('staging')).rejects.toThrow(OwnershipError);
-    await expect(databaseIn('prod')).rejects.toThrow(OwnershipError);
+  test('refuses a runtime role on a preview', async () => {
     await expect(databaseIn('pr-7', { runtime: RUNTIME })).rejects.toThrow(
       'a preview takes no runtime role: its generated role is both owner and runtime'
     );
+  });
+
+  test('refuses a product id whose made runtime role name would pass 63 characters', async () => {
+    // `<product>_stg_owner` is 62 characters and fits; `<product>_stg_runtime` is 64.
+    const product = `b${'x'.repeat(51)}`;
+    await expect(databaseIn('staging', {}, product)).rejects.toThrow(
+      `runtime role "${product}_stg_runtime" must match`
+    );
+    await expect(databaseIn('staging', { runtime: RUNTIME }, product)).resolves.toBeDefined();
+  });
+
+  test.each([
+    ['staging', 'basefresh_stg'],
+    ['prod', 'basefresh_prd'],
+  ])('%s without `runtime` makes <database>_runtime, a plain login role, and grants it', async (stack, database) => {
+    const { resources } = await databaseIn(stack);
+    const made = `${database}_runtime`;
+    expect(children(resources)).toEqual(
+      [
+        ...children((await databaseIn(stack, { runtime: RUNTIME })).resources),
+        'postgresql:index/role:Role db-runtime',
+        'random:index/randomPassword:RandomPassword db-runtime-password',
+      ].sort()
+    );
+    const role = one(resources, 'db-runtime');
+    expect(role.inputs).toMatchObject({ name: made, login: true, password: 'mock-password-db-runtime-password' });
+    expect(role.secretInputs).toContain('password');
+    expect([role.inputs.createDatabase, role.inputs.createRole, role.inputs.superuser]).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    const granted = [
+      ...ofType(resources, 'postgresql:index/grant:Grant'),
+      ...ofType(resources, 'postgresql:index/defaultPrivileges:DefaultPrivileges'),
+    ].filter((r) => r.name.startsWith('db-runtime-'));
+    expect(granted.map((r) => r.inputs.role)).toEqual(Array(6).fill(made));
+    // It is a member of nothing and nothing is a member of it.
+    const memberships = ofType(resources, 'postgresql:index/grantRole:GrantRole');
+    expect(memberships.filter((r) => [r.inputs.role, r.inputs.grantRole].includes(made))).toEqual([]);
+  });
+
+  test('without `runtime` the pooled URL is the made role on 6432 with its generated password, as a secret', async () => {
+    const { result } = await databaseIn('staging');
+    const pooled = new URL(result.pooledUrl!);
+    expect([pooled.username, pooled.password, pooled.port, pooled.pathname]).toEqual([
+      'basefresh_stg_runtime.abc123',
+      'mock-password-db-runtime-password',
+      '6432',
+      '/basefresh_stg',
+    ]);
+    expect(result.secret).toEqual([true, true]);
+  });
+
+  test('on prod the made runtime role and its password are protected and retained too', async () => {
+    const { resources } = await databaseIn('prod');
+    const managed = resources.filter((r) => r.custom && !r.type.startsWith('pulumi:providers:'));
+    expect(managed).toHaveLength(14);
+    for (const resource of managed) {
+      expect([resource.type, resource.protect, resource.retainOnDelete]).toEqual([resource.type, true, true]);
+    }
   });
 
   test('refuses the shared stack', async () => {

@@ -14,8 +14,6 @@ const SECRETS = {
   production: [
     'AWS_DEPLOY_ROLE_ARN',
     'PG_ADMIN_URL',
-    'PG_RUNTIME_ROLE',
-    'PG_RUNTIME_PASSWORD',
     'CLOUDFLARE_ZONE_ID',
     'CLOUDFLARE_API_TOKEN',
     'VERCEL_API_TOKEN',

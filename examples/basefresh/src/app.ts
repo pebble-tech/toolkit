@@ -9,7 +9,10 @@ export interface BasefreshInputs {
   cloudflareAccountId: string;
   /** `pr-<n>`, staging and prod: the product's admin URL on the stage's cluster (secret). `shared` has no database. */
   pgAdminUrl?: pulumi.Input<string>;
-  /** Staging and prod: the PlanetScale-made role runtimes connect as through the pooler, and its password (secret). */
+  /**
+   * Staging and prod: an existing role runtimes connect as through the pooler, and its password (secret), as base-app
+   * passes its PlanetScale-made role. Without it the `Database` makes one (examples/web-only).
+   */
   pgRuntime?: { role: string; password: pulumi.Input<string> };
   authSecret: pulumi.Input<string>;
   /** Built by the product (esbuild); paths relative to the project directory. */

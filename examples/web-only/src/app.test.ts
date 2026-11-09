@@ -10,7 +10,6 @@ const inputs: NotesInputs = {
   apex: 'pebbletech.my',
   cloudflareZoneId: 'zone-1',
   pgAdminUrl: 'postgresql://notes_admin:admin@sin.pg.psdb.cloud:5432/postgres',
-  pgRuntime: { role: 'notes_app', password: 'runtime' },
 };
 
 // What Vercel answers when staging and prod look the shared project up by name.
