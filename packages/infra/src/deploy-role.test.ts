@@ -161,8 +161,23 @@ describe('DeployRole', () => {
       'arn:aws:logs:*:*:log-group:/aws/lambda/basefresh-staging-*:*',
     ]);
     expect(statement(policy, 'CertificatesCreateTagged')).toMatchObject({
-      Action: ['acm:RequestCertificate', 'acm:AddTagsToCertificate'],
-      Condition: { StringLike: { 'aws:RequestTag/product': 'basefresh', 'aws:RequestTag/env': 'staging' } },
+      Action: 'acm:RequestCertificate',
+      Condition: {
+        StringLike: { 'aws:RequestTag/product': 'basefresh', 'aws:RequestTag/env': 'staging' },
+        'ForAllValues:StringLike': { 'acm:DomainNames': '*-basefresh-stg.pebbletech.my' },
+      },
+    });
+    // Adding a tag needs the certificate to be this product's already: no retagging another's, then deleting it.
+    expect(statement(policy, 'CertificatesTagOwn')).toMatchObject({
+      Action: 'acm:AddTagsToCertificate',
+      Condition: {
+        StringLike: {
+          'aws:RequestTag/product': 'basefresh',
+          'aws:RequestTag/env': 'staging',
+          'aws:ResourceTag/product': 'basefresh',
+          'aws:ResourceTag/env': 'staging',
+        },
+      },
     });
     expect(statement(policy, 'CertificatesChangeOwn').Condition).toEqual({
       StringLike: { 'aws:ResourceTag/product': 'basefresh', 'aws:ResourceTag/env': 'staging' },
@@ -215,10 +230,12 @@ describe('DeployRole', () => {
     ['staging', 'basefresh-staging-*', 'arn:aws:apigateway:*::/domainnames/*-basefresh-stg.pebbletech.my'],
     ['prod', 'basefresh-prod-*', 'arn:aws:apigateway:*::/domainnames/*-basefresh.pebbletech.my'],
   ] as const)(
-    '%s creates an HTTP API only under its name, and reads domains only under its hostname',
+    '%s creates an HTTP API only under its name and tags, and reads domains only under its hostname',
     async (env, apiName, domainArn) => {
       const { resources } = await roleFor(env);
       const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
+      const requestTags = { 'aws:RequestTag/product': 'basefresh', 'aws:RequestTag/env': env };
+      const resourceTags = { 'aws:ResourceTag/product': 'basefresh', 'aws:ResourceTag/env': env };
       const verbs = [
         'apigateway:GET',
         'apigateway:POST',
@@ -233,7 +250,9 @@ describe('DeployRole', () => {
         Effect: 'Allow',
         Action: 'apigateway:POST',
         Resource: 'arn:aws:apigateway:*::/apis',
-        Condition: { StringLike: { 'apigateway:Request/ApiName': apiName } },
+        Condition: {
+          StringLike: { 'apigateway:Request/ApiName': apiName, ...requestTags },
+        },
       });
       expect(statement(policy, 'HttpApi')).toEqual({
         Sid: 'HttpApi',
@@ -241,10 +260,8 @@ describe('DeployRole', () => {
         Action: verbs,
         Resource: 'arn:aws:apigateway:*::/apis/*',
         Condition: {
-          StringLikeIfExists: {
-            'apigateway:Resource/ApiName': apiName,
-            'apigateway:Request/ApiName': apiName,
-          },
+          StringLike: resourceTags,
+          StringLikeIfExists: { 'apigateway:Request/ApiName': apiName, ...requestTags },
         },
       });
       expect(statement(policy, 'HttpApiDomainCreate')).toEqual({
@@ -252,6 +269,14 @@ describe('DeployRole', () => {
         Effect: 'Allow',
         Action: 'apigateway:POST',
         Resource: 'arn:aws:apigateway:*::/domainnames',
+        Condition: { StringLike: requestTags },
+      });
+      expect(statement(policy, 'HttpApiTagsOnCreate')).toEqual({
+        Sid: 'HttpApiTagsOnCreate',
+        Effect: 'Allow',
+        Action: ['apigateway:POST', 'apigateway:PUT'],
+        Resource: 'arn:aws:apigateway:*::/tags/*',
+        Condition: { StringLike: { ...requestTags, ...resourceTags } },
       });
       expect(statement(policy, 'HttpApiDomain')).toEqual({
         Sid: 'HttpApiDomain',
@@ -266,7 +291,7 @@ describe('DeployRole', () => {
   test.each(['staging', 'prod'] as const)('rename-refusal: %s cannot rename its API to other-prod-api', async (env) => {
     const { resources } = await roleFor(env);
     const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
-    const own = { 'apigateway:Resource/ApiName': `basefresh-${env}-api` };
+    const own = { 'aws:ResourceTag/product': 'basefresh', 'aws:ResourceTag/env': env };
     expect(
       allows(policy, 'apigateway:PATCH', gatewayArn('/apis/own-id'), {
         ...own,
@@ -282,14 +307,93 @@ describe('DeployRole', () => {
     ).toBe(true);
   });
 
-  test.each(['staging', 'prod'] as const)('%s cannot tag or untag through /tags', async (env) => {
+  // pbt-stg showed a tag write on an existing resource carries no resource tags on /tags, and one on a resource being
+  // created carries the request's.
+  test.each(['staging', 'prod'] as const)(
+    '%s writes tags through /tags only while creating its own resource',
+    async (env) => {
+      const { resources } = await roleFor(env);
+      const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
+      const tags = gatewayArn('/tags/' + encodeURIComponent(gatewayArn('/apis/foreign-id')));
+      const domainTags = gatewayArn(
+        '/tags/' + encodeURIComponent(gatewayArn('/domainnames/api-basefresh.pebbletech.my'))
+      );
+      const request = (product: string) => ({ 'aws:RequestTag/product': product, 'aws:RequestTag/env': env });
+      const creating = (product: string) => ({
+        ...request(product),
+        'aws:ResourceTag/product': product,
+        'aws:ResourceTag/env': env,
+      });
+      expect({
+        createOwnApi: allows(policy, 'apigateway:POST', tags, creating('basefresh')),
+        createOwnDomain: allows(policy, 'apigateway:PUT', domainTags, creating('basefresh')),
+        createOther: allows(policy, 'apigateway:POST', tags, creating('other')),
+        retagExisting: allows(policy, 'apigateway:POST', tags, request('basefresh')),
+        untag: allows(policy, 'apigateway:DELETE', tags, creating('basefresh')),
+      }).toEqual({ createOwnApi: true, createOwnDomain: true, createOther: false, retagExisting: false, untag: false });
+    }
+  );
+
+  test.each(['staging', 'prod'] as const)(
+    "%s cannot create, read or change routes, integrations or stages under another product's API id",
+    async (env) => {
+      const { resources } = await roleFor(env);
+      const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
+      // Children carry their API's tags for aws:ResourceTag; an untagged API has none.
+      const api = (product?: string): Record<string, string> =>
+        product === undefined ? {} : { 'aws:ResourceTag/product': product, 'aws:ResourceTag/env': env };
+      const calls = [
+        ['apigateway:POST', '/apis/id/routes'],
+        ['apigateway:PATCH', '/apis/id/routes/route-id'],
+        ['apigateway:DELETE', '/apis/id/integrations/integration-id'],
+        ['apigateway:GET', '/apis/id/routes'],
+        ['apigateway:POST', '/apis/id/stages'],
+      ] as const;
+      const run = (context: Record<string, string>) =>
+        calls.map(([action, path]) => allows(policy, action, gatewayArn(path), context));
+      expect({
+        own: run(api('basefresh')),
+        otherProduct: run(api('other')),
+        otherEnv: run({
+          'aws:ResourceTag/product': 'basefresh',
+          'aws:ResourceTag/env': env === 'prod' ? 'staging' : 'prod',
+        }),
+        untagged: run(api()),
+        ownStageTaggedAsOther: allows(policy, 'apigateway:POST', gatewayArn('/apis/id/stages'), {
+          ...api('basefresh'),
+          'aws:RequestTag/product': 'other',
+          'aws:RequestTag/env': env,
+        }),
+      }).toEqual({
+        own: calls.map(() => true),
+        otherProduct: calls.map(() => false),
+        otherEnv: calls.map(() => false),
+        untagged: calls.map(() => false),
+        ownStageTaggedAsOther: false,
+      });
+    }
+  );
+
+  test.each(['staging', 'prod'] as const)('%s creates an HTTP API or a domain only with its own tags', async (env) => {
     const { resources } = await roleFor(env);
     const policy = JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
-    const tags = gatewayArn('/tags/' + encodeURIComponent(gatewayArn('/apis/foreign-id')));
-    expect([allows(policy, 'apigateway:POST', tags), allows(policy, 'apigateway:DELETE', tags)]).toEqual([
-      false,
-      false,
-    ]);
+    const name = { 'apigateway:Request/ApiName': `basefresh-${env}-api` };
+    const request = (product: string) => ({ 'aws:RequestTag/product': product, 'aws:RequestTag/env': env });
+    expect({
+      apiOwn: allows(policy, 'apigateway:POST', gatewayArn('/apis'), { ...name, ...request('basefresh') }),
+      apiOther: allows(policy, 'apigateway:POST', gatewayArn('/apis'), { ...name, ...request('other') }),
+      apiUntagged: allows(policy, 'apigateway:POST', gatewayArn('/apis'), name),
+      domainOwn: allows(policy, 'apigateway:POST', gatewayArn('/domainnames'), request('basefresh')),
+      domainOther: allows(policy, 'apigateway:POST', gatewayArn('/domainnames'), request('other')),
+      domainUntagged: allows(policy, 'apigateway:POST', gatewayArn('/domainnames')),
+    }).toEqual({
+      apiOwn: true,
+      apiOther: false,
+      apiUntagged: false,
+      domainOwn: true,
+      domainOther: false,
+      domainUntagged: false,
+    });
   });
 
   test.each(['pebbletech.my', 'tenant-basefresh-stg.com', 'tenant-basefresh.com'] as const)(
@@ -316,9 +420,14 @@ describe('DeployRole', () => {
           const matched = hostnames.filter((row) =>
             patterns.some((pattern) => iamMatches(pattern, gatewayArn(`/domainnames/${row.host}`)))
           );
+          const certificateNames = String(
+            statement(policy, 'CertificatesCreateTagged').Condition['ForAllValues:StringLike']['acm:DomainNames']
+          );
+          const certifiable = hostnames.filter((row) => iamMatches(certificateNames, row.host));
           const own = hostnames.filter((row) => row.product === product && row.stack === env);
           expect(own).toHaveLength(kinds.length);
           expect(matched.map((row) => row.host).sort()).toEqual(own.map((row) => row.host).sort());
+          expect(certifiable.map((row) => row.host).sort()).toEqual(own.map((row) => row.host).sort());
           for (const host of own.map((row) => row.host)) {
             const mapping = gatewayArn(`/domainnames/${host}/apimappings`);
             expect([
