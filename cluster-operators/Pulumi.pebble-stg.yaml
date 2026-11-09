@@ -1,0 +1,8 @@
+secretsprovider: awskms://alias/pebble-stg-pulumi-staging?region=ap-southeast-1
+encryptedkey: AQICAHijSOfPkTL+H5G0UnXJIvlX0GGgj5as1cEliSnBDT71sgGYZaNUQRJbgXd2z1ttoNr6AAAAfjB8BgkqhkiG9w0BBwagbzBtAgEAMGgGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMBBJdv3AYRXHk1N/eAgEQgDuun+Nek+ft6DTkO9pVwhjVgGmDGwhobccCSYf3k1wHIPvIkz4g+m2sUAK2VorOvphknPZH4yrPLswQZw==
+config:
+  pebble-cluster-operators:adoptExisting: "false"
+  pebble-cluster-operators:adminRole:
+    secure: v1:ab9X7f5HqJzvPxYl:yBlvKyJhaYLXmCF+k6XiqQR2oas520SPaiC+HZfLRMY5fducvVrb
+  pebble-cluster-operators:members:
+    secure: v1:on4kw5dWMy7ym1x1:XE1v4eIX/UYnUctWl4tobn34/cDkB7XDLZ4Z/kJSVHcV3aHBrHH+GX2F8Q==

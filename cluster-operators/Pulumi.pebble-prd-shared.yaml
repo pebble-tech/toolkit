@@ -1,0 +1,8 @@
+secretsprovider: awskms://alias/pebble-prd-pulumi-prod?region=ap-southeast-1
+encryptedkey: AQICAHggNE64TGXjWv0bNtd0mqGI0eTtwNWuO/SEsqhCLZE3EwH6UFPGUlbzBHdfsFAyWyFlAAAAfjB8BgkqhkiG9w0BBwagbzBtAgEAMGgGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMPNd3MgdNvRiP8rpyAgEQgDuQUt2nacl6OT3aWl4sLnGv1zgiEn5mOWhH+e6IW7B/I6IpRU1h4pALKFdzs6+Hfam35HI9YE3+J/4OIQ==
+config:
+  pebble-cluster-operators:adoptExisting: "false"
+  pebble-cluster-operators:adminRole:
+    secure: v1:oQzfO91Es9b6ZPTy:2OBPlsCUQRJZTX8DjImamnOzm6w+QT+mX7d3lg8/r6st3/iOOP6J
+  pebble-cluster-operators:members:
+    secure: v1:msyqj4i8QWbuVN5X:uqyXD5cAnySbdqCPezYBEChvpsRvTLWS3srQSufKbf+inuzNMkKWIpfGhQ==
