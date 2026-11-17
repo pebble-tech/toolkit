@@ -1,5 +1,32 @@
 # @pebbletech/infra
 
+## 0.6.0
+
+### Minor Changes
+
+- 80bbe59: `VercelProject` stops a pull request's preview from becoming a new project's production deployment. Vercel makes a
+  project's first deployment production when it names no target, as a preview deploy does. The `shared` stack now
+  deploys a static placeholder page shipped in the package to the project, also naming no target: on a new project it is
+  the first deployment, so it becomes production until the first release replaces it; on a project that already has a
+  production deployment it is one more preview, and production is untouched. The upload is `placeholder/index.html` and
+  a `vercel.json` under the project's root directory that skips the install, runs a no-op build and serves the page, for
+  that deployment only. The deployment sends no build, install, framework, output or root-directory override; the only
+  project setting the provider sends with it is `sourceFilesOutsideRootDirectory: true`, the provider's default for a
+  project. Check the project's Build and Deployment settings in Vercel after the first `shared` up. It is created
+  once (its inputs are ignored afterwards), and protected and retained like every `shared` child. A product does nothing;
+  a test that lists `shared`'s resources sees `vercel:index/deployment:Deployment <name>-placeholder`. README "First
+  deployment" also gives the state steps for a replaced project.
+- a9ab0ed: `VercelProject` pins the project's Node version, and the README says how to remove a protected prod resource.
+  
+  - The `shared` project pins Node: `project.nodeVersion`, typed `NodeVersion` (`'18.x' | '20.x' | '22.x' | '24.x'`, the
+    values `@pulumiverse/vercel` 5.21.1 accepts), default `24.x`. Before, the project had none and Vercel gave a new
+    project its own default. The default applies to an existing project on its next `shared` `up`, and takes effect with
+    its next deployment. A product that pinned Node with a transformation can drop the transformation.
+  - README "Remove a protected prod resource": the `pulumi state unprotect` and `pulumi state delete` steps, then the
+    release, then `vercel env rm … --project <product>-web`. Prod and shared children stay protected.
+  - README "Verify a Vercel domain": the `_vercel` TXT record Vercel may ask for is still a hand step after the first
+    `staging` or `prod` release that binds the domain.
+
 ## 0.5.0
 
 ### Minor Changes
