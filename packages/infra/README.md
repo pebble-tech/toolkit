@@ -6,7 +6,7 @@ pinning a version; the guardrails are defaults it cannot turn off.
 | Component | Creates | Refuses |
 |---|---|---|
 | `Stage` | nothing; parses the stack name and names, tags and protects everything else | a product id that is not one DNS label, starts with `pebble`, or is `pr`/`staging`/`prod`/`shared`; a kind that is not one DNS label; any stack other than `pr-<n>`, `staging`, `prod`, `shared` |
-| `VercelProject` | `shared`: the project (no Git connection, private source, Vercel Authentication on previews), custom environments, the protection bypass. `staging`/`prod`: env vars (secrets `sensitive`), the domain bound to the stage's environment (replaced delete-first, because a hostname is on one project: a new `projectId` leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname), an unproxied Cloudflare CNAME | previews; the project outside `shared`; env vars or domains on `shared`; a secret-looking name in `vars` |
+| `VercelProject` | `shared`: the project (no Git connection, private source, Vercel Authentication on previews, Node `24.x` unless `nodeVersion` names another), custom environments, the protection bypass. `staging`/`prod`: env vars (secrets `sensitive`), the domain bound to the stage's environment (replaced delete-first, because a hostname is on one project: a new `projectId` leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname), an unproxied Cloudflare CNAME (not the `_vercel` TXT record Vercel may ask for: [Verify a Vercel domain](#verify-a-vercel-domain)) | previews; the project outside `shared`; env vars or domains on `shared`; a secret-looking name in `vars` |
 | `Database` | an explicit Postgres provider on port 5432 with `sslmode=verify-full`, the owner login role, the database owned by it, the owner's grant to `pebble_operators`, the `public` revoke, and on staging/prod the runtime role (made, unless `runtime` names one) and its grants; `directUrl` (owner) and `pooledUrl` (runtime) as secrets. See [Database](#database) | any `owner*` argument; `runtime` on a preview; a runtime role that is the owner or the operators group; a database or owner name longer than 63 characters. The names are always derived from `stage.databaseName()` |
 | `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, a CloudWatch alarm on the function's errors (see [Errors alarm](#errors-alarm); `alarm: false` opts out), HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; a boundary other than the stage's own `<product>-<env>-boundary` in the current account (a typed `PermissionsBoundaryArn` from `Stage` or `DeployRole`, checked when it resolves, so `pulumi preview` fails). Timeouts above 29 s are clamped |
 | `Worker` | Workers script from a prebuilt module with Workers observability on (`headSamplingRate`, 0 to 1, default 1: every request), R2 bucket `<product>-<env>-<kind>` (on prod, `adoptExisting` imports that same name instead of creating it), plain and secret bindings, custom domain (replaced delete-first, because a hostname has one custom domain: a new script name leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname) | a secret-looking name in `vars` unless listed in `plainTextAllowed`; `adoptExisting` outside prod |
@@ -243,6 +243,53 @@ const customEnvironmentId = stage.isProd
 
 Tearing down `shared` or `prod` takes an explicit step: every child there is protected, so run
 `pulumi state unprotect --all -s <stack>` before `pulumi destroy -s <stack>`.
+
+### Upgrade from 0.5: the Vercel project
+
+- `shared`'s next `up` sets the project's Node to `24.x`, or to `project.nodeVersion`, on an existing project too. If
+  Vercel's saved value differs, the preview shows an update of the project; nothing is replaced. Running deployments
+  keep their Node: the setting takes effect with the next deployment (the provider: "A new Deployment is required for
+  your changes to take effect"). A product that pinned Node with a transformation can drop it.
+
+### Verify a Vercel domain
+
+`VercelProject` creates the CNAME but not the TXT record Vercel asks for when it cannot verify a hostname on its own
+(for example when the apex is in use elsewhere in Vercel). After the first `staging` or `prod` release that binds the
+domain, open the project's Settings, Domains in Vercel: if the domain shows a TXT record to add, add that record, name
+`_vercel` on the apex and the value Vercel shows, unproxied, in the apex's Cloudflare zone. Making it automatic is
+TEC-432's follow-up card.
+
+### Remove a protected prod resource
+
+Every child on `prod` and `shared` is protected, and every one but the two custom domains is retained. So a change
+that drops one, such as an env var taken out of `vars` or `secrets`, fails the release with `cannot be deleted because
+it is protected`. That is the guard, and it stays on: no change alone deletes a prod resource. Unprotecting alone is not
+enough either: the release then shows `delete[retain]`, which drops the resource from the state and leaves it in
+Vercel. To remove one on purpose, with prod admin SSO and `pulumi login` to the stack's backend, right before the
+release that drops it:
+
+```sh
+pulumi stack --show-urns -s prod | grep 'web-env-PLUNK_SECRET_KEY'   # the resource's URN, ending in ::<its name>
+pulumi state unprotect '<urn>' -s prod
+pulumi state delete '<urn>' -s prod
+```
+
+`pulumi state delete` refuses a resource that another one depends on (the domain, for example, which the CNAME
+depends on): remove the dependent first, or pass `--target-dependents`. Then release the change. Its preview shows nothing for the resource. Last, delete it where it lives, since Pulumi
+never did. For an env var, name the project, so the command cannot act on whatever project the directory is linked to:
+
+```sh
+vercel env rm PLUNK_SECRET_KEY production --yes --scope <team id> --project <product>-web
+```
+
+`<product>-web` is the project the `shared` stack created (its `project.name`, if it set one); `--project` takes the
+project id too, which is the `shared` stack's `VercelProject.projectId` and is shown in Vercel under the project's
+Settings, General. `<team id>` is the `VERCEL_TEAM_ID` the workflows use. A new deployment no longer sees the variable;
+the running one, which the release built before the variable was removed, keeps it until production deploys again, so
+publish the next release (or redeploy production) to stop it. If a release that still declares the resource runs between the state
+delete and that change, it creates the resource again or fails on the one that exists; repeat the steps. On staging and
+previews nothing is protected, so the change alone deletes it. [Remove an applied prod alarm](#remove-an-applied-prod-alarm)
+is the same steps for the errors alarm.
 
 A staging or prod deploy role works only on HTTP APIs (with their routes, integrations and stages) tagged with its own `product` and `env`, creates APIs and custom domains only with those tags, and requests certificates only for its own hostnames. Two limits remain. `POST` on `/domainnames` has no name condition, so the role can create a domain of another product's hostname with that product's certificate before that product has created it. And it can change a hostname in a sub-zone of its apex whose label ends with `-<product>-stg` or `-<product>` (for example `api-x-stg.foo-basefresh-stg.pebbletech.my`). API Gateway tag changes after creation are denied.
 
