@@ -259,16 +259,35 @@ Tearing down `shared` or `prod` takes an explicit step: every child there is pro
 Vercel makes a project's first deployment its production deployment when the deployment names no target, and a
 preview deploy names none (the CLI drops `--target=preview` before it calls the API). So when a pull request's preview
 ran before any release, it became production: public, with that preview's placeholder keys. `shared` now deploys a
-static page shipped in the package (`placeholder/index.html`, no build) to the project, naming no target either:
+static page shipped in the package to the project, naming no target either:
 
 - On a new project it is the first deployment, so it is production until the first release deploys over it. Previews
   stay previews. A product does nothing.
 - On a project that already has a production deployment (any project from 0.5 or earlier) it is one more preview,
   behind Vercel Authentication, and production is untouched.
 
-It is created once. Its inputs are ignored afterwards, so a new page in a later version, or the package installed at
-another path, makes no new deployment. Like every `shared` child it is protected and retained; removing it from the
-state deletes nothing in Vercel.
+The upload is `placeholder/index.html` and `placeholder/vercel.json`, placed under the project's `rootDirectory`, where
+Vercel reads `vercel.json`. That file overrides the project's settings for this deployment only: framework "Other", no
+install (`""`), a no-op build (`echo`), and the directory itself as the output, so the page builds as a static page
+whatever the project's commands are. The deployment sends no `projectSettings` of its own, so it changes no saved
+project setting. The provider uploads the two files from a copy it is given under the system's temporary directory.
+
+It is created once. Its inputs are ignored afterwards, so a new page in a later version, or another temporary
+directory, makes no new deployment. Like every `shared` child it is protected and retained; removing it from the state
+deletes nothing in Vercel.
+
+If the project is replaced (for example a new `teamId`), the placeholder's replacement stops the release at its
+protection, and a replacement would reuse the ignored file paths from the state, which may no longer exist. Right
+before that release, with `pulumi login` to the `shared` stack's backend, drop it from the state so the release creates
+it again from the current files:
+
+```sh
+pulumi stack --show-urns -s shared | grep 'deployment:Deployment'   # the placeholder's URN, ending in ::<name>-placeholder
+pulumi state unprotect '<urn>' -s shared
+pulumi state delete '<urn>' -s shared
+```
+
+The project itself is protected too, so its replacement needs the same unprotect.
 
 ### Verify a Vercel domain
 

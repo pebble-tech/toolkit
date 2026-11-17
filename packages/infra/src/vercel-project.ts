@@ -2,21 +2,49 @@ import * as cloudflare from '@pulumi/cloudflare';
 import * as pulumi from '@pulumi/pulumi';
 import * as vercel from '@pulumiverse/vercel';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { NamespaceError, OwnershipError } from './errors.js';
 import { assertNoSecretsInPlainText } from './secrets.js';
 import type { Stage } from './stage.js';
 
-/** The static page `shared` deploys once to a new project, shipped in the package (`placeholder/index.html`). */
-const PLACEHOLDER = fileURLToPath(new URL('../placeholder/index.html', import.meta.url));
+/**
+ * What `shared` deploys once to a new project, shipped in the package: a static page and the `vercel.json` that builds
+ * it as one (no install, a no-op build, framework "Other", the directory itself as the output).
+ */
+const PLACEHOLDER_FILES = ['index.html', 'vercel.json'] as const;
+const PLACEHOLDER_DIR = fileURLToPath(new URL('../placeholder/', import.meta.url));
 
-/** `{ <path>: '<size>~<sha1>' }`, the form `vercel.getFile` gives and `vercel.Deployment` reads. */
-function placeholderFiles(): Record<string, string> {
-  const content = readFileSync(PLACEHOLDER);
-  return { [PLACEHOLDER]: `${content.length}~${createHash('sha1').update(content).digest('hex')}` };
+const sha1 = (content: Buffer | string) => createHash('sha1').update(content).digest('hex');
+
+/**
+ * The placeholder laid out under the project's root directory, where Vercel builds and reads `vercel.json`, as
+ * `vercel.Deployment` takes it: `files` maps a local path to `<size>~<sha1>` (the form `vercel.getFile` gives), and the
+ * uploaded name is that path without `pathPrefix`. The provider reads the local files only when it creates the
+ * deployment, so they are written under the system's temporary directory.
+ */
+function placeholderUpload(rootDirectory: string): { files: Record<string, string>; pathPrefix: string } {
+  const root = posix.normalize(rootDirectory.replaceAll('\\', '/')).replace(/^(\.\/)+|^\/+|\/+$/g, '') || '.';
+  if (root === '..' || root.startsWith('../')) {
+    throw new OwnershipError(`rootDirectory "${rootDirectory}" leaves the project`);
+  }
+  const contents = PLACEHOLDER_FILES.map((file) => [file, readFileSync(join(PLACEHOLDER_DIR, file))] as const);
+  const pathPrefix = join(
+    tmpdir(),
+    'pebbletech-infra-placeholder',
+    sha1([root, ...contents.map(([, c]) => sha1(c))].join('\n'))
+  );
+  const files: Record<string, string> = {};
+  for (const [file, content] of contents) {
+    const path = join(pathPrefix, root === '.' ? '' : root, file);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, content);
+    files[path] = `${content.length}~${sha1(content)}`;
+  }
+  return { files, pathPrefix };
 }
 
 /**
@@ -149,18 +177,14 @@ export class VercelProject extends pulumi.ComponentResource {
       // preview otherwise (the Vercel CLI: "This is your project's first deployment, so it was assigned to
       // production"). So a new project's first deployment is this static page, never a pull request's preview; on a
       // project that already has a production deployment it is one more preview, behind Vercel Authentication, and
-      // production is untouched. No build runs. Created once: its inputs are ignored afterwards, so neither the
-      // package's path on another machine nor a new page makes a new deployment.
+      // production is untouched. Its own `vercel.json` turns the project's install and build off for this deployment
+      // only. No `projectSettings`: the provider drops empty commands from them, and Vercel saves a first deployment's
+      // `projectSettings` for the next ones. Created once: its inputs are ignored afterwards, so neither another
+      // temporary directory nor a new page makes a new deployment.
       new vercel.Deployment(
         `${name}-placeholder`,
-        {
-          projectId: project.id,
-          teamId,
-          files: placeholderFiles(),
-          pathPrefix: dirname(PLACEHOLDER),
-          projectSettings: { buildCommand: '', installCommand: '' },
-        },
-        child({ ignoreChanges: ['files', 'pathPrefix', 'projectSettings', 'production'] })
+        { projectId: project.id, teamId, ...placeholderUpload(settings.rootDirectory) },
+        child({ ignoreChanges: ['files', 'pathPrefix', 'production'] })
       );
       this.projectId = project.id;
       this.bypassSecret = pulumi.secret(bypass.secret);

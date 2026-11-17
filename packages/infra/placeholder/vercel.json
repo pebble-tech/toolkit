@@ -1,0 +1,6 @@
+{
+  "framework": null,
+  "installCommand": "",
+  "buildCommand": "echo 'Placeholder page: nothing to build.'",
+  "outputDirectory": "."
+}

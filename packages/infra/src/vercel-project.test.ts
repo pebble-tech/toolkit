@@ -1,6 +1,6 @@
 import * as pulumi from '@pulumi/pulumi';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
@@ -41,6 +41,12 @@ const stageArgs = (stage: string) => ({
   },
 });
 
+/** A file shipped in `placeholder/`, or nothing when the package ships none of that name. */
+const shipped = (file: string) => {
+  const path = fileURLToPath(new URL(`../placeholder/${file}`, import.meta.url));
+  return existsSync(path) ? readFileSync(path) : Buffer.alloc(0);
+};
+
 const ofType = (resources: { type: string }[], type: string) => resources.filter((r) => r.type === type) as any[];
 
 describe('VercelProject on the shared stack', () => {
@@ -55,28 +61,50 @@ describe('VercelProject on the shared stack', () => {
     ]);
   });
 
-  test("deploys the package's static page to the new project, naming no target, with no build", async () => {
+  test("uploads the package's page and its vercel.json under the project's root directory, with no projectSettings", async () => {
     const { resources } = await vercelIn('shared', { project: PROJECT });
-    const page = fileURLToPath(new URL('../placeholder/index.html', import.meta.url));
-    const content = readFileSync(page);
-    const sha1 = createHash('sha1').update(content).digest('hex');
-    // No `production` input: Vercel makes a target-less deployment production only on a project that has none, so an
-    // existing project's production deployment is never replaced by this page.
-    expect(ofType(resources, 'vercel:index/deployment:Deployment').map((r) => r.inputs)).toEqual([
-      {
-        projectId: 'web-id',
-        files: { [page]: `${content.length}~${sha1}` },
-        pathPrefix: fileURLToPath(new URL('../placeholder', import.meta.url)),
-        projectSettings: { buildCommand: '', installCommand: '' },
-      },
+    const [placeholder] = ofType(resources, 'vercel:index/deployment:Deployment');
+    const entry = (file: string) => `${shipped(file).length}~${createHash('sha1').update(shipped(file)).digest('hex')}`;
+    const { files, pathPrefix, ...rest } = placeholder?.inputs ?? {};
+    // What Vercel receives: each file's name once the provider strips `pathPrefix`, its size and sha1, and the local
+    // copy the provider uploads from. No `projectSettings` and no `production`: the provider would drop empty commands,
+    // Vercel saves a first deployment's projectSettings for the next ones, and a target-less deployment is production
+    // only on a project that has none.
+    const uploaded = Object.entries((files ?? {}) as Record<string, string>).map(([path, sizeSha]) => [
+      path.slice(String(pathPrefix).length + 1),
+      sizeSha,
+      readFileSync(path).equals(shipped(path.endsWith('vercel.json') ? 'vercel.json' : 'index.html')),
     ]);
+    expect([rest, uploaded.sort()]).toEqual([
+      { projectId: 'web-id' },
+      [
+        ['apps/web/index.html', entry('index.html'), true],
+        ['apps/web/vercel.json', entry('vercel.json'), true],
+      ],
+    ]);
+  });
+
+  test('the shipped vercel.json skips the install, runs a no-op build and serves the page as is', async () => {
+    const config = JSON.parse(shipped('vercel.json').toString('utf8') || '{}');
+    expect(config).toEqual({
+      framework: null,
+      installCommand: '',
+      buildCommand: "echo 'Placeholder page: nothing to build.'",
+      outputDirectory: '.',
+    });
+  });
+
+  test('refuses a root directory outside the project', async () => {
+    await expect(vercelIn('shared', { project: { ...PROJECT, rootDirectory: '../elsewhere' } })).rejects.toThrow(
+      OwnershipError
+    );
   });
 
   test('the placeholder is created once: every input that would replace it is ignored, and it is protected', async () => {
     const { resources } = await vercelIn('shared', { project: PROJECT });
     const placeholders = ofType(resources, 'vercel:index/deployment:Deployment');
     expect(placeholders.map((r) => [r.ignoreChanges, r.protect, r.retainOnDelete])).toEqual([
-      [['files', 'pathPrefix', 'projectSettings', 'production'], true, true],
+      [['files', 'pathPrefix', 'production'], true, true],
     ]);
   });
 
