@@ -1,6 +1,6 @@
 import * as pulumi from '@pulumi/pulumi';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
@@ -92,6 +92,17 @@ describe('VercelProject on the shared stack', () => {
       buildCommand: "echo 'Placeholder page: nothing to build.'",
       outputDirectory: '.',
     });
+  });
+
+  test('writes each local copy once: a later evaluation leaves the file the provider may be reading untouched', async () => {
+    // Every evaluation on the machine (another product's, a test's) names the same paths. Rewriting one in place
+    // would let a provider reading it for an upload see it empty; it is written once, by a rename, and then left alone.
+    const first = await vercelIn('shared', { project: PROJECT });
+    const paths = Object.keys(ofType(first.resources, 'vercel:index/deployment:Deployment')[0]?.inputs.files ?? {});
+    const before = paths.map((path) => [statSync(path).ino, statSync(path).mtimeMs]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vercelIn('shared', { project: PROJECT });
+    expect(paths.map((path) => [statSync(path).ino, statSync(path).mtimeMs])).toEqual(before);
   });
 
   test('refuses a root directory outside the project', async () => {

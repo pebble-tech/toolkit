@@ -1,8 +1,8 @@
 import * as cloudflare from '@pulumi/cloudflare';
 import * as pulumi from '@pulumi/pulumi';
 import * as vercel from '@pulumiverse/vercel';
-import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,7 +24,9 @@ const sha1 = (content: Buffer | string) => createHash('sha1').update(content).di
  * The placeholder laid out under the project's root directory, where Vercel builds and reads `vercel.json`, as
  * `vercel.Deployment` takes it: `files` maps a local path to `<size>~<sha1>` (the form `vercel.getFile` gives), and the
  * uploaded name is that path without `pathPrefix`. The provider reads the local files only when it creates the
- * deployment, so they are written under the system's temporary directory.
+ * deployment, so they are written under the system's temporary directory, at a path named by their content. Every
+ * evaluation on the machine (another product's, a test's) uses the same path, so a file is written once, to a sibling
+ * and renamed into place: a reader never sees it part-written.
  */
 function placeholderUpload(rootDirectory: string): { files: Record<string, string>; pathPrefix: string } {
   const root = posix.normalize(rootDirectory.replaceAll('\\', '/')).replace(/^(\.\/)+|^\/+|\/+$/g, '') || '.';
@@ -41,7 +43,11 @@ function placeholderUpload(rootDirectory: string): { files: Record<string, strin
   for (const [file, content] of contents) {
     const path = join(pathPrefix, root === '.' ? '' : root, file);
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, content);
+    if (!existsSync(path) || !readFileSync(path).equals(content)) {
+      const partial = `${path}.${process.pid}.${randomBytes(6).toString('hex')}.partial`;
+      writeFileSync(partial, content);
+      renameSync(partial, path);
+    }
     files[path] = `${content.length}~${sha1(content)}`;
   }
   return { files, pathPrefix };
