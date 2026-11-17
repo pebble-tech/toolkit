@@ -274,7 +274,8 @@ pulumi state unprotect '<urn>' -s prod
 pulumi state delete '<urn>' -s prod
 ```
 
-Then release the change. Its preview shows nothing for the resource. Last, delete it where it lives, since Pulumi
+`pulumi state delete` refuses a resource that another one depends on (the domain, for example, which the CNAME
+depends on): remove the dependent first, or pass `--target-dependents`. Then release the change. Its preview shows nothing for the resource. Last, delete it where it lives, since Pulumi
 never did. For an env var, name the project, so the command cannot act on whatever project the directory is linked to:
 
 ```sh
@@ -284,7 +285,8 @@ vercel env rm PLUNK_SECRET_KEY production --yes --scope <team id> --project <pro
 `<product>-web` is the project the `shared` stack created (its `project.name`, if it set one); `--project` takes the
 project id too, which is the `shared` stack's `VercelProject.projectId` and is shown in Vercel under the project's
 Settings, General. `<team id>` is the `VERCEL_TEAM_ID` the workflows use. A new deployment no longer sees the variable;
-the running one keeps what it was built with. If a release that still declares the resource runs between the state
+the running one, which the release built before the variable was removed, keeps it until production deploys again, so
+publish the next release (or redeploy production) to stop it. If a release that still declares the resource runs between the state
 delete and that change, it creates the resource again or fails on the one that exists; repeat the steps. On staging and
 previews nothing is protected, so the change alone deletes it. [Remove an applied prod alarm](#remove-an-applied-prod-alarm)
 is the same steps for the errors alarm.
