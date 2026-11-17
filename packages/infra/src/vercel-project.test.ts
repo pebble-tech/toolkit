@@ -2,6 +2,7 @@ import * as pulumi from '@pulumi/pulumi';
 import { describe, expect, test } from 'vitest';
 
 import {
+  type NodeVersion,
   NamespaceError,
   OwnershipError,
   PlainTextSecretError,
@@ -56,9 +57,32 @@ describe('VercelProject on the shared stack', () => {
     expect(project.inputs).toEqual({
       name: 'basefresh-web',
       ...PROJECT,
+      nodeVersion: '24.x',
       publicSource: false,
       vercelAuthentication: { deploymentType: 'only_preview_deployments' },
     });
+  });
+
+  test('pins the Node version the product declares, or the toolkit default', async () => {
+    expect.assertions(2);
+    const pinned = await vercelIn('shared', { project: { ...PROJECT, nodeVersion: '22.x' } });
+    expect(ofType(pinned.resources, 'vercel:index/project:Project')[0].inputs.nodeVersion).toBe('22.x');
+    const unset = await vercelIn('shared', { project: PROJECT });
+    expect(ofType(unset.resources, 'vercel:index/project:Project')[0].inputs.nodeVersion).toBe('24.x');
+  });
+
+  test('types the Node version as the provider accepts it, and passes each one through', async () => {
+    const accepted: NodeVersion[] = ['18.x', '20.x', '22.x', '24.x'];
+    // @ts-expect-error provider 5.21.1 refuses 26.x
+    const newer: NodeVersion = '26.x';
+    // @ts-expect-error a bare major is not Vercel's spelling
+    const bare: NodeVersion = '24';
+    expect.assertions(accepted.length + 1);
+    expect([newer, bare]).toEqual(['26.x', '24']);
+    for (const nodeVersion of accepted) {
+      const { resources } = await vercelIn('shared', { project: { ...PROJECT, nodeVersion } });
+      expect(ofType(resources, 'vercel:index/project:Project')[0].inputs.nodeVersion).toBe(nodeVersion);
+    }
   });
 
   test('the bypass secret is a secret output and outputs are registered', async () => {

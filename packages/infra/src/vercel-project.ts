@@ -12,6 +12,9 @@ import type { Stage } from './stage.js';
  */
 export type PreviewProtection = 'only_preview_deployments' | 'standard_protection_new' | 'all_deployments';
 
+/** The Node.js versions `@pulumiverse/vercel` 5.21.1 accepts for a project (its `node_version` validator). */
+export type NodeVersion = '18.x' | '20.x' | '22.x' | '24.x';
+
 /** Project settings, owned by the `shared` stack. */
 export interface VercelProjectSettings {
   /** Defaults to `<product>-web`; must start with `<product>-`. */
@@ -21,6 +24,11 @@ export interface VercelProjectSettings {
   installCommand?: string;
   devCommand?: string;
   outputDirectory?: string;
+  /**
+   * Node.js for the build and the functions. Default `24.x`, the toolkit's own Node. Without it Vercel gives a new
+   * project its own default, which need not be the Node the product declares.
+   */
+  nodeVersion?: NodeVersion;
   /** Custom environments to create, by name. Default `['staging']`. */
   customEnvironments?: string[];
   /** Default `only_preview_deployments`: previews need a Vercel login (or the bypass secret). */
@@ -105,6 +113,7 @@ export class VercelProject extends pulumi.ComponentResource {
           installCommand: settings.installCommand,
           devCommand: settings.devCommand,
           outputDirectory: settings.outputDirectory,
+          nodeVersion: settings.nodeVersion ?? '24.x',
           publicSource: false,
           vercelAuthentication: { deploymentType: settings.protection ?? 'only_preview_deployments' },
         },

@@ -30,6 +30,7 @@ export {
 export { Worker, type WorkerArgs, type WorkerBucket } from './worker.js';
 export {
   VercelProject,
+  type NodeVersion,
   type PreviewProtection,
   type VercelProjectArgs,
   type VercelProjectSettings,

@@ -21,6 +21,7 @@ const ENUMS: Record<string, Record<string, readonly string[]>> = {
       'only_preview_deployments',
       'none',
     ],
+    nodeVersion: ['18.x', '20.x', '22.x', '24.x'], // validated in source (resource_project.go `node_version` OneOf), no plugin run
   },
   'vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable': {
     'targets[]': ['production', 'preview', 'development'], // validated
