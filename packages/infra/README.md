@@ -6,7 +6,7 @@ pinning a version; the guardrails are defaults it cannot turn off.
 | Component | Creates | Refuses |
 |---|---|---|
 | `Stage` | nothing; parses the stack name and names, tags and protects everything else | a product id that is not one DNS label, starts with `pebble`, or is `pr`/`staging`/`prod`/`shared`; a kind that is not one DNS label; any stack other than `pr-<n>`, `staging`, `prod`, `shared` |
-| `VercelProject` | `shared`: the project (no Git connection, private source, Vercel Authentication on previews, Node `24.x` unless `nodeVersion` names another), custom environments, the protection bypass. `staging`/`prod`: env vars (secrets `sensitive`), the domain bound to the stage's environment (replaced delete-first, because a hostname is on one project: a new `projectId` leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname), an unproxied Cloudflare CNAME (not the `_vercel` TXT record Vercel may ask for: [Verify a Vercel domain](#verify-a-vercel-domain)) | previews; the project outside `shared`; env vars or domains on `shared`; a secret-looking name in `vars` |
+| `VercelProject` | `shared`: the project (no Git connection, private source, Vercel Authentication on previews, Node `24.x` unless `nodeVersion` names another), custom environments, the protection bypass, and a placeholder deployment so a pull request's preview is never the project's first deployment ([First deployment](#first-deployment)). `staging`/`prod`: env vars (secrets `sensitive`), the domain bound to the stage's environment (replaced delete-first, because a hostname is on one project: a new `projectId` leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname), an unproxied Cloudflare CNAME (not the `_vercel` TXT record Vercel may ask for: [Verify a Vercel domain](#verify-a-vercel-domain)) | previews; the project outside `shared`; env vars or domains on `shared`; a secret-looking name in `vars` |
 | `Database` | an explicit Postgres provider on port 5432 with `sslmode=verify-full`, the owner login role, the database owned by it, the owner's grant to `pebble_operators`, the `public` revoke, and on staging/prod the runtime role (made, unless `runtime` names one) and its grants; `directUrl` (owner) and `pooledUrl` (runtime) as secrets. See [Database](#database) | any `owner*` argument; `runtime` on a preview; a runtime role that is the owner or the operators group; a database or owner name longer than 63 characters. The names are always derived from `stage.databaseName()` |
 | `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, a CloudWatch alarm on the function's errors (see [Errors alarm](#errors-alarm); `alarm: false` opts out), HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; a boundary other than the stage's own `<product>-<env>-boundary` in the current account (a typed `PermissionsBoundaryArn` from `Stage` or `DeployRole`, checked when it resolves, so `pulumi preview` fails). Timeouts above 29 s are clamped |
 | `Worker` | Workers script from a prebuilt module with Workers observability on (`headSamplingRate`, 0 to 1, default 1: every request), R2 bucket `<product>-<env>-<kind>` (on prod, `adoptExisting` imports that same name instead of creating it), plain and secret bindings, custom domain (replaced delete-first, because a hostname has one custom domain: a new script name leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname) | a secret-looking name in `vars` unless listed in `plainTextAllowed`; `adoptExisting` outside prod |
@@ -250,6 +250,25 @@ Tearing down `shared` or `prod` takes an explicit step: every child there is pro
   Vercel's saved value differs, the preview shows an update of the project; nothing is replaced. Running deployments
   keep their Node: the setting takes effect with the next deployment (the provider: "A new Deployment is required for
   your changes to take effect"). A product that pinned Node with a transformation can drop it.
+- `shared`'s next `up` adds `web-placeholder` (`vercel:index/deployment:Deployment`, named after the component): one
+  preview deployment of the placeholder page, since the project already has a production deployment
+  ([First deployment](#first-deployment)). Tests that list `shared`'s resources list it too.
+
+### First deployment
+
+Vercel makes a project's first deployment its production deployment when the deployment names no target, and a
+preview deploy names none (the CLI drops `--target=preview` before it calls the API). So when a pull request's preview
+ran before any release, it became production: public, with that preview's placeholder keys. `shared` now deploys a
+static page shipped in the package (`placeholder/index.html`, no build) to the project, naming no target either:
+
+- On a new project it is the first deployment, so it is production until the first release deploys over it. Previews
+  stay previews. A product does nothing.
+- On a project that already has a production deployment (any project from 0.5 or earlier) it is one more preview,
+  behind Vercel Authentication, and production is untouched.
+
+It is created once. Its inputs are ignored afterwards, so a new page in a later version, or the package installed at
+another path, makes no new deployment. Like every `shared` child it is protected and retained; removing it from the
+state deletes nothing in Vercel.
 
 ### Verify a Vercel domain
 

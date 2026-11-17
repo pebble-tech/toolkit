@@ -34,7 +34,8 @@
     "pebble-infra": "./dist/bin.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "placeholder"
   ],
   "scripts": {
     "build": "rm -rf dist && tsc --project tsconfig.build.json",

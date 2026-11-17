@@ -1,10 +1,23 @@
 import * as cloudflare from '@pulumi/cloudflare';
 import * as pulumi from '@pulumi/pulumi';
 import * as vercel from '@pulumiverse/vercel';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { NamespaceError, OwnershipError } from './errors.js';
 import { assertNoSecretsInPlainText } from './secrets.js';
 import type { Stage } from './stage.js';
+
+/** The static page `shared` deploys once to a new project, shipped in the package (`placeholder/index.html`). */
+const PLACEHOLDER = fileURLToPath(new URL('../placeholder/index.html', import.meta.url));
+
+/** `{ <path>: '<size>~<sha1>' }`, the form `vercel.getFile` gives and `vercel.Deployment` reads. */
+function placeholderFiles(): Record<string, string> {
+  const content = readFileSync(PLACEHOLDER);
+  return { [PLACEHOLDER]: `${content.length}~${createHash('sha1').update(content).digest('hex')}` };
+}
 
 /**
  * Which deployments need a Vercel login, spelled as the provider validates `vercel_authentication.deployment_type`
@@ -131,6 +144,23 @@ export class VercelProject extends pulumi.ComponentResource {
         `${name}-bypass`,
         { projectId: project.id, teamId, note: 'CI smoke tests and preview checks' },
         child()
+      );
+      // A deployment that names no target is the project's production deployment when the project has none yet, and a
+      // preview otherwise (the Vercel CLI: "This is your project's first deployment, so it was assigned to
+      // production"). So a new project's first deployment is this static page, never a pull request's preview; on a
+      // project that already has a production deployment it is one more preview, behind Vercel Authentication, and
+      // production is untouched. No build runs. Created once: its inputs are ignored afterwards, so neither the
+      // package's path on another machine nor a new page makes a new deployment.
+      new vercel.Deployment(
+        `${name}-placeholder`,
+        {
+          projectId: project.id,
+          teamId,
+          files: placeholderFiles(),
+          pathPrefix: dirname(PLACEHOLDER),
+          projectSettings: { buildCommand: '', installCommand: '' },
+        },
+        child({ ignoreChanges: ['files', 'pathPrefix', 'projectSettings', 'production'] })
       );
       this.projectId = project.id;
       this.bypassSecret = pulumi.secret(bypass.secret);

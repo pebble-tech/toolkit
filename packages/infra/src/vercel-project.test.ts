@@ -1,4 +1,7 @@
 import * as pulumi from '@pulumi/pulumi';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 import {
@@ -41,14 +44,48 @@ const stageArgs = (stage: string) => ({
 const ofType = (resources: { type: string }[], type: string) => resources.filter((r) => r.type === type) as any[];
 
 describe('VercelProject on the shared stack', () => {
-  test('owns the project, a staging custom environment and the protection bypass; nothing else', async () => {
+  test('owns the project, a staging custom environment, the protection bypass and the placeholder; nothing else', async () => {
     const { resources } = await vercelIn('shared', { project: PROJECT });
     const children = resources.filter((r) => r.custom);
     expect(children.map((r) => `${r.type} ${r.name}`).sort()).toEqual([
       'vercel:index/customEnvironment:CustomEnvironment web-staging',
+      'vercel:index/deployment:Deployment web-placeholder',
       'vercel:index/project:Project web',
       'vercel:index/projectProtectionBypass:ProjectProtectionBypass web-bypass',
     ]);
+  });
+
+  test("deploys the package's static page to the new project, naming no target, with no build", async () => {
+    const { resources } = await vercelIn('shared', { project: PROJECT });
+    const page = fileURLToPath(new URL('../placeholder/index.html', import.meta.url));
+    const content = readFileSync(page);
+    const sha1 = createHash('sha1').update(content).digest('hex');
+    // No `production` input: Vercel makes a target-less deployment production only on a project that has none, so an
+    // existing project's production deployment is never replaced by this page.
+    expect(ofType(resources, 'vercel:index/deployment:Deployment').map((r) => r.inputs)).toEqual([
+      {
+        projectId: 'web-id',
+        files: { [page]: `${content.length}~${sha1}` },
+        pathPrefix: fileURLToPath(new URL('../placeholder', import.meta.url)),
+        projectSettings: { buildCommand: '', installCommand: '' },
+      },
+    ]);
+  });
+
+  test('the placeholder is created once: every input that would replace it is ignored, and it is protected', async () => {
+    const { resources } = await vercelIn('shared', { project: PROJECT });
+    const placeholders = ofType(resources, 'vercel:index/deployment:Deployment');
+    expect(placeholders.map((r) => [r.ignoreChanges, r.protect, r.retainOnDelete])).toEqual([
+      [['files', 'pathPrefix', 'projectSettings', 'production'], true, true],
+    ]);
+  });
+
+  test('staging and prod deploy no placeholder', async () => {
+    expect.assertions(2);
+    for (const stack of ['staging', 'prod']) {
+      const { resources } = await vercelIn(stack, stageArgs(stack));
+      expect(ofType(resources, 'vercel:index/deployment:Deployment')).toEqual([]);
+    }
   });
 
   test('the project has no Git connection, private source and Vercel Authentication on previews', async () => {

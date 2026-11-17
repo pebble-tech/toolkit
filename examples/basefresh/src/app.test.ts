@@ -109,12 +109,13 @@ const RUNTIME = (env: string, suffix: string) => {
 };
 
 describe('basefresh program', () => {
-  test('shared owns the Vercel project, its staging environment and the bypass, nothing else', async () => {
+  test('shared owns the Vercel project, its staging environment, the bypass and the placeholder, nothing else', async () => {
     const { resources, result } = await run('shared');
     expect(summary(resources)).toEqual([
       'pebbletech:index:Stage stage',
       'pebbletech:index:VercelProject web',
       'vercel:index/customEnvironment:CustomEnvironment web-staging staging',
+      'vercel:index/deployment:Deployment web-placeholder',
       'vercel:index/project:Project web basefresh-web',
       'vercel:index/projectProtectionBypass:ProjectProtectionBypass web-bypass',
     ]);
