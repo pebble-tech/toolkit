@@ -1,6 +1,8 @@
 import * as pulumi from '@pulumi/pulumi';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
@@ -75,12 +77,15 @@ describe('VercelProject on the shared stack', () => {
       sizeSha,
       readFileSync(path).equals(shipped(path.endsWith('vercel.json') ? 'vercel.json' : 'index.html')),
     ]);
-    expect([rest, uploaded.sort()]).toEqual([
+    // Under a directory of this user's own: another user's under a shared temporary directory is not writable.
+    const own = join(tmpdir(), `pebbletech-infra-placeholder-${process.getuid?.() ?? userInfo().username}`);
+    expect([rest, uploaded.sort(), String(pathPrefix).startsWith(`${own}/`)]).toEqual([
       { projectId: 'web-id' },
       [
         ['apps/web/index.html', entry('index.html'), true],
         ['apps/web/vercel.json', entry('vercel.json'), true],
       ],
+      true,
     ]);
   });
 

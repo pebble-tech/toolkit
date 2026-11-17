@@ -3,7 +3,7 @@ import * as pulumi from '@pulumi/pulumi';
 import * as vercel from '@pulumiverse/vercel';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,9 +34,10 @@ function placeholderUpload(rootDirectory: string): { files: Record<string, strin
     throw new OwnershipError(`rootDirectory "${rootDirectory}" leaves the project`);
   }
   const contents = PLACEHOLDER_FILES.map((file) => [file, readFileSync(join(PLACEHOLDER_DIR, file))] as const);
+  // One directory per user: another user's directory under a shared temporary directory is not writable.
   const pathPrefix = join(
     tmpdir(),
-    'pebbletech-infra-placeholder',
+    `pebbletech-infra-placeholder-${process.getuid?.() ?? userInfo().username}`,
     sha1([root, ...contents.map(([, c]) => sha1(c))].join('\n'))
   );
   const files: Record<string, string> = {};
