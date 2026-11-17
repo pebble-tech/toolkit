@@ -269,8 +269,11 @@ static page shipped in the package to the project, naming no target either:
 The upload is `placeholder/index.html` and `placeholder/vercel.json`, placed under the project's `rootDirectory`, where
 Vercel reads `vercel.json`. That file overrides the project's settings for this deployment only: framework "Other", no
 install (`""`), a no-op build (`echo`), and the directory itself as the output, so the page builds as a static page
-whatever the project's commands are. The deployment sends no `projectSettings` of its own, so it changes no saved
-project setting. The provider uploads the two files from a copy it is given under the system's temporary directory.
+whatever the project's commands are. The deployment sends no build, install, framework, output or root-directory
+override; the only project setting the provider sends with it is `sourceFilesOutsideRootDirectory: true`, which is the
+provider's default for a project. Vercel saves a first deployment's project settings for later deployments, so after
+the first `shared` up on this version, check the project's Build and Deployment settings in Vercel. The provider
+uploads the two files from a copy it is given under the system's temporary directory.
 
 It is created once. Its inputs are ignored afterwards, so a new page in a later version, or another temporary
 directory, makes no new deployment. Like every `shared` child it is protected and retained; removing it from the state
