@@ -22,13 +22,15 @@ function packedFiles(): string[] {
 
 // prepack rebuilds dist/ with tsc first, which can pass vitest's 5 s default on a loaded machine.
 test(
-  'the packed tarball holds the compiled modules, README, LICENSE and package.json, and no tests',
+  'the packed tarball holds the compiled modules, the placeholder page and its vercel.json, README, LICENSE and package.json, and no tests',
   { timeout: 60_000 },
   () => {
     const modules = readdirSync(join(packageDir, 'src'))
       .filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))
       .flatMap((file) => [`dist/${file.replace(/\.ts$/, '.d.ts')}`, `dist/${file.replace(/\.ts$/, '.js')}`]);
-    expect(packedFiles()).toEqual(['LICENSE', 'README.md', 'package.json', ...modules].sort());
+    expect(packedFiles()).toEqual(
+      ['LICENSE', 'README.md', 'package.json', 'placeholder/index.html', 'placeholder/vercel.json', ...modules].sort()
+    );
   }
 );
 

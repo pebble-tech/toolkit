@@ -1,4 +1,9 @@
 import * as pulumi from '@pulumi/pulumi';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 import {
@@ -38,17 +43,93 @@ const stageArgs = (stage: string) => ({
   },
 });
 
+/** A file shipped in `placeholder/`, or nothing when the package ships none of that name. */
+const shipped = (file: string) => {
+  const path = fileURLToPath(new URL(`../placeholder/${file}`, import.meta.url));
+  return existsSync(path) ? readFileSync(path) : Buffer.alloc(0);
+};
+
 const ofType = (resources: { type: string }[], type: string) => resources.filter((r) => r.type === type) as any[];
 
 describe('VercelProject on the shared stack', () => {
-  test('owns the project, a staging custom environment and the protection bypass; nothing else', async () => {
+  test('owns the project, a staging custom environment, the protection bypass and the placeholder; nothing else', async () => {
     const { resources } = await vercelIn('shared', { project: PROJECT });
     const children = resources.filter((r) => r.custom);
     expect(children.map((r) => `${r.type} ${r.name}`).sort()).toEqual([
       'vercel:index/customEnvironment:CustomEnvironment web-staging',
+      'vercel:index/deployment:Deployment web-placeholder',
       'vercel:index/project:Project web',
       'vercel:index/projectProtectionBypass:ProjectProtectionBypass web-bypass',
     ]);
+  });
+
+  test("uploads the package's page and its vercel.json under the project's root directory, with no projectSettings", async () => {
+    const { resources } = await vercelIn('shared', { project: PROJECT });
+    const [placeholder] = ofType(resources, 'vercel:index/deployment:Deployment');
+    const entry = (file: string) => `${shipped(file).length}~${createHash('sha1').update(shipped(file)).digest('hex')}`;
+    const { files, pathPrefix, ...rest } = placeholder?.inputs ?? {};
+    // What Vercel receives: each file's name once the provider strips `pathPrefix`, its size and sha1, and the local
+    // copy the provider uploads from. No `projectSettings` and no `production`: the provider would drop empty commands,
+    // Vercel saves a first deployment's projectSettings for the next ones, and a target-less deployment is production
+    // only on a project that has none.
+    const uploaded = Object.entries((files ?? {}) as Record<string, string>).map(([path, sizeSha]) => [
+      path.slice(String(pathPrefix).length + 1),
+      sizeSha,
+      readFileSync(path).equals(shipped(path.endsWith('vercel.json') ? 'vercel.json' : 'index.html')),
+    ]);
+    // Under a directory of this user's own: another user's under a shared temporary directory is not writable.
+    const own = join(tmpdir(), `pebbletech-infra-placeholder-${process.getuid?.() ?? userInfo().username}`);
+    expect([rest, uploaded.sort(), String(pathPrefix).startsWith(`${own}/`)]).toEqual([
+      { projectId: 'web-id' },
+      [
+        ['apps/web/index.html', entry('index.html'), true],
+        ['apps/web/vercel.json', entry('vercel.json'), true],
+      ],
+      true,
+    ]);
+  });
+
+  test('the shipped vercel.json skips the install, runs a no-op build and serves the page as is', async () => {
+    const config = JSON.parse(shipped('vercel.json').toString('utf8') || '{}');
+    expect(config).toEqual({
+      framework: null,
+      installCommand: '',
+      buildCommand: "echo 'Placeholder page: nothing to build.'",
+      outputDirectory: '.',
+    });
+  });
+
+  test('writes each local copy once: a later evaluation leaves the file the provider may be reading untouched', async () => {
+    // Every evaluation on the machine (another product's, a test's) names the same paths. Rewriting one in place
+    // would let a provider reading it for an upload see it empty; it is written once, by a rename, and then left alone.
+    const first = await vercelIn('shared', { project: PROJECT });
+    const paths = Object.keys(ofType(first.resources, 'vercel:index/deployment:Deployment')[0]?.inputs.files ?? {});
+    const before = paths.map((path) => [statSync(path).ino, statSync(path).mtimeMs]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vercelIn('shared', { project: PROJECT });
+    expect(paths.map((path) => [statSync(path).ino, statSync(path).mtimeMs])).toEqual(before);
+  });
+
+  test('refuses a root directory outside the project', async () => {
+    await expect(vercelIn('shared', { project: { ...PROJECT, rootDirectory: '../elsewhere' } })).rejects.toThrow(
+      OwnershipError
+    );
+  });
+
+  test('the placeholder is created once: every input that would replace it is ignored, and it is protected', async () => {
+    const { resources } = await vercelIn('shared', { project: PROJECT });
+    const placeholders = ofType(resources, 'vercel:index/deployment:Deployment');
+    expect(placeholders.map((r) => [r.ignoreChanges, r.protect, r.retainOnDelete])).toEqual([
+      [['files', 'pathPrefix', 'production'], true, true],
+    ]);
+  });
+
+  test('staging and prod deploy no placeholder', async () => {
+    expect.assertions(2);
+    for (const stack of ['staging', 'prod']) {
+      const { resources } = await vercelIn(stack, stageArgs(stack));
+      expect(ofType(resources, 'vercel:index/deployment:Deployment')).toEqual([]);
+    }
   });
 
   test('the project has no Git connection, private source and Vercel Authentication on previews', async () => {
