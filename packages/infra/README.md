@@ -6,7 +6,7 @@ pinning a version; the guardrails are defaults it cannot turn off.
 | Component | Creates | Refuses |
 |---|---|---|
 | `Stage` | nothing; parses the stack name and names, tags and protects everything else | a product id that is not one DNS label, starts with `pebble`, or is `pr`/`staging`/`prod`/`shared`; a kind that is not one DNS label; any stack other than `pr-<n>`, `staging`, `prod`, `shared` |
-| `VercelProject` | `shared`: the project (no Git connection, private source, Vercel Authentication on previews, Node `24.x` unless `nodeVersion` names another), custom environments, the protection bypass, and a placeholder deployment so a pull request's preview is never the project's first deployment ([First deployment](#first-deployment)). `staging`/`prod`: env vars (secrets `sensitive`), the domain bound to the stage's environment (replaced delete-first, because a hostname is on one project: a new `projectId` leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname), an unproxied Cloudflare CNAME (not the `_vercel` TXT record Vercel may ask for: [Verify a Vercel domain](#verify-a-vercel-domain)) | previews; the project outside `shared`; env vars or domains on `shared`; a secret-looking name in `vars` |
+| `VercelProject` | `shared`: the project (no Git connection, private source, Vercel Authentication on previews, Node `24.x` unless `nodeVersion` names another, Skew Protection at 12 hours unless `skewProtection` names another age or `false` ([Skew Protection](#skew-protection))), custom environments, the protection bypass, and a placeholder deployment so a pull request's preview is never the project's first deployment ([First deployment](#first-deployment)). `staging`/`prod`: env vars (secrets `sensitive`), the domain bound to the stage's environment (replaced delete-first, because a hostname is on one project: a new `projectId` leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname), an unproxied Cloudflare CNAME (not the `_vercel` TXT record Vercel may ask for: [Verify a Vercel domain](#verify-a-vercel-domain)) | previews; the project outside `shared`; env vars or domains on `shared`; a secret-looking name in `vars` |
 | `Database` | an explicit Postgres provider on port 5432 with `sslmode=verify-full`, the owner login role, the database owned by it, the owner's grant to `pebble_operators`, the `public` revoke, and on staging/prod the runtime role (made, unless `runtime` names one) and its grants; `directUrl` (owner) and `pooledUrl` (runtime) as secrets. See [Database](#database) | any `owner*` argument; `runtime` on a preview; a runtime role that is the owner or the operators group; a database or owner name longer than 63 characters. The names are always derived from `stage.databaseName()` |
 | `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, a CloudWatch alarm on the function's errors (see [Errors alarm](#errors-alarm); `alarm: false` opts out), HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; a boundary other than the stage's own `<product>-<env>-boundary` in the current account (a typed `PermissionsBoundaryArn` from `Stage` or `DeployRole`, checked when it resolves, so `pulumi preview` fails). Timeouts above 29 s are clamped |
 | `Worker` | Workers script from a prebuilt module with Workers observability on (`headSamplingRate`, 0 to 1, default 1: every request), R2 bucket `<product>-<env>-<kind>` (on prod, `adoptExisting` imports that same name instead of creating it), plain and secret bindings, custom domain (replaced delete-first, because a hostname has one custom domain: a new script name leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname) | a secret-looking name in `vars` unless listed in `plainTextAllowed`; `adoptExisting` outside prod |
@@ -254,6 +254,13 @@ Tearing down `shared` or `prod` takes an explicit step: every child there is pro
   preview deployment of the placeholder page, since the project already has a production deployment
   ([First deployment](#first-deployment)). Tests that list `shared`'s resources list it too.
 
+### Upgrade from 0.6: Skew Protection
+
+- `shared`'s next `up` turns Skew Protection on for an existing project too, with a maximum age of 12 hours, or the age
+  `project.skewProtection` names. The preview shows an update of the project; nothing is replaced. A product whose
+  build does not carry a deployment id yet gets no pinning from it ([Skew Protection](#skew-protection)): set the id
+  first, or pass `skewProtection: false` until it does.
+
 ### First deployment
 
 Vercel makes a project's first deployment its production deployment when the deployment names no target, and a
@@ -291,6 +298,41 @@ pulumi state delete '<urn>' -s shared
 ```
 
 The project itself is protected too, so its replacement needs the same unprotect.
+
+### Skew Protection
+
+A browser tab opened before a deploy keeps running the old code. Without Skew Protection its requests reach the new
+deployment, so any change to what the client and server send each other can break it until the user reloads. With it,
+Vercel routes the tab's requests (assets, data fetches, server functions) to the deployment that served its page, as
+long as that deployment is younger than the maximum age. A full page load always gets the latest deployment.
+
+`project.skewProtection` sets the maximum age, typed `SkewProtectionMaxAge`: `'30 minutes'`, `'4 hours'`, `'12 hours'`,
+`'1 day'` or `'7 days'`, the values `@pulumiverse/vercel` 5.21.1 accepts. The default is `'12 hours'`, Vercel's default
+on Pro, which includes Skew Protection at no extra charge. Vercel allows a maximum age up to the project's deployment
+retention, so a longer age needs a retention at least that long. `false` turns it off: the provider then sends a
+maximum age of 0.
+
+The project owns the setting, so a value changed in Vercel's dashboard is set back on the next `shared` `up` that
+updates the project. The provider sends every project setting it manages in that update, not only the one that changed:
+a dashboard change to any of them (Node, the commands, the root directory, Vercel Authentication, Skew Protection) is
+reset to the program's value. Change these in the program, not in the dashboard.
+
+What a product needs besides the setting:
+
+- **A deployment id in a prebuilt build.** A product that runs `vercel build` and `vercel deploy --prebuilt` builds
+  outside Vercel, so the build cannot know the id Vercel assigns. It sets its own: `deploymentId` in
+  `.vercel/output/config.json` (Vercel's Build Output API), generated at build time. Vercel's rules for the id: unique
+  per project, so one per deploy (a deploy that reuses an id fails); at most 32 characters; letters, digits, `-` and `_`
+  only; not starting with `dpl_`. The framework must also put that id on its requests (Nitro's Vercel preset sets the
+  `__vdpl` cookie from `VERCEL_DEPLOYMENT_ID` when `VERCEL_SKEW_PROTECTION_ENABLED` is set at build). Without the id,
+  the setting is on but nothing is pinned.
+- **System environment variables exposed** to deployments: Vercel's Skew Protection steps ask for the project's
+  "Automatically expose System Environment Variables" setting to be on. `VercelProject` leaves that setting as Vercel
+  has it; check it once in the project's settings.
+- **A wait before a contract migration.** An open tab can keep calling a deployment until that deployment is older
+  than the maximum age. A migration that removes or changes a shape the old code reads (a dropped column, a renamed
+  field) ships only once every deployment that read the old shape is older than the maximum age: 12 hours after the
+  release that stopped reading it, by default. Ship the additive half, wait, then the contract half.
 
 ### Verify a Vercel domain
 
