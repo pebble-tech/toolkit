@@ -11,6 +11,7 @@ import {
   NamespaceError,
   OwnershipError,
   PlainTextSecretError,
+  type SkewProtectionMaxAge,
   Stage,
   VercelProject,
   type VercelProjectArgs,
@@ -141,6 +142,7 @@ describe('VercelProject on the shared stack', () => {
       nodeVersion: '24.x',
       publicSource: false,
       vercelAuthentication: { deploymentType: 'only_preview_deployments' },
+      skewProtection: '12 hours',
     });
   });
 
@@ -163,6 +165,36 @@ describe('VercelProject on the shared stack', () => {
     for (const nodeVersion of accepted) {
       const { resources } = await vercelIn('shared', { project: { ...PROJECT, nodeVersion } });
       expect(ofType(resources, 'vercel:index/project:Project')[0].inputs.nodeVersion).toBe(nodeVersion);
+    }
+  });
+
+  test("turns Skew Protection on with Pro's 12 hour maximum age, sets another age, or turns it off", async () => {
+    const inputs = async (project: typeof PROJECT & { skewProtection?: SkewProtectionMaxAge | false }) =>
+      ofType((await vercelIn('shared', { project })).resources, 'vercel:index/project:Project')[0].inputs;
+    const [unset, sevenDays, off] = [
+      await inputs(PROJECT),
+      await inputs({ ...PROJECT, skewProtection: '7 days' }),
+      await inputs({ ...PROJECT, skewProtection: false }),
+    ];
+    // Off is no input at all: the provider then sends a max age of 0, which Vercel reads as off.
+    expect([unset.skewProtection, sevenDays.skewProtection, 'skewProtection' in off]).toEqual([
+      '12 hours',
+      '7 days',
+      false,
+    ]);
+  });
+
+  test('types the Skew Protection maximum age as the provider accepts it, and passes each one through', async () => {
+    const accepted: SkewProtectionMaxAge[] = ['30 minutes', '4 hours', '12 hours', '1 day', '7 days'];
+    // @ts-expect-error provider 5.21.1 has no 1 hour
+    const hour: SkewProtectionMaxAge = '1 hour';
+    // @ts-expect-error seconds are what the provider sends, not what it takes
+    const seconds: SkewProtectionMaxAge = '43200';
+    expect.assertions(accepted.length + 1);
+    expect([hour, seconds]).toEqual(['1 hour', '43200']);
+    for (const skewProtection of accepted) {
+      const { resources } = await vercelIn('shared', { project: { ...PROJECT, skewProtection } });
+      expect(ofType(resources, 'vercel:index/project:Project')[0].inputs.skewProtection).toBe(skewProtection);
     }
   });
 

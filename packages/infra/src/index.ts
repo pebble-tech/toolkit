@@ -32,6 +32,7 @@ export {
   VercelProject,
   type NodeVersion,
   type PreviewProtection,
+  type SkewProtectionMaxAge,
   type VercelProjectArgs,
   type VercelProjectSettings,
 } from './vercel-project.js';

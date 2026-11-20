@@ -63,6 +63,12 @@ export type PreviewProtection = 'only_preview_deployments' | 'standard_protectio
 /** The Node.js versions `@pulumiverse/vercel` 5.21.1 accepts for a project (its `node_version` validator). */
 export type NodeVersion = '18.x' | '20.x' | '22.x' | '24.x';
 
+/**
+ * How long Skew Protection keeps a deployment reachable for the clients it served, as `@pulumiverse/vercel` 5.21.1
+ * accepts it (its `skew_protection` validator; the provider sends the seconds as `skewProtectionMaxAge`).
+ */
+export type SkewProtectionMaxAge = '30 minutes' | '4 hours' | '12 hours' | '1 day' | '7 days';
+
 /** Project settings, owned by the `shared` stack. */
 export interface VercelProjectSettings {
   /** Defaults to `<product>-web`; must start with `<product>-`. */
@@ -81,6 +87,11 @@ export interface VercelProjectSettings {
   customEnvironments?: string[];
   /** Default `only_preview_deployments`: previews need a Vercel login (or the bypass secret). */
   protection?: PreviewProtection;
+  /**
+   * Skew Protection's maximum age: a tab keeps reaching the deployment it loaded from until that deployment is this
+   * old. Default `12 hours`, Vercel's default on Pro. `false` turns it off.
+   */
+  skewProtection?: SkewProtectionMaxAge | false;
 }
 
 export interface VercelProjectArgs {
@@ -164,6 +175,8 @@ export class VercelProject extends pulumi.ComponentResource {
           nodeVersion: settings.nodeVersion ?? '24.x',
           publicSource: false,
           vercelAuthentication: { deploymentType: settings.protection ?? 'only_preview_deployments' },
+          // Unset is off: the provider sends a max age of 0.
+          skewProtection: settings.skewProtection === false ? undefined : (settings.skewProtection ?? '12 hours'),
         },
         child()
       );
