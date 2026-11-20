@@ -330,13 +330,20 @@ What a product needs besides the setting:
   `.vercel/output/config.json`, and the `VERCEL_DEPLOYMENT_ID` environment variable, with
   `VERCEL_SKEW_PROTECTION_ENABLED=1`. From those two variables the preset adds a route to `config.json` that sets the
   `__vdpl` cookie on every document response. Nitro writes no `deploymentId` into `config.json` by itself, and adds no
-  cookie route without both variables. For example, in the deploy job:
+  cookie route without both variables. The id must be unique per deploy to the project, not per workflow run: one run
+  can deploy the same project twice (staging, then production), and Vercel fails the second deploy if it reuses the
+  first one's id. So the example adds a fixed tag for each target. For example, in the deploy job:
 
   ```sh
-  DEPLOYMENT_ID="gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"   # unique per deploy, <= 32 characters, not dpl_
+  TARGET=stg   # stg, prd or pr: one fixed tag per target the job deploys to
+  DEPLOYMENT_ID="gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${TARGET}"
   export VERCEL_DEPLOYMENT_ID="$DEPLOYMENT_ID" VERCEL_SKEW_PROTECTION_ENABLED=1
   vercel build && vercel deploy --prebuilt
   ```
+
+  The id's length is 3 (`gh-`), plus the run id, plus 1, plus the attempt, plus 1, plus the tag (at most 3). With
+  today's 11-digit run ids and a two-digit attempt that is 21 characters. Even a 19-digit run id (the largest 64-bit
+  integer) gives 29, within the limit of 32. It never starts with `dpl_`.
 
   and in the Nitro config, `vercel: { config: { deploymentId: process.env.VERCEL_DEPLOYMENT_ID } }`.
 - **A fresh build and deploy after turning it on.** Deployments built before the setting, or before the id, carry no
