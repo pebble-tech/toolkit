@@ -321,11 +321,28 @@ What a product needs besides the setting:
 
 - **A deployment id in a prebuilt build.** A product that runs `vercel build` and `vercel deploy --prebuilt` builds
   outside Vercel, so the build cannot know the id Vercel assigns. It sets its own: `deploymentId` in
-  `.vercel/output/config.json` (Vercel's Build Output API), generated at build time. Vercel's rules for the id: unique
-  per project, so one per deploy (a deploy that reuses an id fails); at most 32 characters; letters, digits, `-` and `_`
-  only; not starting with `dpl_`. The framework must also put that id on its requests (Nitro's Vercel preset sets the
-  `__vdpl` cookie from `VERCEL_DEPLOYMENT_ID` when `VERCEL_SKEW_PROTECTION_ENABLED` is set at build). Without the id,
-  the setting is on but nothing is pinned.
+  `.vercel/output/config.json` (Vercel's Build Output API), generated at build time. This needs a Vercel CLI newer than
+  `vercel@50.3.3` (Vercel's docs, "Custom Deployment ID"). Vercel's rules for the id: unique per project, so one per
+  deploy (a deploy that reuses an id fails); at most 32 characters; letters, digits, `-` and `_` only; not starting
+  with `dpl_`. Without the id, the setting is on but nothing is pinned.
+- **The framework puts the id on its requests.** With Nitro's `vercel` preset, generate one id per deploy and, before
+  `vercel build`, set it in two places: `vercel.config.deploymentId` in the Nitro config, which Nitro merges into
+  `.vercel/output/config.json`, and the `VERCEL_DEPLOYMENT_ID` environment variable, with
+  `VERCEL_SKEW_PROTECTION_ENABLED=1`. From those two variables the preset adds a route to `config.json` that sets the
+  `__vdpl` cookie on every document response. Nitro writes no `deploymentId` into `config.json` by itself, and adds no
+  cookie route without both variables. For example, in the deploy job:
+
+  ```sh
+  DEPLOYMENT_ID="gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"   # unique per deploy, <= 32 characters, not dpl_
+  export VERCEL_DEPLOYMENT_ID="$DEPLOYMENT_ID" VERCEL_SKEW_PROTECTION_ENABLED=1
+  vercel build && vercel deploy --prebuilt
+  ```
+
+  and in the Nitro config, `vercel: { config: { deploymentId: process.env.VERCEL_DEPLOYMENT_ID } }`.
+- **A fresh build and deploy after turning it on.** Deployments built before the setting, or before the id, carry no
+  id: only the next build and deploy is pinned (Vercel's steps end with a redeploy).
+- **One pin per browser.** The `__vdpl` cookie belongs to the origin, not the tab. When any tab loads a page from a
+  newer deployment, every open tab on that origin moves to it.
 - **System environment variables exposed** to deployments: Vercel's Skew Protection steps ask for the project's
   "Automatically expose System Environment Variables" setting to be on. `VercelProject` leaves that setting as Vercel
   has it; check it once in the project's settings.
