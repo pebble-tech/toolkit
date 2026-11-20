@@ -325,7 +325,8 @@ What a product needs besides the setting:
   `vercel@50.3.3` (Vercel's docs, "Custom Deployment ID"). Vercel's rules for the id: unique per project, so one per
   deploy (a deploy that reuses an id fails); at most 32 characters; letters, digits, `-` and `_` only; not starting
   with `dpl_`. Without the id, the setting is on but nothing is pinned.
-- **The framework puts the id on its requests.** With Nitro's `vercel` preset, generate one id per deploy and, before
+- **The framework puts the id on its requests.** With Nitro's `vercel` preset (Nitro 2.13.0 or later on 2.x,
+  3.0.1-alpha.2 or later on 3.x: the releases that added skew protection to it), generate one id per deploy and, before
   `vercel build`, set it in two places: `vercel.config.deploymentId` in the Nitro config, which Nitro merges into
   `.vercel/output/config.json`, and the `VERCEL_DEPLOYMENT_ID` environment variable, with
   `VERCEL_SKEW_PROTECTION_ENABLED=1`. From those two variables the preset adds a route to `config.json` that sets the
@@ -357,6 +358,13 @@ What a product needs besides the setting:
   than the maximum age. A migration that removes or changes a shape the old code reads (a dropped column, a renamed
   field) ships only once every deployment that read the old shape is older than the maximum age: 12 hours after the
   release that stopped reading it, by default. Ship the additive half, wait, then the contract half.
+
+  Crawlers are the exception: for requests from Googlebot and Bingbot, Vercel raises the maximum age to 60 days, so a
+  crawler can reach a deployment up to 60 days old (or as old as deployment retention keeps). Waiting the maximum age
+  protects users' tabs, not those requests. Before a contract migration, either wait 60 days; or stop the older
+  deployments from serving: set a Skew Protection Threshold on the first deployment that no longer reads the old shape
+  (Vercel's deployment menu), or delete the older deployments; or accept that a crawler's request to a page that
+  reads the old shape fails until the crawler fetches the page again. Pages behind a login are not crawled.
 
 ### Verify a Vercel domain
 
