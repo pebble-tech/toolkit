@@ -10,7 +10,7 @@ program that passes none of them declares the same resources, names and inputs a
   `<name>-runtime-{schema,tables,sequences}-<schema>` and `<name>-runtime-default-{tables,sequences}-<schema>`.
   `public`'s resources keep their names. The list says which grants the program declares: a new stack without `public`
   gets none on it, but on an existing prod stack the `public` grants are protected and retained, so they stay in
-  Postgres until revoked there directly (README, Schemas). The direct URL waits for the schemas. A preview's schemas
+  Postgres until revoked there directly (README, Schemas). The direct URL waits for the schemas; a release that migrates before `up` must add a schema in an earlier release or create it in the migration (README, Schemas). A preview's schemas
   are dropped with their contents; on staging and prod a schema that holds tables is not dropped, and the `up` fails.
   A value that is not a list, an empty or repeated list, or a name that is not a lowercase identifier or is `pg_*` or
   `information_schema`, is refused.

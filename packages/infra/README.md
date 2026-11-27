@@ -100,7 +100,12 @@ const db = new Database('db', { stage, adminUrl: config.requireSecret('pgAdminUr
     them from the state and leaves them in Postgres. They stay until someone revokes them directly in the database.
     The toolkit has no step for that: do not treat `public` as closed to the runtime role until it is done.
   On PostgreSQL 15+ PUBLIC also keeps USAGE on `public`, so the runtime role can see the schema, though not its tables.
-- The direct URL waits for every schema in the list, so a migration run on it in the same update finds them.
+- A release workflow migrates before `up` ([A web-only production workflow](#a-web-only-production-workflow)), so a
+  release that adds a schema to the list and a migration that uses it would migrate before the schema exists. Either
+  add the schema in an earlier release, or have the migration create it first (`CREATE SCHEMA IF NOT EXISTS cms`; it
+  runs as the owner, who owns the database). The component then takes the existing schema over (the provider's
+  `ifNotExists`, default true) and grants on the tables already in it. A first release, which migrates after `up`, and
+  any program reading `directUrl` in the same update find the schemas: the direct URL waits for them and their grants.
 - A preview's schemas are dropped with what they hold (`dropCascade`), as the preview's whole database is. On staging
   and prod a schema is dropped only when it is empty: taking a schema that holds tables out of the list fails the `up`
   rather than destroying its data. Move or drop its tables first.
