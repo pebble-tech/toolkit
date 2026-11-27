@@ -1,0 +1,4125 @@
+{
+  "database pr-7": [
+    {
+      "urn": "urn:pulumi:pr-7::basefresh::pebbletech:index:Database::db",
+      "type": "pebbletech:index:Database",
+      "name": "db",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "databaseName": "basefresh_pr_7",
+        "directUrl": "postgresql://basefresh_pr_7.abc123:mock-password-db-owner-password@sin.pg.psdb.cloud:5432/basefresh_pr_7?sslmode=verify-full",
+        "ownerRole": "basefresh_pr_7"
+      }
+    },
+    {
+      "urn": "urn:pulumi:pr-7::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+      "type": "postgresql:index/database:Database",
+      "name": "db",
+      "parent": "urn:pulumi:pr-7::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:pr-7::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member"
+      ],
+      "inputs": {
+        "name": "basefresh_pr_7",
+        "owner": "basefresh_pr_7"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:pr-7::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-revoke-public",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-revoke-public",
+      "parent": "urn:pulumi:pr-7::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:pr-7::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_pr_7",
+        "objectType": "database",
+        "privileges": [],
+        "role": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:pr-7::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-admin-member",
+      "parent": "urn:pulumi:pr-7::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:pr-7::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_pr_7",
+        "role": "postgres"
+      },
+      "secretInputs": [
+        "role"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:pr-7::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-operators",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-operators",
+      "parent": "urn:pulumi:pr-7::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:pr-7::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_pr_7",
+        "role": "pebble_operators"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:pr-7::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner",
+      "type": "postgresql:index/role:Role",
+      "name": "db-owner",
+      "parent": "urn:pulumi:pr-7::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:pr-7::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password"
+      ],
+      "inputs": {
+        "login": true,
+        "name": "basefresh_pr_7",
+        "password": "mock-password-db-owner-password"
+      },
+      "secretInputs": [
+        "password"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:pr-7::basefresh::pebbletech:index:Database$pulumi:providers:postgresql::db-admin",
+      "type": "pulumi:providers:postgresql",
+      "name": "db-admin",
+      "parent": "urn:pulumi:pr-7::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "connectTimeout": "180",
+        "database": "postgres",
+        "databaseUsername": "postgres",
+        "host": "sin.pg.psdb.cloud",
+        "password": "admin-pw",
+        "port": "5432",
+        "sslmode": "verify-full",
+        "superuser": "false",
+        "username": "postgres.abc123"
+      },
+      "secretInputs": [
+        "database",
+        "databaseUsername",
+        "host",
+        "password",
+        "username"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:pr-7::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password",
+      "type": "random:index/randomPassword:RandomPassword",
+      "name": "db-owner-password",
+      "parent": "urn:pulumi:pr-7::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "length": 32,
+        "special": false
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:pr-7::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "pr-7",
+        "namespace": "basefresh-pr-7",
+        "product": "basefresh"
+      }
+    }
+  ],
+  "database staging, passed runtime": [
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "type": "pebbletech:index:Database",
+      "name": "db",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "databaseName": "basefresh_stg",
+        "directUrl": "postgresql://basefresh_stg_owner.abc123:mock-password-db-owner-password@sin.pg.psdb.cloud:5432/basefresh_stg?sslmode=verify-full",
+        "ownerRole": "basefresh_stg_owner",
+        "pooledUrl": "postgresql://basefresh_app.abc123:runtime-pw@sin.pg.psdb.cloud:6432/basefresh_stg?sslmode=verify-full"
+      }
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+      "type": "postgresql:index/database:Database",
+      "name": "db",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member"
+      ],
+      "inputs": {
+        "name": "basefresh_stg",
+        "owner": "basefresh_stg_owner"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-sequences",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-sequences",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "sequence",
+        "owner": "basefresh_stg_owner",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_app",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-tables",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-tables",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "table",
+        "owner": "basefresh_stg_owner",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_app",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-revoke-public",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-revoke-public",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "database",
+        "privileges": [],
+        "role": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-connect",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-connect",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "database",
+        "privileges": [
+          "CONNECT"
+        ],
+        "role": "basefresh_app"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-schema",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-schema",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "schema",
+        "privileges": [
+          "USAGE"
+        ],
+        "role": "basefresh_app",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-sequences",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-sequences",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "sequence",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_app",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-tables",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-tables",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "table",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_app",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-admin-member",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_stg_owner",
+        "role": "postgres"
+      },
+      "secretInputs": [
+        "role"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-operators",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-operators",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_stg_owner",
+        "role": "pebble_operators"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner",
+      "type": "postgresql:index/role:Role",
+      "name": "db-owner",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password"
+      ],
+      "inputs": {
+        "login": true,
+        "name": "basefresh_stg_owner",
+        "password": "mock-password-db-owner-password"
+      },
+      "secretInputs": [
+        "password"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$pulumi:providers:postgresql::db-admin",
+      "type": "pulumi:providers:postgresql",
+      "name": "db-admin",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "connectTimeout": "180",
+        "database": "postgres",
+        "databaseUsername": "postgres",
+        "host": "sin.pg.psdb.cloud",
+        "password": "admin-pw",
+        "port": "5432",
+        "sslmode": "verify-full",
+        "superuser": "false",
+        "username": "postgres.abc123"
+      },
+      "secretInputs": [
+        "database",
+        "databaseUsername",
+        "host",
+        "password",
+        "username"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password",
+      "type": "random:index/randomPassword:RandomPassword",
+      "name": "db-owner-password",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "length": 32,
+        "special": false
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "staging",
+        "namespace": "basefresh-staging",
+        "product": "basefresh"
+      }
+    }
+  ],
+  "database staging, made runtime": [
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "type": "pebbletech:index:Database",
+      "name": "db",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "databaseName": "basefresh_stg",
+        "directUrl": "postgresql://basefresh_stg_owner.abc123:mock-password-db-owner-password@sin.pg.psdb.cloud:5432/basefresh_stg?sslmode=verify-full",
+        "ownerRole": "basefresh_stg_owner",
+        "pooledUrl": "postgresql://basefresh_stg_runtime.abc123:mock-password-db-runtime-password@sin.pg.psdb.cloud:6432/basefresh_stg?sslmode=verify-full"
+      }
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+      "type": "postgresql:index/database:Database",
+      "name": "db",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member"
+      ],
+      "inputs": {
+        "name": "basefresh_stg",
+        "owner": "basefresh_stg_owner"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-sequences",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-sequences",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "sequence",
+        "owner": "basefresh_stg_owner",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_stg_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-tables",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-tables",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "table",
+        "owner": "basefresh_stg_owner",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_stg_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-revoke-public",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-revoke-public",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "database",
+        "privileges": [],
+        "role": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-connect",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-connect",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "database",
+        "privileges": [
+          "CONNECT"
+        ],
+        "role": "basefresh_stg_runtime"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-schema",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-schema",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "schema",
+        "privileges": [
+          "USAGE"
+        ],
+        "role": "basefresh_stg_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-sequences",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-sequences",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "sequence",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_stg_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-tables",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-tables",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "table",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_stg_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-admin-member",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_stg_owner",
+        "role": "postgres"
+      },
+      "secretInputs": [
+        "role"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-operators",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-operators",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_stg_owner",
+        "role": "pebble_operators"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner",
+      "type": "postgresql:index/role:Role",
+      "name": "db-owner",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password"
+      ],
+      "inputs": {
+        "login": true,
+        "name": "basefresh_stg_owner",
+        "password": "mock-password-db-owner-password"
+      },
+      "secretInputs": [
+        "password"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime",
+      "type": "postgresql:index/role:Role",
+      "name": "db-runtime",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-runtime-password"
+      ],
+      "inputs": {
+        "login": true,
+        "name": "basefresh_stg_runtime",
+        "password": "mock-password-db-runtime-password"
+      },
+      "secretInputs": [
+        "password"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$pulumi:providers:postgresql::db-admin",
+      "type": "pulumi:providers:postgresql",
+      "name": "db-admin",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "connectTimeout": "180",
+        "database": "postgres",
+        "databaseUsername": "postgres",
+        "host": "sin.pg.psdb.cloud",
+        "password": "admin-pw",
+        "port": "5432",
+        "sslmode": "verify-full",
+        "superuser": "false",
+        "username": "postgres.abc123"
+      },
+      "secretInputs": [
+        "database",
+        "databaseUsername",
+        "host",
+        "password",
+        "username"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password",
+      "type": "random:index/randomPassword:RandomPassword",
+      "name": "db-owner-password",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "length": 32,
+        "special": false
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-runtime-password",
+      "type": "random:index/randomPassword:RandomPassword",
+      "name": "db-runtime-password",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "length": 32,
+        "special": false
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "staging",
+        "namespace": "basefresh-staging",
+        "product": "basefresh"
+      }
+    }
+  ],
+  "database staging, pooler host and port": [
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "type": "pebbletech:index:Database",
+      "name": "db",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "databaseName": "basefresh_stg",
+        "directUrl": "postgresql://basefresh_stg_owner.abc123:mock-password-db-owner-password@sin.pg.psdb.cloud:5432/basefresh_stg?sslmode=verify-full",
+        "ownerRole": "basefresh_stg_owner",
+        "pooledUrl": "postgresql://basefresh_app.abc123:runtime-pw@pool.example.com:7432/basefresh_stg?sslmode=verify-full"
+      }
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+      "type": "postgresql:index/database:Database",
+      "name": "db",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member"
+      ],
+      "inputs": {
+        "name": "basefresh_stg",
+        "owner": "basefresh_stg_owner"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-sequences",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-sequences",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "sequence",
+        "owner": "basefresh_stg_owner",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_app",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-tables",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-tables",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "table",
+        "owner": "basefresh_stg_owner",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_app",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-revoke-public",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-revoke-public",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "database",
+        "privileges": [],
+        "role": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-connect",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-connect",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "database",
+        "privileges": [
+          "CONNECT"
+        ],
+        "role": "basefresh_app"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-schema",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-schema",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "schema",
+        "privileges": [
+          "USAGE"
+        ],
+        "role": "basefresh_app",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-sequences",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-sequences",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "sequence",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_app",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-tables",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-tables",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "table",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_app",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-admin-member",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_stg_owner",
+        "role": "postgres"
+      },
+      "secretInputs": [
+        "role"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-operators",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-operators",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_stg_owner",
+        "role": "pebble_operators"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner",
+      "type": "postgresql:index/role:Role",
+      "name": "db-owner",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password"
+      ],
+      "inputs": {
+        "login": true,
+        "name": "basefresh_stg_owner",
+        "password": "mock-password-db-owner-password"
+      },
+      "secretInputs": [
+        "password"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$pulumi:providers:postgresql::db-admin",
+      "type": "pulumi:providers:postgresql",
+      "name": "db-admin",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "connectTimeout": "180",
+        "database": "postgres",
+        "databaseUsername": "postgres",
+        "host": "sin.pg.psdb.cloud",
+        "password": "admin-pw",
+        "port": "5432",
+        "sslmode": "verify-full",
+        "superuser": "false",
+        "username": "postgres.abc123"
+      },
+      "secretInputs": [
+        "database",
+        "databaseUsername",
+        "host",
+        "password",
+        "username"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password",
+      "type": "random:index/randomPassword:RandomPassword",
+      "name": "db-owner-password",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "length": 32,
+        "special": false
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "staging",
+        "namespace": "basefresh-staging",
+        "product": "basefresh"
+      }
+    }
+  ],
+  "database prod, passed runtime": [
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "type": "pebbletech:index:Database",
+      "name": "db",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "databaseName": "basefresh_prd",
+        "directUrl": "postgresql://basefresh_prd_owner.abc123:mock-password-db-owner-password@sin.pg.psdb.cloud:5432/basefresh_prd?sslmode=verify-full",
+        "ownerRole": "basefresh_prd_owner",
+        "pooledUrl": "postgresql://basefresh_app.abc123:runtime-pw@sin.pg.psdb.cloud:6432/basefresh_prd?sslmode=verify-full"
+      }
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+      "type": "postgresql:index/database:Database",
+      "name": "db",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member"
+      ],
+      "inputs": {
+        "name": "basefresh_prd",
+        "owner": "basefresh_prd_owner"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-sequences",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-sequences",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "sequence",
+        "owner": "basefresh_prd_owner",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_app",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-tables",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-tables",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "table",
+        "owner": "basefresh_prd_owner",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_app",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-revoke-public",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-revoke-public",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "database",
+        "privileges": [],
+        "role": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-connect",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-connect",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "database",
+        "privileges": [
+          "CONNECT"
+        ],
+        "role": "basefresh_app"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-schema",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-schema",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "schema",
+        "privileges": [
+          "USAGE"
+        ],
+        "role": "basefresh_app",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-sequences",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-sequences",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "sequence",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_app",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-tables",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-tables",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "table",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_app",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-admin-member",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_prd_owner",
+        "role": "postgres"
+      },
+      "secretInputs": [
+        "role"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-operators",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-operators",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_prd_owner",
+        "role": "pebble_operators"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner",
+      "type": "postgresql:index/role:Role",
+      "name": "db-owner",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password"
+      ],
+      "inputs": {
+        "login": true,
+        "name": "basefresh_prd_owner",
+        "password": "mock-password-db-owner-password"
+      },
+      "secretInputs": [
+        "password"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$pulumi:providers:postgresql::db-admin",
+      "type": "pulumi:providers:postgresql",
+      "name": "db-admin",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "connectTimeout": "180",
+        "database": "postgres",
+        "databaseUsername": "postgres",
+        "host": "sin.pg.psdb.cloud",
+        "password": "admin-pw",
+        "port": "5432",
+        "sslmode": "verify-full",
+        "superuser": "false",
+        "username": "postgres.abc123"
+      },
+      "secretInputs": [
+        "database",
+        "databaseUsername",
+        "host",
+        "password",
+        "username"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password",
+      "type": "random:index/randomPassword:RandomPassword",
+      "name": "db-owner-password",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "length": 32,
+        "special": false
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "prod",
+        "namespace": "basefresh-prod",
+        "product": "basefresh"
+      }
+    }
+  ],
+  "database prod, made runtime": [
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "type": "pebbletech:index:Database",
+      "name": "db",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "databaseName": "basefresh_prd",
+        "directUrl": "postgresql://basefresh_prd_owner.abc123:mock-password-db-owner-password@sin.pg.psdb.cloud:5432/basefresh_prd?sslmode=verify-full",
+        "ownerRole": "basefresh_prd_owner",
+        "pooledUrl": "postgresql://basefresh_prd_runtime.abc123:mock-password-db-runtime-password@sin.pg.psdb.cloud:6432/basefresh_prd?sslmode=verify-full"
+      }
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+      "type": "postgresql:index/database:Database",
+      "name": "db",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member"
+      ],
+      "inputs": {
+        "name": "basefresh_prd",
+        "owner": "basefresh_prd_owner"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-sequences",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-sequences",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "sequence",
+        "owner": "basefresh_prd_owner",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_prd_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-tables",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-tables",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "table",
+        "owner": "basefresh_prd_owner",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_prd_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-revoke-public",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-revoke-public",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "database",
+        "privileges": [],
+        "role": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-connect",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-connect",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "database",
+        "privileges": [
+          "CONNECT"
+        ],
+        "role": "basefresh_prd_runtime"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-schema",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-schema",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "schema",
+        "privileges": [
+          "USAGE"
+        ],
+        "role": "basefresh_prd_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-sequences",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-sequences",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "sequence",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_prd_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-tables",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-tables",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "table",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_prd_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-admin-member",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_prd_owner",
+        "role": "postgres"
+      },
+      "secretInputs": [
+        "role"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-operators",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-operators",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_prd_owner",
+        "role": "pebble_operators"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner",
+      "type": "postgresql:index/role:Role",
+      "name": "db-owner",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password"
+      ],
+      "inputs": {
+        "login": true,
+        "name": "basefresh_prd_owner",
+        "password": "mock-password-db-owner-password"
+      },
+      "secretInputs": [
+        "password"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime",
+      "type": "postgresql:index/role:Role",
+      "name": "db-runtime",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-runtime-password"
+      ],
+      "inputs": {
+        "login": true,
+        "name": "basefresh_prd_runtime",
+        "password": "mock-password-db-runtime-password"
+      },
+      "secretInputs": [
+        "password"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$pulumi:providers:postgresql::db-admin",
+      "type": "pulumi:providers:postgresql",
+      "name": "db-admin",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "connectTimeout": "180",
+        "database": "postgres",
+        "databaseUsername": "postgres",
+        "host": "sin.pg.psdb.cloud",
+        "password": "admin-pw",
+        "port": "5432",
+        "sslmode": "verify-full",
+        "superuser": "false",
+        "username": "postgres.abc123"
+      },
+      "secretInputs": [
+        "database",
+        "databaseUsername",
+        "host",
+        "password",
+        "username"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password",
+      "type": "random:index/randomPassword:RandomPassword",
+      "name": "db-owner-password",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "length": 32,
+        "special": false
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-runtime-password",
+      "type": "random:index/randomPassword:RandomPassword",
+      "name": "db-runtime-password",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "length": 32,
+        "special": false
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "prod",
+        "namespace": "basefresh-prod",
+        "product": "basefresh"
+      }
+    }
+  ],
+  "operators and database in prod": [
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "type": "pebbletech:index:Database",
+      "name": "db",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "databaseName": "basefresh_prd",
+        "directUrl": "postgresql://basefresh_prd_owner.abc123:mock-password-db-owner-password@sin.pg.psdb.cloud:5432/basefresh_prd?sslmode=verify-full",
+        "ownerRole": "basefresh_prd_owner",
+        "pooledUrl": "postgresql://basefresh_prd_runtime.abc123:mock-password-db-runtime-password@sin.pg.psdb.cloud:6432/basefresh_prd?sslmode=verify-full"
+      }
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+      "type": "postgresql:index/database:Database",
+      "name": "db",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member"
+      ],
+      "inputs": {
+        "name": "basefresh_prd",
+        "owner": "basefresh_prd_owner"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-sequences",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-sequences",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "sequence",
+        "owner": "basefresh_prd_owner",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_prd_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-tables",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-tables",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "table",
+        "owner": "basefresh_prd_owner",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_prd_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-revoke-public",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-revoke-public",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "database",
+        "privileges": [],
+        "role": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-connect",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-connect",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "database",
+        "privileges": [
+          "CONNECT"
+        ],
+        "role": "basefresh_prd_runtime"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-schema",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-schema",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "schema",
+        "privileges": [
+          "USAGE"
+        ],
+        "role": "basefresh_prd_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-sequences",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-sequences",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "sequence",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_prd_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-tables",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-tables",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_prd",
+        "objectType": "table",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_prd_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-admin-member",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_prd_owner",
+        "role": "postgres"
+      },
+      "secretInputs": [
+        "role"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-operators",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-operators",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner",
+        "urn:pulumi:prod::basefresh::pebbletech:index:Operators$postgresql:index/role:Role::operators-group"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_prd_owner",
+        "role": "pebble_operators"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner",
+      "type": "postgresql:index/role:Role",
+      "name": "db-owner",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password"
+      ],
+      "inputs": {
+        "login": true,
+        "name": "basefresh_prd_owner",
+        "password": "mock-password-db-owner-password"
+      },
+      "secretInputs": [
+        "password"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime",
+      "type": "postgresql:index/role:Role",
+      "name": "db-runtime",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-runtime-password"
+      ],
+      "inputs": {
+        "login": true,
+        "name": "basefresh_prd_runtime",
+        "password": "mock-password-db-runtime-password"
+      },
+      "secretInputs": [
+        "password"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$pulumi:providers:postgresql::db-admin",
+      "type": "pulumi:providers:postgresql",
+      "name": "db-admin",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "connectTimeout": "180",
+        "database": "postgres",
+        "databaseUsername": "postgres",
+        "host": "sin.pg.psdb.cloud",
+        "password": "admin-pw",
+        "port": "5432",
+        "sslmode": "verify-full",
+        "superuser": "false",
+        "username": "postgres.abc123"
+      },
+      "secretInputs": [
+        "database",
+        "databaseUsername",
+        "host",
+        "password",
+        "username"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password",
+      "type": "random:index/randomPassword:RandomPassword",
+      "name": "db-owner-password",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "length": 32,
+        "special": false
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-runtime-password",
+      "type": "random:index/randomPassword:RandomPassword",
+      "name": "db-runtime-password",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "length": 32,
+        "special": false
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Operators::operators",
+      "type": "pebbletech:index:Operators",
+      "name": "operators",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "group": "pebble_operators",
+        "members": [
+          "pscale_api_alice",
+          "pscale_api_bob"
+        ]
+      }
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Operators$postgresql:index/grantRole:GrantRole::operators-member-pscale_api_alice",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "operators-member-pscale_api_alice",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Operators::operators",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Operators$postgresql:index/role:Role::operators-group"
+      ],
+      "inputs": {
+        "grantRole": "pebble_operators",
+        "role": "pscale_api_alice"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Operators$postgresql:index/grantRole:GrantRole::operators-member-pscale_api_bob",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "operators-member-pscale_api_bob",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Operators::operators",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:Operators$postgresql:index/role:Role::operators-group"
+      ],
+      "inputs": {
+        "grantRole": "pebble_operators",
+        "role": "pscale_api_bob"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Operators$postgresql:index/role:Role::operators-group",
+      "type": "postgresql:index/role:Role",
+      "name": "operators-group",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Operators::operators",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "roles"
+      ],
+      "dependencies": [],
+      "inputs": {
+        "login": false,
+        "name": "pebble_operators"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Operators$pulumi:providers:postgresql::operators-admin",
+      "type": "pulumi:providers:postgresql",
+      "name": "operators-admin",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:Operators::operators",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "connectTimeout": "180",
+        "database": "postgres",
+        "databaseUsername": "postgres",
+        "host": "sin.pg.psdb.cloud",
+        "password": "admin-pw",
+        "port": "5432",
+        "sslmode": "verify-full",
+        "superuser": "false",
+        "username": "postgres.abc123"
+      },
+      "secretInputs": [
+        "database",
+        "databaseUsername",
+        "host",
+        "password",
+        "username"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "prod",
+        "namespace": "basefresh-prod",
+        "product": "basefresh"
+      }
+    }
+  ],
+  "operators shared": [
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:Operators::operators",
+      "type": "pebbletech:index:Operators",
+      "name": "operators",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "group": "pebble_operators",
+        "members": [
+          "pscale_api_alice"
+        ]
+      }
+    },
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:Operators$postgresql:index/grantRole:GrantRole::operators-member-pscale_api_alice",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "operators-member-pscale_api_alice",
+      "parent": "urn:pulumi:shared::basefresh::pebbletech:index:Operators::operators",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:shared::basefresh::pebbletech:index:Operators$postgresql:index/role:Role::operators-group"
+      ],
+      "inputs": {
+        "grantRole": "pebble_operators",
+        "role": "pscale_api_alice"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:Operators$postgresql:index/role:Role::operators-group",
+      "type": "postgresql:index/role:Role",
+      "name": "operators-group",
+      "parent": "urn:pulumi:shared::basefresh::pebbletech:index:Operators::operators",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "roles"
+      ],
+      "dependencies": [],
+      "inputs": {
+        "login": false,
+        "name": "pebble_operators"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:Operators$pulumi:providers:postgresql::operators-admin",
+      "type": "pulumi:providers:postgresql",
+      "name": "operators-admin",
+      "parent": "urn:pulumi:shared::basefresh::pebbletech:index:Operators::operators",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "connectTimeout": "180",
+        "database": "postgres",
+        "databaseUsername": "postgres",
+        "host": "sin.pg.psdb.cloud",
+        "password": "admin-pw",
+        "port": "5432",
+        "sslmode": "verify-full",
+        "superuser": "false",
+        "username": "postgres.abc123"
+      },
+      "secretInputs": [
+        "database",
+        "databaseUsername",
+        "host",
+        "password",
+        "username"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "shared",
+        "namespace": "basefresh-shared",
+        "product": "basefresh"
+      }
+    }
+  ],
+  "operators cluster, adopting": [
+    {
+      "urn": "urn:pulumi:pebble-stg::pebble-cluster-operators::pebbletech:index:Operators::operators",
+      "type": "pebbletech:index:Operators",
+      "name": "operators",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "cluster": "pebble-stg",
+        "group": "pebble_operators",
+        "members": [
+          "pscale_api_alice",
+          "pscale_api_bob"
+        ]
+      }
+    },
+    {
+      "urn": "urn:pulumi:pebble-stg::pebble-cluster-operators::pebbletech:index:Operators$postgresql:index/grantRole:GrantRole::operators-member-pscale_api_alice",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "operators-member-pscale_api_alice",
+      "parent": "urn:pulumi:pebble-stg::pebble-cluster-operators::pebbletech:index:Operators::operators",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:pebble-stg::pebble-cluster-operators::pebbletech:index:Operators$postgresql:index/role:Role::operators-group"
+      ],
+      "inputs": {
+        "grantRole": "pebble_operators",
+        "role": "pscale_api_alice"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:pebble-stg::pebble-cluster-operators::pebbletech:index:Operators$postgresql:index/grantRole:GrantRole::operators-member-pscale_api_bob",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "operators-member-pscale_api_bob",
+      "parent": "urn:pulumi:pebble-stg::pebble-cluster-operators::pebbletech:index:Operators::operators",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:pebble-stg::pebble-cluster-operators::pebbletech:index:Operators$postgresql:index/role:Role::operators-group"
+      ],
+      "inputs": {
+        "grantRole": "pebble_operators",
+        "role": "pscale_api_bob"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:pebble-stg::pebble-cluster-operators::pebbletech:index:Operators$postgresql:index/role:Role::operators-group",
+      "type": "postgresql:index/role:Role",
+      "name": "operators-group",
+      "parent": "urn:pulumi:pebble-stg::pebble-cluster-operators::pebbletech:index:Operators::operators",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "pebble_operators",
+      "ignoreChanges": [
+        "roles"
+      ],
+      "dependencies": [],
+      "inputs": {
+        "login": false,
+        "name": "pebble_operators"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:pebble-stg::pebble-cluster-operators::pebbletech:index:Operators$pulumi:providers:postgresql::operators-admin",
+      "type": "pulumi:providers:postgresql",
+      "name": "operators-admin",
+      "parent": "urn:pulumi:pebble-stg::pebble-cluster-operators::pebbletech:index:Operators::operators",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "connectTimeout": "180",
+        "database": "postgres",
+        "databaseUsername": "postgres",
+        "host": "sin.pg.psdb.cloud",
+        "password": "admin-pw",
+        "port": "5432",
+        "sslmode": "verify-full",
+        "superuser": "false",
+        "username": "postgres.abc123"
+      },
+      "secretInputs": [
+        "database",
+        "databaseUsername",
+        "host",
+        "password",
+        "username"
+      ],
+      "outputs": null
+    }
+  ],
+  "deploy role preview": [
+    {
+      "urn": "urn:pulumi:preview::basefresh-bootstrap::pebbletech:index:DeployRole::deploy",
+      "type": "pebbletech:index:DeployRole",
+      "name": "deploy",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "boundaryArn": "arn:aws:iam::123456789012:policy/basefresh-preview-boundary",
+        "boundaryName": "basefresh-preview-boundary",
+        "roleArn": "arn:aws:iam::123456789012:role/basefresh-preview-deploy",
+        "roleName": "basefresh-preview-deploy"
+      }
+    },
+    {
+      "urn": "urn:pulumi:preview::basefresh-bootstrap::pebbletech:index:DeployRole$aws:iam/policy:Policy::deploy-boundary",
+      "type": "aws:iam/policy:Policy",
+      "name": "deploy-boundary",
+      "parent": "urn:pulumi:preview::basefresh-bootstrap::pebbletech:index:DeployRole::deploy",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "description": "Permissions boundary for basefresh-pr-* workload roles",
+        "name": "basefresh-preview-boundary",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogGroup\",\"logs:CreateLogStream\",\"logs:PutLogEvents\"],\"Resource\":[\"arn:aws:logs:*:*:log-group:/aws/lambda/basefresh-pr-*\",\"arn:aws:logs:*:*:log-group:/aws/lambda/basefresh-pr-*:*\"]}]}",
+        "tags": {
+          "env": "preview",
+          "managed-by": "pulumi",
+          "product": "basefresh"
+        }
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:preview::basefresh-bootstrap::pebbletech:index:DeployRole$aws:iam/role:Role::deploy-role",
+      "type": "aws:iam/role:Role",
+      "name": "deploy-role",
+      "parent": "urn:pulumi:preview::basefresh-bootstrap::pebbletech:index:DeployRole::deploy",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "assumeRolePolicy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com\"},\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":[\"repo:pebble-tech/basefresh:environment:preview\"]}}}]}",
+        "description": "GitHub Actions deploy for pebble-tech/basefresh (basefresh preview)",
+        "name": "basefresh-preview-deploy",
+        "tags": {
+          "env": "preview",
+          "managed-by": "pulumi",
+          "product": "basefresh"
+        }
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:preview::basefresh-bootstrap::pebbletech:index:DeployRole$aws:iam/rolePolicy:RolePolicy::deploy-policy",
+      "type": "aws:iam/rolePolicy:RolePolicy",
+      "name": "deploy-policy",
+      "parent": "urn:pulumi:preview::basefresh-bootstrap::pebbletech:index:DeployRole::deploy",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:preview::basefresh-bootstrap::pebbletech:index:DeployRole$aws:iam/policy:Policy::deploy-boundary",
+        "urn:pulumi:preview::basefresh-bootstrap::pebbletech:index:DeployRole$aws:iam/role:Role::deploy-role"
+      ],
+      "inputs": {
+        "name": "deploy",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"StateList\",\"Effect\":\"Allow\",\"Action\":\"s3:ListBucket\",\"Resource\":\"arn:aws:s3:::pebble-stg-pulumi-state\",\"Condition\":{\"StringLike\":{\"s3:prefix\":[\"basefresh/preview\",\"basefresh/preview/*\"]}}},{\"Sid\":\"StateObjects\",\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:PutObject\",\"s3:DeleteObject\"],\"Resource\":[\"arn:aws:s3:::pebble-stg-pulumi-state/basefresh/preview/*\"]},{\"Sid\":\"StateSecrets\",\"Effect\":\"Allow\",\"Action\":[\"kms:Encrypt\",\"kms:Decrypt\",\"kms:GenerateDataKey\",\"kms:DescribeKey\"],\"Resource\":\"arn:aws:kms:ap-southeast-1:123456789012:key/pebble-stg-pulumi-preview\"}]}",
+        "role": "basefresh-preview-deploy"
+      },
+      "secretInputs": [],
+      "outputs": null
+    }
+  ],
+  "deploy role staging": [
+    {
+      "urn": "urn:pulumi:staging::basefresh-bootstrap::pebbletech:index:DeployRole::deploy",
+      "type": "pebbletech:index:DeployRole",
+      "name": "deploy",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "boundaryArn": "arn:aws:iam::123456789012:policy/basefresh-staging-boundary",
+        "boundaryName": "basefresh-staging-boundary",
+        "roleArn": "arn:aws:iam::123456789012:role/basefresh-staging-deploy",
+        "roleName": "basefresh-staging-deploy"
+      }
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh-bootstrap::pebbletech:index:DeployRole$aws:iam/policy:Policy::deploy-boundary",
+      "type": "aws:iam/policy:Policy",
+      "name": "deploy-boundary",
+      "parent": "urn:pulumi:staging::basefresh-bootstrap::pebbletech:index:DeployRole::deploy",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "description": "Permissions boundary for basefresh-staging-* workload roles",
+        "name": "basefresh-staging-boundary",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogGroup\",\"logs:CreateLogStream\",\"logs:PutLogEvents\"],\"Resource\":[\"arn:aws:logs:*:*:log-group:/aws/lambda/basefresh-staging-*\",\"arn:aws:logs:*:*:log-group:/aws/lambda/basefresh-staging-*:*\"]}]}",
+        "tags": {
+          "env": "staging",
+          "managed-by": "pulumi",
+          "product": "basefresh"
+        }
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh-bootstrap::pebbletech:index:DeployRole$aws:iam/role:Role::deploy-role",
+      "type": "aws:iam/role:Role",
+      "name": "deploy-role",
+      "parent": "urn:pulumi:staging::basefresh-bootstrap::pebbletech:index:DeployRole::deploy",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "assumeRolePolicy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com\"},\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":[\"repo:pebble-tech/basefresh:environment:staging\"]}}}]}",
+        "description": "GitHub Actions deploy for pebble-tech/basefresh (basefresh staging)",
+        "name": "basefresh-staging-deploy",
+        "tags": {
+          "env": "staging",
+          "managed-by": "pulumi",
+          "product": "basefresh"
+        }
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh-bootstrap::pebbletech:index:DeployRole$aws:iam/rolePolicy:RolePolicy::deploy-policy",
+      "type": "aws:iam/rolePolicy:RolePolicy",
+      "name": "deploy-policy",
+      "parent": "urn:pulumi:staging::basefresh-bootstrap::pebbletech:index:DeployRole::deploy",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh-bootstrap::pebbletech:index:DeployRole$aws:iam/policy:Policy::deploy-boundary",
+        "urn:pulumi:staging::basefresh-bootstrap::pebbletech:index:DeployRole$aws:iam/role:Role::deploy-role"
+      ],
+      "inputs": {
+        "name": "deploy",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"Lambda\",\"Effect\":\"Allow\",\"Action\":[\"lambda:CreateFunction\",\"lambda:DeleteFunction\",\"lambda:Get*\",\"lambda:List*\",\"lambda:Update*\",\"lambda:PublishVersion\",\"lambda:AddPermission\",\"lambda:RemovePermission\",\"lambda:PutFunctionConcurrency\",\"lambda:DeleteFunctionConcurrency\",\"lambda:TagResource\",\"lambda:UntagResource\"],\"Resource\":\"arn:aws:lambda:*:*:function:basefresh-staging-*\"},{\"Sid\":\"HttpApiCreate\",\"Effect\":\"Allow\",\"Action\":\"apigateway:POST\",\"Resource\":\"arn:aws:apigateway:*::/apis\",\"Condition\":{\"StringLike\":{\"apigateway:Request/ApiName\":\"basefresh-staging-*\",\"aws:RequestTag/product\":\"basefresh\",\"aws:RequestTag/env\":\"staging\"}}},{\"Sid\":\"HttpApi\",\"Effect\":\"Allow\",\"Action\":[\"apigateway:GET\",\"apigateway:POST\",\"apigateway:PUT\",\"apigateway:PATCH\",\"apigateway:DELETE\",\"apigateway:TagResource\",\"apigateway:UntagResource\"],\"Resource\":\"arn:aws:apigateway:*::/apis/*\",\"Condition\":{\"StringLike\":{\"aws:ResourceTag/product\":\"basefresh\",\"aws:ResourceTag/env\":\"staging\"},\"StringLikeIfExists\":{\"apigateway:Request/ApiName\":\"basefresh-staging-*\",\"aws:RequestTag/product\":\"basefresh\",\"aws:RequestTag/env\":\"staging\"}}},{\"Sid\":\"HttpApiDomainCreate\",\"Effect\":\"Allow\",\"Action\":\"apigateway:POST\",\"Resource\":\"arn:aws:apigateway:*::/domainnames\",\"Condition\":{\"StringLike\":{\"aws:RequestTag/product\":\"basefresh\",\"aws:RequestTag/env\":\"staging\"}}},{\"Sid\":\"HttpApiTagsOnCreate\",\"Effect\":\"Allow\",\"Action\":[\"apigateway:POST\",\"apigateway:PUT\"],\"Resource\":\"arn:aws:apigateway:*::/tags/*\",\"Condition\":{\"StringLike\":{\"aws:RequestTag/product\":\"basefresh\",\"aws:RequestTag/env\":\"staging\",\"aws:ResourceTag/product\":\"basefresh\",\"aws:ResourceTag/env\":\"staging\"}}},{\"Sid\":\"HttpApiDomain\",\"Effect\":\"Allow\",\"Action\":[\"apigateway:GET\",\"apigateway:POST\",\"apigateway:PUT\",\"apigateway:PATCH\",\"apigateway:DELETE\"],\"Resource\":[\"arn:aws:apigateway:*::/domainnames/*-basefresh-stg.pebbletech.my\",\"arn:aws:apigateway:*::/domainnames/*-basefresh-stg.pebbletech.my/apimappings\",\"arn:aws:apigateway:*::/domainnames/*-basefresh-stg.pebbletech.my/apimappings/*\"]},{\"Sid\":\"CertificatesRead\",\"Effect\":\"Allow\",\"Action\":[\"acm:DescribeCertificate\",\"acm:ListCertificates\",\"acm:ListTagsForCertificate\"],\"Resource\":\"*\"},{\"Sid\":\"CertificatesCreateTagged\",\"Effect\":\"Allow\",\"Action\":\"acm:RequestCertificate\",\"Resource\":\"*\",\"Condition\":{\"StringLike\":{\"aws:RequestTag/product\":\"basefresh\",\"aws:RequestTag/env\":\"staging\"},\"ForAllValues:StringLike\":{\"acm:DomainNames\":\"*-basefresh-stg.pebbletech.my\"}}},{\"Sid\":\"CertificatesTagOwn\",\"Effect\":\"Allow\",\"Action\":\"acm:AddTagsToCertificate\",\"Resource\":\"*\",\"Condition\":{\"StringLike\":{\"aws:RequestTag/product\":\"basefresh\",\"aws:RequestTag/env\":\"staging\",\"aws:ResourceTag/product\":\"basefresh\",\"aws:ResourceTag/env\":\"staging\"}}},{\"Sid\":\"CertificatesChangeOwn\",\"Effect\":\"Allow\",\"Action\":[\"acm:DeleteCertificate\",\"acm:RemoveTagsFromCertificate\"],\"Resource\":\"*\",\"Condition\":{\"StringLike\":{\"aws:ResourceTag/product\":\"basefresh\",\"aws:ResourceTag/env\":\"staging\"}}},{\"Sid\":\"Logs\",\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogGroup\",\"logs:DeleteLogGroup\",\"logs:PutRetentionPolicy\",\"logs:DeleteRetentionPolicy\",\"logs:TagResource\",\"logs:UntagResource\",\"logs:ListTagsForResource\",\"logs:TagLogGroup\",\"logs:UntagLogGroup\",\"logs:ListTagsLogGroup\"],\"Resource\":[\"arn:aws:logs:*:*:log-group:/aws/lambda/basefresh-staging-*\",\"arn:aws:logs:*:*:log-group:/aws/lambda/basefresh-staging-*:*\"]},{\"Sid\":\"LogsDescribe\",\"Effect\":\"Allow\",\"Action\":\"logs:DescribeLogGroups\",\"Resource\":\"*\"},{\"Sid\":\"Alarms\",\"Effect\":\"Allow\",\"Action\":[\"cloudwatch:PutMetricAlarm\",\"cloudwatch:DeleteAlarms\",\"cloudwatch:TagResource\",\"cloudwatch:UntagResource\",\"cloudwatch:ListTagsForResource\"],\"Resource\":\"arn:aws:cloudwatch:*:*:alarm:basefresh-staging-*\"},{\"Sid\":\"AlarmsDescribe\",\"Effect\":\"Allow\",\"Action\":\"cloudwatch:DescribeAlarms\",\"Resource\":\"*\"},{\"Sid\":\"RolesOnlyWithBoundary\",\"Effect\":\"Allow\",\"Action\":[\"iam:CreateRole\",\"iam:PutRolePermissionsBoundary\",\"iam:PutRolePolicy\",\"iam:DeleteRolePolicy\",\"iam:DetachRolePolicy\"],\"Resource\":\"arn:aws:iam::*:role/basefresh-staging-*\",\"Condition\":{\"StringEquals\":{\"iam:PermissionsBoundary\":\"arn:aws:iam::123456789012:policy/basefresh-staging-boundary\"}}},{\"Sid\":\"AttachOnlyBasicExecution\",\"Effect\":\"Allow\",\"Action\":\"iam:AttachRolePolicy\",\"Resource\":\"arn:aws:iam::*:role/basefresh-staging-*\",\"Condition\":{\"StringEquals\":{\"iam:PermissionsBoundary\":\"arn:aws:iam::123456789012:policy/basefresh-staging-boundary\"},\"ArnEquals\":{\"iam:PolicyARN\":\"arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole\"}}},{\"Sid\":\"RolesManage\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetRole\",\"iam:GetRolePolicy\",\"iam:ListRolePolicies\",\"iam:ListAttachedRolePolicies\",\"iam:ListInstanceProfilesForRole\",\"iam:DeleteRole\",\"iam:TagRole\",\"iam:UntagRole\",\"iam:UpdateRole\",\"iam:UpdateRoleDescription\",\"iam:UpdateAssumeRolePolicy\"],\"Resource\":\"arn:aws:iam::*:role/basefresh-staging-*\"},{\"Sid\":\"PassRolesToLambda\",\"Effect\":\"Allow\",\"Action\":\"iam:PassRole\",\"Resource\":\"arn:aws:iam::*:role/basefresh-staging-*\",\"Condition\":{\"StringEquals\":{\"iam:PassedToService\":\"lambda.amazonaws.com\"}}},{\"Sid\":\"NeverTouchSelfOrBoundary\",\"Effect\":\"Deny\",\"Action\":\"iam:*\",\"Resource\":[\"arn:aws:iam::*:role/basefresh-staging-deploy\",\"arn:aws:iam::*:policy/basefresh-staging-boundary\"]},{\"Sid\":\"NeverDropBoundary\",\"Effect\":\"Deny\",\"Action\":\"iam:DeleteRolePermissionsBoundary\",\"Resource\":\"*\"},{\"Sid\":\"StateList\",\"Effect\":\"Allow\",\"Action\":\"s3:ListBucket\",\"Resource\":\"arn:aws:s3:::pebble-stg-pulumi-state\",\"Condition\":{\"StringLike\":{\"s3:prefix\":[\"basefresh/staging\",\"basefresh/staging/*\",\"basefresh/shared\",\"basefresh/shared/*\"]}}},{\"Sid\":\"StateObjects\",\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:PutObject\",\"s3:DeleteObject\"],\"Resource\":[\"arn:aws:s3:::pebble-stg-pulumi-state/basefresh/staging/*\",\"arn:aws:s3:::pebble-stg-pulumi-state/basefresh/shared/*\"]},{\"Sid\":\"StateSecrets\",\"Effect\":\"Allow\",\"Action\":[\"kms:Encrypt\",\"kms:Decrypt\",\"kms:GenerateDataKey\",\"kms:DescribeKey\"],\"Resource\":\"arn:aws:kms:ap-southeast-1:123456789012:key/pebble-stg-pulumi-staging\"}]}",
+        "role": "basefresh-staging-deploy"
+      },
+      "secretInputs": [],
+      "outputs": null
+    }
+  ],
+  "deploy role prod": [
+    {
+      "urn": "urn:pulumi:prod::basefresh-bootstrap::pebbletech:index:DeployRole::deploy",
+      "type": "pebbletech:index:DeployRole",
+      "name": "deploy",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "boundaryArn": "arn:aws:iam::123456789012:policy/basefresh-prod-boundary",
+        "boundaryName": "basefresh-prod-boundary",
+        "roleArn": "arn:aws:iam::123456789012:role/basefresh-prod-deploy",
+        "roleName": "basefresh-prod-deploy"
+      }
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh-bootstrap::pebbletech:index:DeployRole$aws:iam/policy:Policy::deploy-boundary",
+      "type": "aws:iam/policy:Policy",
+      "name": "deploy-boundary",
+      "parent": "urn:pulumi:prod::basefresh-bootstrap::pebbletech:index:DeployRole::deploy",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "description": "Permissions boundary for basefresh-prod-* workload roles",
+        "name": "basefresh-prod-boundary",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogGroup\",\"logs:CreateLogStream\",\"logs:PutLogEvents\"],\"Resource\":[\"arn:aws:logs:*:*:log-group:/aws/lambda/basefresh-prod-*\",\"arn:aws:logs:*:*:log-group:/aws/lambda/basefresh-prod-*:*\"]}]}",
+        "tags": {
+          "env": "prod",
+          "managed-by": "pulumi",
+          "product": "basefresh"
+        }
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh-bootstrap::pebbletech:index:DeployRole$aws:iam/role:Role::deploy-role",
+      "type": "aws:iam/role:Role",
+      "name": "deploy-role",
+      "parent": "urn:pulumi:prod::basefresh-bootstrap::pebbletech:index:DeployRole::deploy",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "assumeRolePolicy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com\"},\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":[\"repo:pebble-tech/basefresh:environment:production\"]}}}]}",
+        "description": "GitHub Actions deploy for pebble-tech/basefresh (basefresh prod)",
+        "name": "basefresh-prod-deploy",
+        "tags": {
+          "env": "prod",
+          "managed-by": "pulumi",
+          "product": "basefresh"
+        }
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh-bootstrap::pebbletech:index:DeployRole$aws:iam/rolePolicy:RolePolicy::deploy-policy",
+      "type": "aws:iam/rolePolicy:RolePolicy",
+      "name": "deploy-policy",
+      "parent": "urn:pulumi:prod::basefresh-bootstrap::pebbletech:index:DeployRole::deploy",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh-bootstrap::pebbletech:index:DeployRole$aws:iam/policy:Policy::deploy-boundary",
+        "urn:pulumi:prod::basefresh-bootstrap::pebbletech:index:DeployRole$aws:iam/role:Role::deploy-role"
+      ],
+      "inputs": {
+        "name": "deploy",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"Lambda\",\"Effect\":\"Allow\",\"Action\":[\"lambda:CreateFunction\",\"lambda:DeleteFunction\",\"lambda:Get*\",\"lambda:List*\",\"lambda:Update*\",\"lambda:PublishVersion\",\"lambda:AddPermission\",\"lambda:RemovePermission\",\"lambda:PutFunctionConcurrency\",\"lambda:DeleteFunctionConcurrency\",\"lambda:TagResource\",\"lambda:UntagResource\"],\"Resource\":\"arn:aws:lambda:*:*:function:basefresh-prod-*\"},{\"Sid\":\"HttpApiCreate\",\"Effect\":\"Allow\",\"Action\":\"apigateway:POST\",\"Resource\":\"arn:aws:apigateway:*::/apis\",\"Condition\":{\"StringLike\":{\"apigateway:Request/ApiName\":\"basefresh-prod-*\",\"aws:RequestTag/product\":\"basefresh\",\"aws:RequestTag/env\":\"prod\"}}},{\"Sid\":\"HttpApi\",\"Effect\":\"Allow\",\"Action\":[\"apigateway:GET\",\"apigateway:POST\",\"apigateway:PUT\",\"apigateway:PATCH\",\"apigateway:DELETE\",\"apigateway:TagResource\",\"apigateway:UntagResource\"],\"Resource\":\"arn:aws:apigateway:*::/apis/*\",\"Condition\":{\"StringLike\":{\"aws:ResourceTag/product\":\"basefresh\",\"aws:ResourceTag/env\":\"prod\"},\"StringLikeIfExists\":{\"apigateway:Request/ApiName\":\"basefresh-prod-*\",\"aws:RequestTag/product\":\"basefresh\",\"aws:RequestTag/env\":\"prod\"}}},{\"Sid\":\"HttpApiDomainCreate\",\"Effect\":\"Allow\",\"Action\":\"apigateway:POST\",\"Resource\":\"arn:aws:apigateway:*::/domainnames\",\"Condition\":{\"StringLike\":{\"aws:RequestTag/product\":\"basefresh\",\"aws:RequestTag/env\":\"prod\"}}},{\"Sid\":\"HttpApiTagsOnCreate\",\"Effect\":\"Allow\",\"Action\":[\"apigateway:POST\",\"apigateway:PUT\"],\"Resource\":\"arn:aws:apigateway:*::/tags/*\",\"Condition\":{\"StringLike\":{\"aws:RequestTag/product\":\"basefresh\",\"aws:RequestTag/env\":\"prod\",\"aws:ResourceTag/product\":\"basefresh\",\"aws:ResourceTag/env\":\"prod\"}}},{\"Sid\":\"HttpApiDomain\",\"Effect\":\"Allow\",\"Action\":[\"apigateway:GET\",\"apigateway:POST\",\"apigateway:PUT\",\"apigateway:PATCH\",\"apigateway:DELETE\"],\"Resource\":[\"arn:aws:apigateway:*::/domainnames/*-basefresh.pebbletech.my\",\"arn:aws:apigateway:*::/domainnames/*-basefresh.pebbletech.my/apimappings\",\"arn:aws:apigateway:*::/domainnames/*-basefresh.pebbletech.my/apimappings/*\"]},{\"Sid\":\"CertificatesRead\",\"Effect\":\"Allow\",\"Action\":[\"acm:DescribeCertificate\",\"acm:ListCertificates\",\"acm:ListTagsForCertificate\"],\"Resource\":\"*\"},{\"Sid\":\"CertificatesCreateTagged\",\"Effect\":\"Allow\",\"Action\":\"acm:RequestCertificate\",\"Resource\":\"*\",\"Condition\":{\"StringLike\":{\"aws:RequestTag/product\":\"basefresh\",\"aws:RequestTag/env\":\"prod\"},\"ForAllValues:StringLike\":{\"acm:DomainNames\":\"*-basefresh.pebbletech.my\"}}},{\"Sid\":\"CertificatesTagOwn\",\"Effect\":\"Allow\",\"Action\":\"acm:AddTagsToCertificate\",\"Resource\":\"*\",\"Condition\":{\"StringLike\":{\"aws:RequestTag/product\":\"basefresh\",\"aws:RequestTag/env\":\"prod\",\"aws:ResourceTag/product\":\"basefresh\",\"aws:ResourceTag/env\":\"prod\"}}},{\"Sid\":\"CertificatesChangeOwn\",\"Effect\":\"Allow\",\"Action\":[\"acm:DeleteCertificate\",\"acm:RemoveTagsFromCertificate\"],\"Resource\":\"*\",\"Condition\":{\"StringLike\":{\"aws:ResourceTag/product\":\"basefresh\",\"aws:ResourceTag/env\":\"prod\"}}},{\"Sid\":\"Logs\",\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogGroup\",\"logs:DeleteLogGroup\",\"logs:PutRetentionPolicy\",\"logs:DeleteRetentionPolicy\",\"logs:TagResource\",\"logs:UntagResource\",\"logs:ListTagsForResource\",\"logs:TagLogGroup\",\"logs:UntagLogGroup\",\"logs:ListTagsLogGroup\"],\"Resource\":[\"arn:aws:logs:*:*:log-group:/aws/lambda/basefresh-prod-*\",\"arn:aws:logs:*:*:log-group:/aws/lambda/basefresh-prod-*:*\"]},{\"Sid\":\"LogsDescribe\",\"Effect\":\"Allow\",\"Action\":\"logs:DescribeLogGroups\",\"Resource\":\"*\"},{\"Sid\":\"Alarms\",\"Effect\":\"Allow\",\"Action\":[\"cloudwatch:PutMetricAlarm\",\"cloudwatch:DeleteAlarms\",\"cloudwatch:TagResource\",\"cloudwatch:UntagResource\",\"cloudwatch:ListTagsForResource\"],\"Resource\":\"arn:aws:cloudwatch:*:*:alarm:basefresh-prod-*\"},{\"Sid\":\"AlarmsDescribe\",\"Effect\":\"Allow\",\"Action\":\"cloudwatch:DescribeAlarms\",\"Resource\":\"*\"},{\"Sid\":\"RolesOnlyWithBoundary\",\"Effect\":\"Allow\",\"Action\":[\"iam:CreateRole\",\"iam:PutRolePermissionsBoundary\",\"iam:PutRolePolicy\",\"iam:DeleteRolePolicy\",\"iam:DetachRolePolicy\"],\"Resource\":\"arn:aws:iam::*:role/basefresh-prod-*\",\"Condition\":{\"StringEquals\":{\"iam:PermissionsBoundary\":\"arn:aws:iam::123456789012:policy/basefresh-prod-boundary\"}}},{\"Sid\":\"AttachOnlyBasicExecution\",\"Effect\":\"Allow\",\"Action\":\"iam:AttachRolePolicy\",\"Resource\":\"arn:aws:iam::*:role/basefresh-prod-*\",\"Condition\":{\"StringEquals\":{\"iam:PermissionsBoundary\":\"arn:aws:iam::123456789012:policy/basefresh-prod-boundary\"},\"ArnEquals\":{\"iam:PolicyARN\":\"arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole\"}}},{\"Sid\":\"RolesManage\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetRole\",\"iam:GetRolePolicy\",\"iam:ListRolePolicies\",\"iam:ListAttachedRolePolicies\",\"iam:ListInstanceProfilesForRole\",\"iam:DeleteRole\",\"iam:TagRole\",\"iam:UntagRole\",\"iam:UpdateRole\",\"iam:UpdateRoleDescription\",\"iam:UpdateAssumeRolePolicy\"],\"Resource\":\"arn:aws:iam::*:role/basefresh-prod-*\"},{\"Sid\":\"PassRolesToLambda\",\"Effect\":\"Allow\",\"Action\":\"iam:PassRole\",\"Resource\":\"arn:aws:iam::*:role/basefresh-prod-*\",\"Condition\":{\"StringEquals\":{\"iam:PassedToService\":\"lambda.amazonaws.com\"}}},{\"Sid\":\"NeverTouchSelfOrBoundary\",\"Effect\":\"Deny\",\"Action\":\"iam:*\",\"Resource\":[\"arn:aws:iam::*:role/basefresh-prod-deploy\",\"arn:aws:iam::*:policy/basefresh-prod-boundary\"]},{\"Sid\":\"NeverDropBoundary\",\"Effect\":\"Deny\",\"Action\":\"iam:DeleteRolePermissionsBoundary\",\"Resource\":\"*\"},{\"Sid\":\"StateList\",\"Effect\":\"Allow\",\"Action\":\"s3:ListBucket\",\"Resource\":\"arn:aws:s3:::pebble-prd-pulumi-state\",\"Condition\":{\"StringLike\":{\"s3:prefix\":[\"basefresh/prod\",\"basefresh/prod/*\"]}}},{\"Sid\":\"StateObjects\",\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:PutObject\",\"s3:DeleteObject\"],\"Resource\":[\"arn:aws:s3:::pebble-prd-pulumi-state/basefresh/prod/*\"]},{\"Sid\":\"StateSecrets\",\"Effect\":\"Allow\",\"Action\":[\"kms:Encrypt\",\"kms:Decrypt\",\"kms:GenerateDataKey\",\"kms:DescribeKey\"],\"Resource\":\"arn:aws:kms:ap-southeast-1:123456789012:key/pebble-prd-pulumi-prod\"}]}",
+        "role": "basefresh-prod-deploy"
+      },
+      "secretInputs": [],
+      "outputs": null
+    }
+  ],
+  "database staging, mixed-case admin host": [
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "type": "pebbletech:index:Database",
+      "name": "db",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "databaseName": "basefresh_stg",
+        "directUrl": "postgresql://basefresh_stg_owner.abc123:mock-password-db-owner-password@SIN.Pg.PSDB.cloud:5432/basefresh_stg?sslmode=verify-full",
+        "ownerRole": "basefresh_stg_owner",
+        "pooledUrl": "postgresql://basefresh_stg_runtime.abc123:mock-password-db-runtime-password@SIN.Pg.PSDB.cloud:6432/basefresh_stg?sslmode=verify-full"
+      }
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+      "type": "postgresql:index/database:Database",
+      "name": "db",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member"
+      ],
+      "inputs": {
+        "name": "basefresh_stg",
+        "owner": "basefresh_stg_owner"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-sequences",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-sequences",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "sequence",
+        "owner": "basefresh_stg_owner",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_stg_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-tables",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-tables",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "table",
+        "owner": "basefresh_stg_owner",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_stg_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-revoke-public",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-revoke-public",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "database",
+        "privileges": [],
+        "role": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-connect",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-connect",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "database",
+        "privileges": [
+          "CONNECT"
+        ],
+        "role": "basefresh_stg_runtime"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-schema",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-schema",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "schema",
+        "privileges": [
+          "USAGE"
+        ],
+        "role": "basefresh_stg_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-sequences",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-sequences",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "sequence",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_stg_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-tables",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-tables",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "table",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_stg_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-admin-member",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_stg_owner",
+        "role": "postgres"
+      },
+      "secretInputs": [
+        "role"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-operators",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-operators",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_stg_owner",
+        "role": "pebble_operators"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner",
+      "type": "postgresql:index/role:Role",
+      "name": "db-owner",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password"
+      ],
+      "inputs": {
+        "login": true,
+        "name": "basefresh_stg_owner",
+        "password": "mock-password-db-owner-password"
+      },
+      "secretInputs": [
+        "password"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime",
+      "type": "postgresql:index/role:Role",
+      "name": "db-runtime",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-runtime-password"
+      ],
+      "inputs": {
+        "login": true,
+        "name": "basefresh_stg_runtime",
+        "password": "mock-password-db-runtime-password"
+      },
+      "secretInputs": [
+        "password"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$pulumi:providers:postgresql::db-admin",
+      "type": "pulumi:providers:postgresql",
+      "name": "db-admin",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "connectTimeout": "180",
+        "database": "postgres",
+        "databaseUsername": "postgres",
+        "host": "SIN.Pg.PSDB.cloud",
+        "password": "admin-pw",
+        "port": "5432",
+        "sslmode": "verify-full",
+        "superuser": "false",
+        "username": "postgres.abc123"
+      },
+      "secretInputs": [
+        "database",
+        "databaseUsername",
+        "host",
+        "password",
+        "username"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password",
+      "type": "random:index/randomPassword:RandomPassword",
+      "name": "db-owner-password",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "length": 32,
+        "special": false
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-runtime-password",
+      "type": "random:index/randomPassword:RandomPassword",
+      "name": "db-runtime-password",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "length": 32,
+        "special": false
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "staging",
+        "namespace": "basefresh-staging",
+        "product": "basefresh"
+      }
+    }
+  ],
+  "database staging, -POOLER admin host": [
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "type": "pebbletech:index:Database",
+      "name": "db",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "databaseName": "basefresh_stg",
+        "directUrl": "postgresql://basefresh_stg_owner.abc123:mock-password-db-owner-password@X-POOLER.pg.psdb.cloud:5432/basefresh_stg?sslmode=verify-full",
+        "ownerRole": "basefresh_stg_owner",
+        "pooledUrl": "postgresql://basefresh_stg_runtime.abc123:mock-password-db-runtime-password@X-POOLER.pg.psdb.cloud:6432/basefresh_stg?sslmode=verify-full"
+      }
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+      "type": "postgresql:index/database:Database",
+      "name": "db",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member"
+      ],
+      "inputs": {
+        "name": "basefresh_stg",
+        "owner": "basefresh_stg_owner"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-sequences",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-sequences",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "sequence",
+        "owner": "basefresh_stg_owner",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_stg_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/defaultPrivileges:DefaultPrivileges::db-runtime-default-tables",
+      "type": "postgresql:index/defaultPrivileges:DefaultPrivileges",
+      "name": "db-runtime-default-tables",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "table",
+        "owner": "basefresh_stg_owner",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_stg_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-revoke-public",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-revoke-public",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "database",
+        "privileges": [],
+        "role": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-connect",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-connect",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "database",
+        "privileges": [
+          "CONNECT"
+        ],
+        "role": "basefresh_stg_runtime"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-schema",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-schema",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "schema",
+        "privileges": [
+          "USAGE"
+        ],
+        "role": "basefresh_stg_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-sequences",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-sequences",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "sequence",
+        "privileges": [
+          "USAGE",
+          "SELECT",
+          "UPDATE"
+        ],
+        "role": "basefresh_stg_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grant:Grant::db-runtime-tables",
+      "type": "postgresql:index/grant:Grant",
+      "name": "db-runtime-tables",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/database:Database::db",
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime"
+      ],
+      "inputs": {
+        "database": "basefresh_stg",
+        "objectType": "table",
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ],
+        "role": "basefresh_stg_runtime",
+        "schema": "public"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-admin-member",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-admin-member",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_stg_owner",
+        "role": "postgres"
+      },
+      "secretInputs": [
+        "role"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/grantRole:GrantRole::db-operators",
+      "type": "postgresql:index/grantRole:GrantRole",
+      "name": "db-operators",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "withAdminOption"
+      ],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner"
+      ],
+      "inputs": {
+        "grantRole": "basefresh_stg_owner",
+        "role": "pebble_operators"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-owner",
+      "type": "postgresql:index/role:Role",
+      "name": "db-owner",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password"
+      ],
+      "inputs": {
+        "login": true,
+        "name": "basefresh_stg_owner",
+        "password": "mock-password-db-owner-password"
+      },
+      "secretInputs": [
+        "password"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$postgresql:index/role:Role::db-runtime",
+      "type": "postgresql:index/role:Role",
+      "name": "db-runtime",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-runtime-password"
+      ],
+      "inputs": {
+        "login": true,
+        "name": "basefresh_stg_runtime",
+        "password": "mock-password-db-runtime-password"
+      },
+      "secretInputs": [
+        "password"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$pulumi:providers:postgresql::db-admin",
+      "type": "pulumi:providers:postgresql",
+      "name": "db-admin",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "connectTimeout": "180",
+        "database": "postgres",
+        "databaseUsername": "postgres",
+        "host": "X-POOLER.pg.psdb.cloud",
+        "password": "admin-pw",
+        "port": "5432",
+        "sslmode": "verify-full",
+        "superuser": "false",
+        "username": "postgres.abc123"
+      },
+      "secretInputs": [
+        "database",
+        "databaseUsername",
+        "host",
+        "password",
+        "username"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-owner-password",
+      "type": "random:index/randomPassword:RandomPassword",
+      "name": "db-owner-password",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "length": 32,
+        "special": false
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Database$random:index/randomPassword:RandomPassword::db-runtime-password",
+      "type": "random:index/randomPassword:RandomPassword",
+      "name": "db-runtime-password",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:Database::db",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "length": 32,
+        "special": false
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "staging",
+        "namespace": "basefresh-staging",
+        "product": "basefresh"
+      }
+    }
+  ]
+}

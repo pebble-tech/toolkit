@@ -19,7 +19,7 @@ export {
   type StageKind,
   type StateKey,
 } from './stage.js';
-export { Database, OPERATORS_GROUP, type DatabaseArgs, type DatabaseRuntime } from './database.js';
+export { Database, OPERATORS_GROUP, type DatabaseArgs, type DatabaseFlavor, type DatabaseRuntime } from './database.js';
 export {
   ApiFunction,
   MAX_API_TIMEOUT_SECONDS,
