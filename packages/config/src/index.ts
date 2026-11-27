@@ -11,5 +11,6 @@ export const lintStaged = {
 export const presets = {
   tsconfig: '@pebbletech/config/tsconfig.base.json',
   oxlint: '@pebbletech/config/oxlint.json',
+  oxlintSite: '@pebbletech/config/oxlint-site.json',
   oxfmt: '@pebbletech/config/oxfmt.json',
 } as const;
