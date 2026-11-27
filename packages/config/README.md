@@ -43,7 +43,8 @@ and the import groups above.
 ## Renovate
 
 The Renovate preset is [`renovate.json`](./renovate.json) in this directory. Renovate reads it from the toolkit repo
-on GitHub, not from npm, so it is not in the package. A repo's `renovate.json` names it as its only `extends` entry:
+on GitHub, not from npm, so it is not in the package. A repo's `renovate.json` names it as its only `extends` entry (a second entry is the opt-in
+[auto-merge](#auto-merge-opt-in) preset):
 
 ```json
 "extends": ["github>pebble-tech/toolkit//packages/config/renovate"]
@@ -71,6 +72,7 @@ What the preset sets:
   The regex manager reads the pins, and the GitHub Actions manager leaves them alone
   ([`@pebbletech/infra`, Renovate](../infra/README.md#renovate)).
 - Node and pnpm pins (`node`, `pnpm`, `@types/node`) are never updated by the bot.
+- No auto-merge: see [Auto-merge (opt-in)](#auto-merge-opt-in).
 
 ### A repo's own groups
 
@@ -88,9 +90,26 @@ A repo that moves to the preset from a config with exclusion lists should check 
 exclude (base-app's tooling group: oxlint, prettier, tsx and the rest) now also takes those packages' minors and
 patches, which the old catch-all used to take.
 
-### Auto-merge
+### Auto-merge (opt-in)
 
-Only Payload and Next.js updates from npm auto-merge, and only two kinds:
+The preset merges nothing by itself: every update waits for a person. Auto-merge is a second preset,
+[`renovate-automerge.json`](./renovate-automerge.json), that a repo adds as a second `extends` entry, after the first:
+
+```json
+"extends": [
+  "github>pebble-tech/toolkit//packages/config/renovate",
+  "github>pebble-tech/toolkit//packages/config/renovate-automerge"
+]
+```
+
+Opting in needs a branch protection rule or ruleset on the default branch with required checks. Without them, nothing
+holds the merge back: Renovate merges on its own status gate, and a skipped or path-filtered workflow does not stop it.
+On a site repo that merge starts the staging deploy. Private repos get branch protection and rulesets only on a paid
+GitHub plan, so a private repo on the Free plan must not opt in.
+
+No repo opts in today, the toolkit included.
+
+With the opt-in, only Payload and Next.js updates from npm auto-merge, and only two kinds:
 
 - patch updates, unless Renovate marks the update breaking (a prerelease step such as a canary, or a patch of a 0.x
   version);
@@ -103,9 +122,9 @@ Renovate never takes auto-merge off a PR once it has turned it on, even when it 
 same branch. That is why patches have their own branch: a branch that is set to auto-merge only ever holds patches,
 and a minor goes to a different branch and PR.
 
-The preset uses GitHub's own auto-merge (`automergeType: "pr"`, `platformAutomerge: true`): Renovate turns it on when it
-opens the PR, and GitHub merges once the branch's rules are met. That makes the repo's settings the safeguard. The
-preset changes none of them, so set them yourself:
+The opt-in preset uses GitHub's own auto-merge (`automergeType: "pr"`, `platformAutomerge: true`): Renovate turns it on
+when it opens the PR, and GitHub merges once the branch's rules are met. That makes the repo's settings the safeguard.
+The preset changes none of them, so set them yourself before opting in:
 
 - A branch protection rule or ruleset on the default branch that requires the CI checks (`verify`, and anything
   else that must pass). Without required checks, GitHub refuses to turn auto-merge on, and Renovate merges the PR

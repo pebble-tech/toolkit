@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Opt-in on top of Pebble's shared Renovate preset: GitHub auto-merge for Payload and Next.js patch and security updates. Only for a repo whose default branch has required checks (branch protection or a ruleset)",
+  "automergeType": "pr",
+  "platformAutomerge": true,
+  "packageRules": [
+    {
+      "description": "Payload and Next.js patches auto-merge once the required checks pass, unless Renovate marks them breaking (a prerelease step, a 0.x patch); their minors and majors wait for a person",
+      "matchDatasources": ["npm"],
+      "matchPackageNames": ["payload", "/^@payloadcms\\//", "next", "/^@next\\//", "eslint-config-next"],
+      "matchUpdateTypes": ["patch"],
+      "matchJsonata": ["$not(isBreaking = true)"],
+      "automerge": true
+    },
+    {
+      "description": "Payload and Next.js security fixes that are a patch or a minor auto-merge once the required checks pass; a major security fix waits for a person. Renovate sets isVulnerabilityAlert from its alert rules, which it appends after every rule here and applies before this rule is read again",
+      "matchDatasources": ["npm"],
+      "matchPackageNames": ["payload", "/^@payloadcms\\//", "next", "/^@next\\//", "eslint-config-next"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "matchJsonata": ["isVulnerabilityAlert = true"],
+      "automerge": true
+    }
+  ]
+}

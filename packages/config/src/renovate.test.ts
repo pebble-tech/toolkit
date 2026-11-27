@@ -20,7 +20,7 @@ interface Preset {
   automerge?: boolean;
   automergeType?: string;
   platformAutomerge?: boolean;
-  vulnerabilityAlerts: Record<string, unknown>;
+  vulnerabilityAlerts?: Record<string, unknown>;
   customManagers: { managerFilePatterns: string[]; matchStrings: string[] }[];
   packageRules: PackageRule[];
 }
@@ -29,11 +29,14 @@ const packageDir = join(import.meta.dirname, '..');
 const repoRoot = join(packageDir, '..', '..');
 const read = (path: string): string => readFileSync(path, 'utf8');
 const preset = JSON.parse(read(join(packageDir, 'renovate.json'))) as Preset;
+const optIn = JSON.parse(read(join(packageDir, 'renovate-automerge.json'))) as Preset;
+// A repo that extends both: Renovate puts a preset's rules in extends order, so the opt-in's come after the base's
+const combinedRules = [...preset.packageRules, ...optIn.packageRules];
 const rules = preset.packageRules;
 
 const payload = ['payload', '/^@payloadcms\\//'];
 const next = ['next', '/^@next\\//', 'eslint-config-next'];
-const automergeRules = rules.filter((rule) => rule.automerge === true);
+const automergeRules = combinedRules.filter((rule) => rule.automerge === true);
 
 describe('the shared Renovate preset', () => {
   test('the minor and patch catch-all is the first rule and names no packages, so later groups win', () => {
@@ -59,7 +62,31 @@ describe('the shared Renovate preset', () => {
     ]);
   });
 
-  test('only two rules auto-merge: Payload and Next.js npm patches that are not breaking, and their patch or minor security fixes', () => {
+  // No rule, and no top-level or vulnerability-alert setting, sets automerge: so no update type (patch, minor, major,
+  // security) of any package (Payload, Next.js or other) can auto-merge from the base preset alone
+  test('on its own never auto-merges anything: no rule, top-level or security setting sets automerge', () => {
+    expect(rules.filter((rule) => 'automerge' in rule)).toEqual([]);
+    expect(preset.automerge).toBeUndefined();
+    expect(preset.vulnerabilityAlerts?.automerge).toBeUndefined();
+  });
+
+  test('on its own leaves GitHub auto-merge and the merge type unset', () => {
+    expect([preset.automergeType, preset.platformAutomerge]).toEqual([undefined, undefined]);
+  });
+
+  test('the opt-in preset is only auto-merge: the two rules, the merge type and platform auto-merge', () => {
+    expect(Object.keys(optIn).sort()).toEqual([
+      '$schema',
+      'automergeType',
+      'description',
+      'packageRules',
+      'platformAutomerge',
+    ]);
+    expect([optIn.automergeType, optIn.platformAutomerge]).toEqual(['pr', true]);
+    expect(optIn.packageRules).toEqual(automergeRules);
+  });
+
+  test('only two rules auto-merge once a repo opts in: Payload and Next.js npm patches that are not breaking, and their patch or minor security fixes', () => {
     expect(automergeRules).toEqual([
       {
         description: expect.any(String),
@@ -81,11 +108,10 @@ describe('the shared Renovate preset', () => {
   });
 
   test('the auto-merge rules come after every group, and nothing else turns auto-merge on', () => {
-    const lastGroup = Math.max(...rules.map((rule, index) => (rule.groupName === undefined ? -1 : index)));
-    expect(rules.slice(-automergeRules.length)).toEqual(automergeRules);
-    expect(rules.length - automergeRules.length).toBeGreaterThan(lastGroup);
-    expect([preset.automerge, preset.vulnerabilityAlerts.automerge]).toEqual([undefined, undefined]);
-    expect([preset.automergeType, preset.platformAutomerge]).toEqual(['pr', true]);
+    const lastGroup = Math.max(...combinedRules.map((rule, index) => (rule.groupName === undefined ? -1 : index)));
+    expect(combinedRules.slice(-automergeRules.length)).toEqual(automergeRules);
+    expect(combinedRules.length - automergeRules.length).toBeGreaterThan(lastGroup);
+    expect([optIn.automerge, optIn.vulnerabilityAlerts]).toEqual([undefined, undefined]);
   });
 
   test.each([
