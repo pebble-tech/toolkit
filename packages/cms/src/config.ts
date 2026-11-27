@@ -11,6 +11,8 @@ import { USERS_SLUG, createUsersCollection } from './users.js';
 export const DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 export const CMS_SCHEMA = 'cms';
 const MIN_SECRET_LENGTH = 32;
+// Placeholders published in templates (the base-site skeleton, create-payload-app's .env.example): never a real secret.
+const KNOWN_PLACEHOLDERS = new Set(['dev-only-secret-change-in-production', 'YOUR_SECRET_HERE']);
 
 type PoolOptions = Parameters<typeof postgresAdapter>[0]['pool'];
 
@@ -58,15 +60,15 @@ function devOrTest(): boolean {
 }
 
 /**
- * `PAYLOAD_SECRET`, refused when unset or shorter than 32 characters outside development and test. In development and
+ * `PAYLOAD_SECRET`, refused when unset, a known template placeholder or shorter than 32 characters outside development and test. In development and
  * test an unset secret becomes a random one for this process (sessions end on restart); there is no literal fallback.
  */
 function payloadSecret(): string {
   const secret = process.env.PAYLOAD_SECRET;
-  if (secret && secret.length >= MIN_SECRET_LENGTH) return secret;
+  if (secret && secret.length >= MIN_SECRET_LENGTH && !KNOWN_PLACEHOLDERS.has(secret)) return secret;
   if (devOrTest() && !secret) return randomBytes(32).toString('hex');
   throw new Error(
-    `PAYLOAD_SECRET must be set to at least ${MIN_SECRET_LENGTH} characters (NODE_ENV=${process.env.NODE_ENV ?? 'unset'})`
+    `PAYLOAD_SECRET must be set to a generated value of at least ${MIN_SECRET_LENGTH} characters (NODE_ENV=${process.env.NODE_ENV ?? 'unset'})`
   );
 }
 

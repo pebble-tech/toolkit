@@ -43,13 +43,29 @@
     "@payloadcms/storage-s3": "^3.94.2",
     "payload": "^3.94.2"
   },
+  "peerDependenciesMeta": {
+    "@payloadcms/db-postgres": {
+      "optional": true
+    },
+    "@payloadcms/richtext-lexical": {
+      "optional": true
+    },
+    "@payloadcms/storage-s3": {
+      "optional": true
+    },
+    "payload": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@payloadcms/db-postgres": "3.94.2",
     "@payloadcms/richtext-lexical": "3.94.2",
     "@payloadcms/storage-s3": "3.94.2",
     "@types/node": "catalog:",
+    "@types/pg": "8.23.1",
     "graphql": "16.10.0",
     "payload": "3.94.2",
+    "pg": "8.23.1",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },

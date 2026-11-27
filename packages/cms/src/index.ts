@@ -18,8 +18,8 @@ export { livePreviewLink, previewLink } from './preview.js';
 export type { PreviewLinkOptions } from './preview.js';
 export { sendPurge, withGlobalRevalidateHooks, withRevalidateHooks } from './revalidate.js';
 export type { PurgeTarget, RevalidateOptions } from './revalidate.js';
-export { notifySlackOnCreate, postToSlack } from './slack.js';
-export type { SlackMessage, SlackOptions } from './slack.js';
+export { formatStampNotice, notifySlackOnCreate, postToSlack } from './slack.js';
+export type { SlackMessage, SlackOptions, StampNotice } from './slack.js';
 export {
   FIRST_ADMIN_SEED_CONTEXT,
   USERS_SLUG,
