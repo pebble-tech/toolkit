@@ -1,0 +1,8 @@
+{
+  "name": "site-deploy-vercel-cli",
+  "private": true,
+  "description": "The Vercel CLI site-deploy installs with npm ci --ignore-scripts, from this directory's lockfile",
+  "dependencies": {
+    "vercel": "65.15.0"
+  }
+}

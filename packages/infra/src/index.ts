@@ -1,5 +1,6 @@
 export * from './errors.js';
 export {
+  STAGE_ZONES,
   Stage,
   alarmTopicName,
   assertProduct,
@@ -30,7 +31,9 @@ export {
 export { Worker, type WorkerArgs, type WorkerBucket } from './worker.js';
 export {
   VercelProject,
+  type ClientDnsRecord,
   type NodeVersion,
+  type ProductionDomain,
   type PreviewProtection,
   type SkewProtectionMaxAge,
   type VercelProjectArgs,

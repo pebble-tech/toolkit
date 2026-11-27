@@ -16,6 +16,8 @@ export interface Registration {
   retainOnDelete: boolean;
   /** The `deleteBeforeReplace` option: a replacement deletes this resource before creating the new one. */
   deleteBeforeReplace: boolean;
+  /** The provider reference (`<provider URN>::<id>`) the resource was sent with; empty for the default provider. */
+  provider: string;
   /** The `import` option: an existing cloud resource this one adopts. */
   importId: string;
   /** The `ignoreChanges` option: input properties the engine leaves out of its diff. */
@@ -184,6 +186,7 @@ export async function runProgram<T>(
       protect: request.getProtect() ?? false,
       retainOnDelete: request.getRetainondelete() ?? false,
       deleteBeforeReplace: request.getDeletebeforereplace() ?? false,
+      provider: request.getProvider(),
       importId: request.getImportid(),
       ignoreChanges: request.getIgnorechangesList(),
       dependencies: request.getDependenciesList(),

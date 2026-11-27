@@ -2,13 +2,16 @@ name: Actions
 
 # The setup and pulumi actions in .github/actions, run as a product's workflow runs them, with no cloud: the Pulumi
 # state is a local file backend. Runs on a pull request that changes the actions, the package whose version they read,
-# or the lockfile that sets the Pulumi version.
+# or the lockfile that sets the Pulumi version. The site-deploy job runs site-deploy's artifact prep and the locked
+# Vercel CLI install on hostile artifacts, with a fake vercel first on PATH and no Vercel credentials.
 
 on:
   pull_request:
     paths:
       - .github/actions/**
+      - .github/site-deploy/**
       - .github/workflows/actions.yml
+      - .github/workflows/site-*.yml
       - packages/infra/**
       - pnpm-lock.yaml
 
@@ -144,3 +147,87 @@ jobs:
           pnpm --version
           test ! -e "$HOME/.pulumi/bin/pulumi"
           test -z "${GITHUB_TOKEN:-}"
+
+  site-deploy:
+    runs-on: ubuntu-latest
+    env:
+      SCRIPT: ${{ github.workspace }}/.github/site-deploy/site-deploy.mjs
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      # It records where it ran, what it was given and what the directory held, and deploys nothing. These steps run the
+      # script's commands as site-deploy.yml's steps do, not those steps' own text: that text is held to its rules by
+      # packages/infra/src/site-deploy.test.ts, and the real CLI and GitHub API calls are not run here.
+      - name: A fake vercel first on PATH
+        run: |
+          mkdir -p "$RUNNER_TEMP/fake"
+          cat > "$RUNNER_TEMP/fake/vercel" << 'EOF'
+          #!/bin/sh
+          {
+            echo "cwd=$(pwd)"
+            echo "args=$*"
+            echo "project=$VERCEL_PROJECT_ID org=$VERCEL_ORG_ID"
+            find . -type f | sort
+          } > "$RUNNER_TEMP/fake/calls"
+          echo https://fake-deployment.vercel.app
+          EOF
+          chmod +x "$RUNNER_TEMP/fake/vercel"
+          echo "$RUNNER_TEMP/fake" >> "$GITHUB_PATH"
+
+      - name: A hostile artifact (project link, builds.json, a package.json with a postinstall)
+        run: |
+          a="$RUNNER_TEMP/hostile"
+          mkdir -p "$a/static" "$a/functions/api.func"
+          echo '{"version":3}' > "$a/config.json"
+          echo '{"target":"production"}' > "$a/builds.json"
+          echo '{"projectId":"prj_attacker","orgId":"team_attacker"}' > "$a/project.json"
+          echo '{"scripts":{"postinstall":"touch $RUNNER_TEMP/pwned"}}' > "$a/package.json"
+          echo '<h1>site</h1>' > "$a/static/index.html"
+          echo '{"runtime":"nodejs24.x","handler":"index.mjs"}' > "$a/functions/api.func/.vc-config.json"
+          echo 'export default () => new Response("ok")' > "$a/functions/api.func/index.mjs"
+
+      - name: Prepare it, and deploy it with main's ids through the fake vercel
+        env:
+          VERCEL_PROJECT_ID: prj_main
+          VERCEL_ORG_ID: team_main
+        run: |
+          node "$SCRIPT" prepare "$RUNNER_TEMP/hostile" "$RUNNER_TEMP/deploy"
+          cd "$RUNNER_TEMP/deploy"
+          vercel deploy --prebuilt --environment=preview --yes > "$RUNNER_TEMP/deploy-out"
+          GITHUB_OUTPUT="$RUNNER_TEMP/outputs" node "$SCRIPT" deployment-url "$RUNNER_TEMP/deploy-out"
+          grep -qx 'url=https://fake-deployment.vercel.app' "$RUNNER_TEMP/outputs"
+          cat "$RUNNER_TEMP/fake/calls"
+          grep -qx "project=prj_main org=team_main" "$RUNNER_TEMP/fake/calls"
+          # Every file the CLI could see is under .vercel/output, and no project link or build report is among them.
+          # (`if`, not `!`: bash -e ignores a negated command's failure.)
+          if grep '^\./' "$RUNNER_TEMP/fake/calls" | grep -v '^\./\.vercel/output/'; then exit 1; fi
+          if grep -e project.json -e builds.json "$RUNNER_TEMP/fake/calls"; then exit 1; fi
+          test ! -e package.json
+          test ! -e "$RUNNER_TEMP/pwned"
+
+      - name: A symlink, a .vercel directory and a function's filePathMap are each refused
+        run: |
+          for case in symlink dotvercel filepathmap; do
+            a="$RUNNER_TEMP/$case"
+            mkdir -p "$a/static" "$a/functions/api.func"
+            echo '{"version":3}' > "$a/config.json"
+            echo '{"runtime":"nodejs24.x"}' > "$a/functions/api.func/.vc-config.json"
+            case "$case" in
+              symlink) ln -s /etc/passwd "$a/static/passwd" ;;
+              dotvercel) mkdir -p "$a/static/.vercel" && echo '{}' > "$a/static/.vercel/project.json" ;;
+              filepathmap) echo '{"filePathMap":{"a.js":"/etc/passwd"}}' > "$a/functions/api.func/.vc-config.json" ;;
+            esac
+            if node "$SCRIPT" prepare "$a" "$RUNNER_TEMP/out-$case"; then
+              echo "::error::prepare took the $case artifact"
+              exit 1
+            fi
+          done
+
+      - name: The locked Vercel CLI installs with scripts off, at the workflow's default version
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix .github/site-deploy/vercel
+          expected="$(node -p "require('./.github/site-deploy/vercel/package-lock.json').packages['node_modules/vercel'].version")"
+          test "$(.github/site-deploy/vercel/node_modules/.bin/vercel --version | tail -n 1)" = "$expected"

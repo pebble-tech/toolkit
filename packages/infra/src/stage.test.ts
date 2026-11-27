@@ -69,8 +69,21 @@ describe('Stage', () => {
     expect(stage.tags).toEqual({ product: 'basefresh', env: 'prod', 'managed-by': 'pulumi' });
   });
 
-  test.each(['pebble', 'pebble-stg', 'pebblefresh'])('refuses the reserved product id %s', (product) => {
-    expect(() => new Stage('stage', { product, stack: 'staging' })).toThrow(StageError);
+  test.each([
+    ['pebble', /product id "pebble" is reserved/],
+    ['pebble-stg', /one DNS label/],
+  ])('refuses the reserved product id %s', (product, message) => {
+    expect(() => new Stage('stage', { product, stack: 'staging' })).toThrow(message);
+  });
+
+  // Only the id `pebble` could name a `pebble-*` resource: a product id has no hyphen, so `pebbletech-prod` is never
+  // `pebble-<anything>`'s.
+  test.each(['pebbletech', 'pebblefresh'])('accepts the product id %s, whose names stay its own', (product) => {
+    const stage = new Stage('stage', { product, stack: 'prod' });
+    expect([stage.name('web'), stage.hostname('app', 'pebbletech.my')]).toEqual([
+      `${product}-prod-web`,
+      `app-${product}.pebbletech.my`,
+    ]);
   });
 
   test.each(['Base', 'base_app', '-base', '', 'a', 'base-staging', 'base-pr', 'shared-tools'])(
@@ -105,6 +118,54 @@ describe('Stage', () => {
     expect(() => stage.assertOwnsHostname('app-basefresh-stg.pebbletech.my')).toThrow(NamespaceError);
     expect(() => stage.assertOwnsHostname('app-other.pebbletech.my')).toThrow(NamespaceError);
     expect(() => stage.assertOwnsHostname('basefresh.pebbletech.my')).toThrow(NamespaceError);
+  });
+
+  test.each(['prod', 'staging', 'pr-7'])(
+    '%s: the stage-shaped rule still refuses a custom or apex hostname',
+    async (stack) => {
+      const { stage } = await stageIn(stack);
+      expect(() => stage.assertOwnsHostname('new.pebbletech.my')).toThrow(NamespaceError);
+      expect(() => stage.assertOwnsHostname('pebbletech.my')).toThrow(NamespaceError);
+    }
+  );
+
+  test('prod takes a custom or apex hostname inside its zone with no hyphen below the zone', async () => {
+    const { stage } = await stageIn('prod');
+    const accepted = [
+      ['new.pebbletech.my', 'pebbletech.my'],
+      ['pebbletech.my', 'pebbletech.my'],
+      ['www.new.pebbletech.my', 'pebbletech.my'],
+      ['site2.client.com.my', 'client.com.my'],
+      ['my-brand.com', 'my-brand.com'],
+      // A zone whose name ends in a stage zone's name without the dot is not inside it.
+      ['new.xpebbletech.my', 'xpebbletech.my'],
+      ['xpebbletech.my', 'xpebbletech.my'],
+    ];
+    expect(() => {
+      for (const [host, zone] of accepted) stage.assertCustomHostname(host!, zone!);
+    }).not.toThrow();
+  });
+
+  test.each([
+    ['app-basefresh.pebbletech.my', 'pebbletech.my', /shaped like a stage hostname/],
+    ['api-other-stg.pebbletech.my', 'pebbletech.my', /shaped like a stage hostname/],
+    ['new.app-basefresh-pr-7.pebbletech.my', 'pebbletech.my', /shaped like a stage hostname/],
+    ['new.pebbletech.my', 'other.my', /not in the zone other.my/],
+    ['xpebbletech.my', 'pebbletech.my', /not in the zone pebbletech.my/],
+    ['new.pebbletech.my.', 'pebbletech.my', /not a lowercase domain name/],
+    ['NEW.pebbletech.my', 'pebbletech.my', /not a lowercase domain name/],
+    ['new.pebbletech.my', 'my', /zone "my"/],
+    ['new..pebbletech.my', 'pebbletech.my', /not a lowercase domain name/],
+    ['app-other.pebbletech.my', 'app-other.pebbletech.my', /is a name inside the stage zone pebbletech.my/],
+    ['new.sub.pebbletech.my', 'sub.pebbletech.my', /is a name inside the stage zone pebbletech.my/],
+  ])('prod refuses the custom hostname %s in zone %s', async (hostname, zone, message) => {
+    const { stage } = await stageIn('prod');
+    expect(() => stage.assertCustomHostname(hostname, zone)).toThrow(message);
+  });
+
+  test.each(['staging', 'pr-7', 'shared'])('%s may not claim a custom or apex hostname', async (stack) => {
+    const { stage } = await stageIn(stack);
+    expect(() => stage.assertCustomHostname('new.pebbletech.my', 'pebbletech.my')).toThrow(OwnershipError);
   });
 
   test('shared has no hostnames or databases', async () => {

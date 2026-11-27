@@ -549,8 +549,10 @@ describe('DeployRole', () => {
     });
   });
 
-  test('refuses a pebble product', async () => {
-    await expect(roleFor('staging', { product: 'pebblefresh' })).rejects.toThrow(StageError);
+  test('refuses the product id pebble, and takes pebbletech as a product of its own', async () => {
+    await expect(roleFor('staging', { product: 'pebble' })).rejects.toThrow(StageError);
+    const { resources } = await roleFor('staging', { product: 'pebbletech' });
+    expect(find(resources, 'pebbletech:index:DeployRole').outputs.roleName).toBe('pebbletech-staging-deploy');
   });
 
   test('refuses a product id that is not one DNS label', async () => {

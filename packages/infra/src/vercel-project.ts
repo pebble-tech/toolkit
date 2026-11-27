@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { NamespaceError, OwnershipError } from './errors.js';
 import { assertNoSecretsInPlainText } from './secrets.js';
-import type { Stage } from './stage.js';
+import { STAGE_ZONES, type Stage } from './stage.js';
 
 /**
  * What `shared` deploys once to a new project, shipped in the package: a static page and the `vercel.json` that builds
@@ -112,8 +112,47 @@ export interface VercelProjectArgs {
   /** Sensitive env vars: write-only in Vercel. */
   secrets?: Record<string, pulumi.Input<string>>;
   plainTextAllowed?: string[];
+  /**
+   * The CNAME target every domain points at, such as `cname.vercel-dns.com`. Given, it replaces the
+   * `getDomainConfig` lookup, which a project-scoped Vercel token may not be allowed to make; the records' names,
+   * types and the domains are unchanged. Unset, each CNAME is the target Vercel recommends for its hostname.
+   */
+  cnameTarget?: pulumi.Input<string>;
   /** The stage's web domain, bound to its environment, with an unproxied CNAME in Cloudflare. */
   domain?: { hostname: string; zoneId: pulumi.Input<string> };
+  /**
+   * `prod` only: production hostnames outside the stage shape, such as `new.pebbletech.my` or the apex
+   * `pebbletech.my`. See [Custom and apex domains](README.md#custom-and-apex-domains).
+   */
+  productionDomains?: ProductionDomain[];
+}
+
+/** A custom or apex production hostname. */
+export interface ProductionDomain {
+  /** The zone's apex (`pebbletech.my`) or a name inside it with no hyphen (`new.pebbletech.my`). */
+  hostname: string;
+  /** The DNS zone's name (`pebbletech.my`). Checked against `zoneId`'s zone when that is given. */
+  zoneName: string;
+  /**
+   * The Cloudflare zone when it is ours: Pulumi makes the unproxied CNAME there (flattened by Cloudflare on the apex).
+   * Leave it out for a client's zone: no DNS is made, and `clientDnsRecords` lists the records to add there.
+   */
+  zoneId?: pulumi.Input<string>;
+  /**
+   * The `_vercel.<zoneName>` TXT record's value, copied from the `verification` output (or Vercel's Domains page),
+   * such as `vc-domain-verify=new.pebbletech.my,abc123` for `new.pebbletech.my` (another hostname's is refused). Pulumi makes that record in `zoneId`'s zone. A fixed value,
+   * so the record never depends on whether Vercel has verified the hostname yet; leave it out once verified to drop
+   * the record from the state (it stays in the zone). Needs `zoneId`.
+   */
+  verificationTxt?: string;
+}
+
+/** A DNS record a client adds in its own zone for a production domain. */
+export interface ClientDnsRecord {
+  hostname: string;
+  type: string;
+  name: string;
+  value: string;
 }
 
 /**
@@ -130,13 +169,20 @@ export class VercelProject extends pulumi.ComponentResource {
   readonly bypassSecret: pulumi.Output<string> | undefined;
   /** Staging/prod: `https://<hostname>` when a domain is bound. */
   readonly url: string | undefined;
+  /**
+   * Prod with `productionDomains`: for each hostname, the routing record (a CNAME, or Vercel's A records for an apex in
+   * a client's zone) and the TXT challenges Vercel lists for it, to add in a zone Pulumi does not manage.
+   */
+  readonly clientDnsRecords: pulumi.Output<ClientDnsRecord[]> | undefined;
+  /** Prod with `productionDomains`: Vercel's ownership challenges by hostname, empty once a hostname is verified. */
+  readonly verification: pulumi.Output<Record<string, vercel.types.output.ProjectDomainVerification[]>> | undefined;
 
   constructor(name: string, args: VercelProjectArgs, opts?: pulumi.ComponentResourceOptions) {
     const { stage } = args;
     stage.requireKind('a Vercel project or its env', ['shared', 'staging', 'prod']);
     if (stage.isShared) {
       if (!args.project) throw new OwnershipError('the shared stack owns the Vercel project: pass `project`');
-      if (args.vars || args.secrets || args.domain || args.projectId) {
+      if (args.vars || args.secrets || args.domain || args.productionDomains || args.projectId) {
         throw new OwnershipError('env vars and domains belong to the staging and prod stacks, not shared');
       }
       const projectName = args.project.name ?? `${stage.product}-web`;
@@ -152,6 +198,7 @@ export class VercelProject extends pulumi.ComponentResource {
         );
       }
       if (args.domain) stage.assertOwnsHostname(args.domain.hostname);
+      assertProductionDomains(stage, args);
       assertNoSecretsInPlainText(`VercelProject ${name}`, args.vars ?? {}, args.plainTextAllowed);
     }
     super('pebbletech:index:VercelProject', name, {}, opts);
@@ -209,6 +256,8 @@ export class VercelProject extends pulumi.ComponentResource {
       this.projectId = project.id;
       this.bypassSecret = pulumi.secret(bypass.secret);
       this.url = undefined;
+      this.clientDnsRecords = undefined;
+      this.verification = undefined;
     } else {
       const projectId = pulumi.output(args.projectId!);
       const scope = args.customEnvironmentId
@@ -240,26 +289,42 @@ export class VercelProject extends pulumi.ComponentResource {
           { projectId, teamId, domain: hostname, customEnvironmentId: args.customEnvironmentId },
           { ...child({ deleteBeforeReplace: true }), retainOnDelete: false }
         );
-        const config = vercel.getDomainConfigOutput(
-          { domain: hostname, projectIdOrName: projectId, teamId },
-          { parent: this, dependsOn: [domain] }
-        );
+        const recommended =
+          args.cnameTarget === undefined
+            ? vercel.getDomainConfigOutput(
+                { domain: hostname, projectIdOrName: projectId, teamId },
+                { parent: this, dependsOn: [domain] }
+              ).recommendedCname
+            : pulumi.output(args.cnameTarget);
         new cloudflare.DnsRecord(
           `${name}-cname`,
           {
             zoneId,
             name: hostname,
             type: 'CNAME',
-            content: config.recommendedCname.apply((cname) => cname.replace(/\.$/, '')),
+            content: recommended.apply((cname) => cname.replace(/\.$/, '')),
             ttl: 1,
             proxied: false,
           },
-          child()
+          // The DNS change waits for Vercel's binding: through the lookup, which waits on the domain, or, with a
+          // fixed target and no lookup, explicitly. Left as it was without `cnameTarget`, so 0.7.0's registration holds.
+          child(args.cnameTarget === undefined ? undefined : { dependsOn: [domain] })
         );
       }
+      const production = (args.productionDomains ?? []).map((spec) =>
+        productionDomain(name, spec, { projectId, teamId, cnameTarget: args.cnameTarget, parent: this, child })
+      );
       this.projectId = projectId;
       this.bypassSecret = undefined;
       this.url = args.domain ? `https://${args.domain.hostname}` : undefined;
+      this.clientDnsRecords = production.length
+        ? pulumi.all(production.map((p) => p.clientDnsRecords)).apply((lists) => lists.flat())
+        : undefined;
+      this.verification = production.length
+        ? pulumi
+            .all(production.map((p) => p.verifications.apply((v) => [p.hostname, v ?? []] as const)))
+            .apply((entries) => Object.fromEntries(entries))
+        : undefined;
     }
 
     this.registerOutputs({
@@ -267,6 +332,116 @@ export class VercelProject extends pulumi.ComponentResource {
       customEnvironmentIds: this.customEnvironmentIds,
       ...(this.bypassSecret ? { bypassSecret: this.bypassSecret } : {}),
       ...(this.url ? { url: this.url } : {}),
+      ...(this.clientDnsRecords ? { clientDnsRecords: this.clientDnsRecords } : {}),
+      ...(this.verification ? { verification: this.verification } : {}),
     });
   }
+}
+
+/** Refuses production domains outside `prod`, outside their zone, shaped like a stage hostname, or named twice. */
+function assertProductionDomains(stage: Stage, args: VercelProjectArgs): void {
+  const domains = args.productionDomains ?? [];
+  if (domains.length === 0) return;
+  const seen = new Set<string>();
+  // The stage domain's zone is a stage zone too: its apex is what follows the `<kind>-<product>[-<suffix>]` label.
+  const stageZones = [
+    ...STAGE_ZONES,
+    ...(args.domain ? [args.domain.hostname.slice(args.domain.hostname.indexOf('.') + 1)] : []),
+  ];
+  for (const { hostname, zoneName, zoneId, verificationTxt } of domains) {
+    stage.assertCustomHostname(hostname, zoneName, stageZones);
+    if (seen.has(hostname)) throw new NamespaceError(`hostname "${hostname}" is bound twice`);
+    seen.add(hostname);
+    // The challenge for this hostname, not another's: vc-domain-verify=<this hostname>,<ASCII code>.
+    const challenge = new RegExp(`^vc-domain-verify=${hostname.replaceAll('.', '\\.')},[A-Za-z0-9_-]+$`);
+    if (verificationTxt !== undefined && !challenge.test(verificationTxt)) {
+      throw new NamespaceError(
+        `hostname "${hostname}": \`verificationTxt\` must be Vercel's challenge for it, vc-domain-verify=${hostname},<code>`
+      );
+    }
+    if (verificationTxt !== undefined && zoneId === undefined) {
+      throw new OwnershipError(`hostname "${hostname}": \`verificationTxt\` makes a record in \`zoneId\`; pass it`);
+    }
+  }
+}
+
+interface DomainContext {
+  projectId: pulumi.Output<string>;
+  teamId: pulumi.Input<string> | undefined;
+  cnameTarget: pulumi.Input<string> | undefined;
+  parent: pulumi.Resource;
+  child: (extra?: pulumi.CustomResourceOptions) => pulumi.CustomResourceOptions;
+}
+
+/**
+ * One production hostname: the project domain on `production`, and, in a zone of ours, the unproxied CNAME and the
+ * opt-in `_vercel` TXT. Resource names carry the hostname, never a list index, so adding or removing one hostname
+ * leaves every other one in place; `${name}-domain` and `${name}-cname` stay the stage domain's.
+ */
+function productionDomain(name: string, spec: ProductionDomain, context: DomainContext) {
+  const { hostname, zoneName } = spec;
+  const { projectId, teamId, cnameTarget, parent, child } = context;
+  const apex = hostname === zoneName;
+  // The zone the id names must be the zone the hostname was checked against: a mismatch fails the preview before
+  // anything is created, since the domain and its records wait on this check.
+  const zoneId =
+    spec.zoneId === undefined
+      ? undefined
+      : pulumi.all([spec.zoneId, cloudflare.getZoneOutput({ zoneId: spec.zoneId }, { parent })]).apply(([id, zone]) => {
+          if (zone.name !== zoneName) {
+            throw new NamespaceError(
+              `zone ${id} is ${zone.name || 'unknown'}, not ${zoneName} (hostname "${hostname}")`
+            );
+          }
+          return id;
+        });
+  // As the stage domain: replaced delete-first and never retained, so a replacement frees the hostname.
+  const domain = new vercel.ProjectDomain(
+    `${name}-domain-${hostname}`,
+    { projectId, teamId, domain: zoneId ? zoneId.apply(() => hostname) : hostname },
+    { ...child({ deleteBeforeReplace: true }), retainOnDelete: false }
+  );
+  const config =
+    cnameTarget === undefined
+      ? vercel.getDomainConfigOutput(
+          { domain: hostname, projectIdOrName: projectId, teamId },
+          { parent, dependsOn: [domain] }
+        )
+      : undefined;
+  const cname = (config ? config.recommendedCname : pulumi.output(cnameTarget!)).apply((value) =>
+    value.replace(/\.$/, '')
+  );
+  if (zoneId) {
+    // On the apex Cloudflare flattens the CNAME; the record's name is the zone's full name.
+    new cloudflare.DnsRecord(
+      `${name}-cname-${hostname}`,
+      { zoneId, name: hostname, type: 'CNAME', content: cname, ttl: 1, proxied: false },
+      // Never pointed at Vercel before Vercel serves the hostname, with or without `cnameTarget`.
+      child({ dependsOn: [domain] })
+    );
+  }
+  if (zoneId && spec.verificationTxt !== undefined) {
+    // The value main passes, never Vercel's live challenge list: that list empties once the hostname is verified, and
+    // a record that read it would have nothing to hold. Retained and, unlike the stage's other prod records, not
+    // protected: leaving the value out drops the record from the state and leaves it in the zone.
+    // Not after the domain: the record answers Vercel's challenge, so it may exist before the binding does.
+    new cloudflare.DnsRecord(
+      `${name}-vercel-txt-${hostname}`,
+      { zoneId, name: `_vercel.${zoneName}`, type: 'TXT', content: spec.verificationTxt, ttl: 1 },
+      { ...child(), protect: false, retainOnDelete: true }
+    );
+  }
+  // An apex in a client's zone gets Vercel's A records, unless a fixed CNAME target is given: then the client's DNS
+  // must flatten that CNAME at the apex.
+  const routing =
+    apex && !zoneId && config
+      ? config.recommendedIpv4s.apply((ips) => ips.map((value) => ({ hostname, type: 'A', name: hostname, value })))
+      : cname.apply((value) => [{ hostname, type: 'CNAME', name: hostname, value }]);
+  const clientDnsRecords = pulumi
+    .all([routing, domain.verifications])
+    .apply(([records, challenges]) => [
+      ...records,
+      ...(challenges ?? []).map((c) => ({ hostname, type: c.type, name: c.domain.replace(/\.$/, ''), value: c.value })),
+    ]);
+  return { hostname, verifications: domain.verifications, clientDnsRecords };
 }

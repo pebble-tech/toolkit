@@ -1,0 +1,371 @@
+name: Site deploy
+
+# Reusable: deploys the artifact a site-build run uploaded. workflow_run cannot call a reusable workflow's trigger, so
+# the product holds a thin stub (on: workflow_run, the default branch's copy) that calls this at a pinned sha. Docs:
+# packages/infra/README.md#site-deploy-workflows; copyable stubs in .github/site-deploy/stubs.
+#
+# What it never does: run code from the artifact (no install, no node or pnpm on its files, no package.json or
+# lifecycle script from it), read ids or settings from it (the project and team come from these inputs), deploy to
+# production or promote, or deploy a fork's build. A pull request's build becomes a preview; a push to the default
+# branch becomes the staging custom environment. A run whose PR head or branch tip has moved on is skipped.
+
+on:
+  workflow_call:
+    inputs:
+      toolkit-ref:
+        description: The toolkit commit this workflow is called at (the stub's `uses:` sha); its scripts run from there.
+        type: string
+        required: true
+      build-workflow:
+        description: The site-build caller's path, e.g. .github/workflows/site-build.yml. Any other run is refused.
+        type: string
+        required: true
+      vercel-project-id:
+        description: The Vercel project to deploy to (VERCEL_PROJECT_ID). Never read from the artifact.
+        type: string
+        required: true
+      vercel-team-id:
+        description: The Vercel team that owns it (VERCEL_ORG_ID), e.g. vars.VERCEL_TEAM_ID.
+        type: string
+        required: true
+      vercel-environment:
+        description: The custom environment a push to the default branch deploys to. production is refused.
+        type: string
+        default: staging
+      artifact-name:
+        description: The artifact site-build uploaded.
+        type: string
+        default: site-output
+      alias-template:
+        description: >-
+          Optional preview alias with {pr} for the PR number, e.g. marketing-pr-{pr}.vercel.app. It must come out as
+          <name>-pr-<n>.vercel.app for the verified PR number.
+        type: string
+        default: ''
+      protected-hosts:
+        description: Production and staging hostnames (comma or space separated) an alias may never be.
+        type: string
+        default: ''
+      runtime-vars:
+        description: Plain runtime env vars for the deployment, a JSON object of strings (vercel deploy --env).
+        type: string
+        default: '{}'
+      runs-on:
+        description: The runner labels as JSON, e.g. '"ubuntu-latest"' or '["ubicloud-standard-2"]'.
+        type: string
+        default: '"ubuntu-latest"'
+      vercel-cli-version:
+        description: The Vercel CLI version; it must be the one .github/site-deploy/vercel/package-lock.json locks.
+        type: string
+        default: 65.15.0
+      preview-environment:
+        description: >-
+          The GitHub environment the preview job runs in: its VERCEL_TOKEN and RUNTIME_ENV are the preview's. One
+          per app when a repository deploys several (preview-marketing, preview-cms).
+        type: string
+        default: preview
+      staging-environment:
+        description: The GitHub environment the staging job runs in, one per app like preview-environment.
+        type: string
+        default: staging
+    secrets:
+      VERCEL_TOKEN:
+        description: >-
+          A Vercel token, scoped to this one project where Vercel allows it. Set it as a secret of the preview and
+          staging GitHub environments only (never the repository's: a pull request's own workflow can read those),
+          and pass it by name from the stub. The job that runs in the environment receives the environment's value.
+        required: false
+      RUNTIME_ENV:
+        description: >-
+          Secret runtime env vars as one JSON object, each value masked. An environment secret, passed by name like
+          VERCEL_TOKEN.
+        required: false
+
+permissions: {}
+
+jobs:
+  preview:
+    # Before `environment:`: under workflow_run github.ref is the default branch, so an environment's branch policy
+    # does not tell a PR's run from main's. Only this repository's own pull-request builds get here.
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    environment: ${{ inputs.preview-environment }}
+    # Keyed on the PR number GitHub put in the event, which a fork's build never carries (its list is empty), so a
+    # fork cannot cancel a same-repo preview by naming its branch alike; the run id otherwise.
+    concurrency:
+      group: site-deploy-${{ inputs.artifact-name }}-preview-${{ github.event.workflow_run.pull_requests[0].number || format('run-{0}', github.event.workflow_run.id) }}
+      cancel-in-progress: true
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    env:
+      BUILD_WORKFLOW: ${{ inputs.build-workflow }}
+      TOOLKIT: ${{ github.workspace }}/.toolkit/.github/site-deploy
+    steps:
+      - name: The toolkit ref is a full commit sha
+        env:
+          TOOLKIT_REF: ${{ inputs.toolkit-ref }}
+        run: |
+          if [[ ! "$TOOLKIT_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::toolkit-ref must be the 40-character sha the stub's uses: names, not $TOOLKIT_REF"
+            exit 1
+          fi
+
+      - name: Check out the toolkit's site-deploy scripts (never the product's code)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: pebble-tech/toolkit
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+          sparse-checkout: .github/site-deploy
+          persist-credentials: false
+
+      - name: Decide from the event and the API (same repo, this run, PR head still this sha)
+        id: decide
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VERCEL_PROJECT_ID: ${{ inputs.vercel-project-id }}
+          VERCEL_ORG_ID: ${{ inputs.vercel-team-id }}
+          PREVIEW_ENVIRONMENT: ${{ inputs.preview-environment }}
+          STAGING_ENVIRONMENT: ${{ inputs.staging-environment }}
+        run: node "$TOOLKIT/site-deploy.mjs" decide preview
+
+      # The token is an environment secret: present only because this job runs in its environment. Its absence is a
+      # setup error, never a reason to look elsewhere.
+      - name: The Vercel token is set in the job's environment
+        if: steps.decide.outputs.deploy == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          ENVIRONMENT: ${{ inputs.preview-environment }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::error::no VERCEL_TOKEN: set it as a secret of the $ENVIRONMENT environment, and pass it by name from the stub"
+            exit 1
+          fi
+
+      - name: Install the locked Vercel CLI with scripts off
+        if: steps.decide.outputs.deploy == 'true'
+        env:
+          VERSION: ${{ inputs.vercel-cli-version }}
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix "$TOOLKIT/vercel"
+          installed="$("$TOOLKIT/vercel/node_modules/.bin/vercel" --version | tail -n 1)"
+          test "$installed" = "$VERSION" || { echo "::error::the locked Vercel CLI is $installed, not $VERSION"; exit 1; }
+
+      # gh is the runner image's own (GitHub's and Ubicloud's images ship it); its version is printed for the record.
+      - name: Download the artifact by the triggering run id
+        if: steps.decide.outputs.deploy == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.decide.outputs.run-id }}
+          ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        run: |
+          gh --version | head -n 1
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$ARTIFACT_NAME" --dir "$RUNNER_TEMP/artifact"
+
+      - name: Prepare a fresh directory holding only .vercel/output
+        if: steps.decide.outputs.deploy == 'true'
+        run: node "$TOOLKIT/site-deploy.mjs" prepare "$RUNNER_TEMP/artifact" "$RUNNER_TEMP/deploy"
+
+      - name: Runtime env (each RUNTIME_ENV value masked)
+        if: steps.decide.outputs.deploy == 'true'
+        env:
+          RUNTIME_ENV: ${{ secrets.RUNTIME_ENV }}
+          RUNTIME_VARS: ${{ inputs.runtime-vars }}
+        run: node "$TOOLKIT/site-deploy.mjs" runtime-env "$RUNNER_TEMP/env-args"
+
+      # The project and team from main's inputs, the token from the job's environment: no `vercel link`, no `--scope`,
+      # no project.json, so a project-scoped token works.
+      - name: Deploy the preview
+        id: deploy
+        if: steps.decide.outputs.deploy == 'true'
+        working-directory: ${{ runner.temp }}/deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ inputs.vercel-team-id }}
+          VERCEL_PROJECT_ID: ${{ inputs.vercel-project-id }}
+          VERCEL_TELEMETRY_DISABLED: '1'
+        run: |
+          mapfile -t env_args < "$RUNNER_TEMP/env-args"
+          "$TOOLKIT/vercel/node_modules/.bin/vercel" deploy --prebuilt --environment=preview --yes "${env_args[@]}" > "$RUNNER_TEMP/deploy-out"
+          node "$TOOLKIT/site-deploy.mjs" deployment-url "$RUNNER_TEMP/deploy-out"
+
+      - name: The PR still has this sha as its head (before the alias)
+        id: before-alias
+        if: steps.deploy.outputs.url != '' && inputs.alias-template != ''
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR: ${{ steps.decide.outputs.pr }}
+          SHA: ${{ steps.decide.outputs.sha }}
+        run: node "$TOOLKIT/site-deploy.mjs" recheck
+
+      - name: The preview alias, from main's template and the verified PR number
+        id: alias
+        if: steps.before-alias.outputs.current == 'true'
+        env:
+          ALIAS_TEMPLATE: ${{ inputs.alias-template }}
+          PROTECTED_HOSTS: ${{ inputs.protected-hosts }}
+          PR: ${{ steps.decide.outputs.pr }}
+        run: node "$TOOLKIT/site-deploy.mjs" alias
+
+      - name: Alias the preview
+        id: alias-set
+        if: steps.before-alias.outputs.current == 'true' && steps.alias.outputs.alias != ''
+        working-directory: ${{ runner.temp }}/deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ inputs.vercel-team-id }}
+          VERCEL_PROJECT_ID: ${{ inputs.vercel-project-id }}
+          VERCEL_TELEMETRY_DISABLED: '1'
+          URL: ${{ steps.deploy.outputs.url }}
+          ALIAS: ${{ steps.alias.outputs.alias }}
+        run: '"$TOOLKIT/vercel/node_modules/.bin/vercel" alias set "$URL" "$ALIAS"'
+
+      - name: The PR still has this sha as its head (before the comment)
+        id: before-comment
+        # Also after a failed alias: the deployment exists, so the PR still gets its URL; the job stays failed.
+        if: ${{ !cancelled() && steps.deploy.outputs.url != '' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR: ${{ steps.decide.outputs.pr }}
+          SHA: ${{ steps.decide.outputs.sha }}
+        run: node "$TOOLKIT/site-deploy.mjs" recheck
+
+      - name: Comment the preview URL on the PR (its number from the API, never the artifact)
+        if: ${{ !cancelled() && steps.before-comment.outputs.current == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR: ${{ steps.decide.outputs.pr }}
+          SHA: ${{ steps.decide.outputs.sha }}
+          ARTIFACT_NAME: ${{ inputs.artifact-name }}
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+          # Only an alias that was set.
+          ALIAS: ${{ steps.alias-set.outcome == 'success' && steps.alias.outputs.alias || '' }}
+        run: node "$TOOLKIT/site-deploy.mjs" comment
+
+  staging:
+    # Staging is a push build of this repository whose sha is still the default branch's tip (decided by the script,
+    # never from head_branch).
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    environment: ${{ inputs.staging-environment }}
+    concurrency:
+      group: site-deploy-${{ inputs.artifact-name }}-staging
+      # Never cancelled, and every pending run kept in order (queue: max): a stale build that finishes late must not
+      # cancel the tip's deploy in progress, nor replace the tip's pending run. Each run then checks the tip itself
+      # (at decide and right before vercel deploy) and skips unless it is the tip.
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      actions: read
+      contents: read
+    env:
+      BUILD_WORKFLOW: ${{ inputs.build-workflow }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      VERCEL_ENVIRONMENT: ${{ inputs.vercel-environment }}
+      TOOLKIT: ${{ github.workspace }}/.toolkit/.github/site-deploy
+    steps:
+      - name: The toolkit ref is a full commit sha
+        env:
+          TOOLKIT_REF: ${{ inputs.toolkit-ref }}
+        run: |
+          if [[ ! "$TOOLKIT_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::toolkit-ref must be the 40-character sha the stub's uses: names, not $TOOLKIT_REF"
+            exit 1
+          fi
+
+      - name: Check out the toolkit's site-deploy scripts (never the product's code)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: pebble-tech/toolkit
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+          sparse-checkout: .github/site-deploy
+          persist-credentials: false
+
+      - name: Decide from the event and the API (same repo, this run, still the default branch's tip)
+        id: decide
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VERCEL_PROJECT_ID: ${{ inputs.vercel-project-id }}
+          VERCEL_ORG_ID: ${{ inputs.vercel-team-id }}
+          PREVIEW_ENVIRONMENT: ${{ inputs.preview-environment }}
+          STAGING_ENVIRONMENT: ${{ inputs.staging-environment }}
+        run: node "$TOOLKIT/site-deploy.mjs" decide staging
+
+      # The token is an environment secret: present only because this job runs in its environment. Its absence is a
+      # setup error, never a reason to look elsewhere.
+      - name: The Vercel token is set in the job's environment
+        if: steps.decide.outputs.deploy == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          ENVIRONMENT: ${{ inputs.staging-environment }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::error::no VERCEL_TOKEN: set it as a secret of the $ENVIRONMENT environment, and pass it by name from the stub"
+            exit 1
+          fi
+
+      - name: Install the locked Vercel CLI with scripts off
+        if: steps.decide.outputs.deploy == 'true'
+        env:
+          VERSION: ${{ inputs.vercel-cli-version }}
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix "$TOOLKIT/vercel"
+          installed="$("$TOOLKIT/vercel/node_modules/.bin/vercel" --version | tail -n 1)"
+          test "$installed" = "$VERSION" || { echo "::error::the locked Vercel CLI is $installed, not $VERSION"; exit 1; }
+
+      # gh is the runner image's own (GitHub's and Ubicloud's images ship it); its version is printed for the record.
+      - name: Download the artifact by the triggering run id
+        if: steps.decide.outputs.deploy == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.decide.outputs.run-id }}
+          ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        run: |
+          gh --version | head -n 1
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$ARTIFACT_NAME" --dir "$RUNNER_TEMP/artifact"
+
+      - name: Prepare a fresh directory holding only .vercel/output
+        if: steps.decide.outputs.deploy == 'true'
+        run: node "$TOOLKIT/site-deploy.mjs" prepare "$RUNNER_TEMP/artifact" "$RUNNER_TEMP/deploy"
+
+      - name: Runtime env (each RUNTIME_ENV value masked)
+        if: steps.decide.outputs.deploy == 'true'
+        env:
+          RUNTIME_ENV: ${{ secrets.RUNTIME_ENV }}
+          RUNTIME_VARS: ${{ inputs.runtime-vars }}
+        run: node "$TOOLKIT/site-deploy.mjs" runtime-env "$RUNNER_TEMP/env-args"
+
+      - name: The build is still the default branch's tip (right before the deploy)
+        id: tip
+        if: steps.decide.outputs.deploy == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.decide.outputs.sha }}
+        run: node "$TOOLKIT/site-deploy.mjs" tip
+
+      # The project and team from main's inputs, the token from the job's environment: no `vercel link`, no `--scope`,
+      # no project.json, so a project-scoped token works.
+      - name: Deploy to the staging custom environment
+        id: deploy
+        if: steps.tip.outputs.current == 'true'
+        working-directory: ${{ runner.temp }}/deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ inputs.vercel-team-id }}
+          VERCEL_PROJECT_ID: ${{ inputs.vercel-project-id }}
+          VERCEL_TELEMETRY_DISABLED: '1'
+        run: |
+          mapfile -t env_args < "$RUNNER_TEMP/env-args"
+          "$TOOLKIT/vercel/node_modules/.bin/vercel" deploy --prebuilt --environment="$VERCEL_ENVIRONMENT" --yes "${env_args[@]}" > "$RUNNER_TEMP/deploy-out"
+          node "$TOOLKIT/site-deploy.mjs" deployment-url "$RUNNER_TEMP/deploy-out"

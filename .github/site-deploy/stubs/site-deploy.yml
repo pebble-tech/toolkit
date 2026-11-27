@@ -1,0 +1,39 @@
+name: Site deploy
+
+# Copy to .github/workflows/site-deploy.yml. workflow_run runs the default branch's copy of this file, so a pull
+# request cannot change what deploys it. A pull request's build becomes a preview; a push to main becomes staging.
+# Production is never deployed from here. Replace 0000000000000000000000000000000000000000 with the toolkit commit
+# tagged @pebbletech/infra@<the version infra/ installs>: in `uses:` and in `toolkit-ref`, the same sha.
+
+on:
+  workflow_run:
+    workflows: [Site build]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  marketing:
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    uses: pebble-tech/toolkit/.github/workflows/site-deploy.yml@0000000000000000000000000000000000000000 # @pebbletech/infra@0.8.0
+    with:
+      toolkit-ref: '0000000000000000000000000000000000000000'
+      build-workflow: .github/workflows/site-build.yml
+      artifact-name: marketing-output
+      vercel-project-id: ${{ vars.VERCEL_PROJECT_ID_MARKETING }}
+      vercel-team-id: ${{ vars.VERCEL_TEAM_ID }}
+      vercel-environment: staging
+      alias-template: marketing-pr-{pr}.vercel.app
+      protected-hosts: new.pebbletech.my pebbletech.my
+      # One pair of GitHub environments per app, each holding that app's own VERCEL_TOKEN (and RUNTIME_ENV), with its
+      # deployment branches limited to main. A second app (the CMS) is a second job with its own pair.
+      preview-environment: preview-marketing
+      staging-environment: staging-marketing
+    # Passed by name: the values live only in those environments, and the toolkit job that runs in one receives that
+    # environment's value. Never set VERCEL_TOKEN as a repository secret: a pull request's own workflow can read those.
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      RUNTIME_ENV: ${{ secrets.RUNTIME_ENV }}

@@ -1,4 +1,5 @@
 import * as pulumi from '@pulumi/pulumi';
+import * as vercel from '@pulumiverse/vercel';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
@@ -16,7 +17,7 @@ import {
   VercelProject,
   type VercelProjectArgs,
 } from './index.js';
-import { runProgram, valueOf } from './testing.js';
+import { defaultMocks, type Registration, runProgram, valueOf } from './testing.js';
 
 const PROJECT = {
   rootDirectory: 'apps/web',
@@ -326,5 +327,454 @@ describe('VercelProject on staging and prod', () => {
     await expect(vercelIn('prod', { ...stageArgs('prod'), domain: stageArgs('staging').domain })).rejects.toThrow(
       NamespaceError
     );
+  });
+});
+
+describe('VercelProject production domains (custom and apex hostnames on prod)', () => {
+  const ZONES: Record<string, string> = { 'zone-1': 'pebbletech.my', 'zone-2': 'client.com' };
+  const TXT = (zone: string, host: string) => ({
+    domain: `_vercel.${zone}`,
+    reason: 'pending_domain_verification',
+    type: 'TXT',
+    value: `vc-domain-verify=${host},abc123`,
+  });
+  /** The engine faked as the providers answer: Cloudflare zone names, Vercel's challenges and recommended records. */
+  const mocks = (verified: Record<string, boolean> = {}): pulumi.runtime.Mocks => ({
+    newResource(args) {
+      const base = defaultMocks.newResource(args) as { id: string; state: Record<string, any> };
+      if (args.type !== 'vercel:index/projectDomain:ProjectDomain') return base;
+      const host = String(args.inputs.domain);
+      const zone = host.endsWith('client.com') ? 'client.com' : 'pebbletech.my';
+      const done = verified[host] ?? false;
+      return { ...base, state: { ...base.state, verified: done, verifications: done ? [] : [TXT(zone, host)] } };
+    },
+    call(args) {
+      if (args.token === 'cloudflare:index/getZone:getZone') {
+        return { id: args.inputs.zoneId, zoneId: args.inputs.zoneId, name: ZONES[args.inputs.zoneId] ?? '' };
+      }
+      if (args.token === 'vercel:index/getDomainConfig:getDomainConfig') {
+        return { ...args.inputs, recommendedCname: 'cname.vercel-dns-017.com.', recommendedIpv4s: ['76.76.21.21'] };
+      }
+      return defaultMocks.call(args);
+    },
+  });
+
+  const prodWith = (
+    productionDomains: VercelProjectArgs['productionDomains'],
+    extra: Partial<VercelProjectArgs> = {},
+    verified?: Record<string, boolean>,
+    stack = 'prod'
+  ) =>
+    runProgram({ project: 'basefresh', stack, mocks: mocks(verified) }, () => {
+      const stage = new Stage('stage', { product: 'basefresh' });
+      return new VercelProject('web', { stage, projectId: 'prj_123', productionDomains, ...extra });
+    });
+
+  const NEW = { hostname: 'new.pebbletech.my', zoneName: 'pebbletech.my', zoneId: 'zone-1' };
+  const CHALLENGE = 'vc-domain-verify=pebbletech.my,abc123';
+  const APEX = { hostname: 'pebbletech.my', zoneName: 'pebbletech.my', zoneId: 'zone-1', verificationTxt: CHALLENGE };
+
+  test('binds each hostname to production with an unproxied CNAME, the apex by its full name, and the opt-in TXT', async () => {
+    const { resources } = await prodWith([NEW, APEX]);
+    const children = resources.filter((r) => r.custom).sort((a, b) => a.name.localeCompare(b.name));
+    expect(
+      children.map((r) => [
+        r.type,
+        r.name,
+        r.inputs,
+        r.protect,
+        r.retainOnDelete,
+        r.deleteBeforeReplace,
+        r.ignoreChanges,
+      ])
+    ).toEqual([
+      [
+        'cloudflare:index/dnsRecord:DnsRecord',
+        'web-cname-new.pebbletech.my',
+        {
+          zoneId: 'zone-1',
+          name: 'new.pebbletech.my',
+          type: 'CNAME',
+          content: 'cname.vercel-dns-017.com',
+          ttl: 1,
+          proxied: false,
+        },
+        true,
+        true,
+        false,
+        [],
+      ],
+      [
+        'cloudflare:index/dnsRecord:DnsRecord',
+        'web-cname-pebbletech.my',
+        {
+          zoneId: 'zone-1',
+          name: 'pebbletech.my',
+          type: 'CNAME',
+          content: 'cname.vercel-dns-017.com',
+          ttl: 1,
+          proxied: false,
+        },
+        true,
+        true,
+        false,
+        [],
+      ],
+      [
+        'vercel:index/projectDomain:ProjectDomain',
+        'web-domain-new.pebbletech.my',
+        { projectId: 'prj_123', domain: 'new.pebbletech.my' },
+        true,
+        false,
+        true,
+        [],
+      ],
+      [
+        'vercel:index/projectDomain:ProjectDomain',
+        'web-domain-pebbletech.my',
+        { projectId: 'prj_123', domain: 'pebbletech.my' },
+        true,
+        false,
+        true,
+        [],
+      ],
+      [
+        'cloudflare:index/dnsRecord:DnsRecord',
+        'web-vercel-txt-pebbletech.my',
+        {
+          zoneId: 'zone-1',
+          name: '_vercel.pebbletech.my',
+          type: 'TXT',
+          content: 'vc-domain-verify=pebbletech.my,abc123',
+          ttl: 1,
+        },
+        false,
+        true,
+        false,
+        [],
+      ],
+    ]);
+  });
+
+  test('the stage domain keeps its resources and names beside production domains', async () => {
+    const domain = { hostname: 'app-basefresh.pebbletech.my', zoneId: 'zone-1' };
+    const alone = await prodWith(undefined, { domain });
+    const beside = await prodWith([NEW, APEX], { domain });
+    const stageDomain = (resources: Registration[]) =>
+      resources
+        .filter((r) => r.name === 'web-domain' || r.name === 'web-cname')
+        .map((r) => [r.urn, r.inputs, r.protect, r.retainOnDelete, r.deleteBeforeReplace])
+        .sort();
+    expect([stageDomain(beside.resources), stageDomain(alone.resources).length]).toEqual([
+      stageDomain(alone.resources),
+      2,
+    ]);
+  });
+
+  test('a hostname keeps its URNs when another is added, removed or listed first', async () => {
+    const urnsOf = async (domains: (typeof NEW)[]) =>
+      (await prodWith(domains)).resources
+        .filter((r) => r.name.endsWith('new.pebbletech.my'))
+        .map((r) => r.urn)
+        .sort();
+    const alone = await urnsOf([NEW]);
+    expect([await urnsOf([NEW, APEX]), await urnsOf([APEX, NEW]), alone.length]).toEqual([alone, alone, 2]);
+  });
+
+  test("a client's zone gets no DNS from Pulumi: clientDnsRecords lists the CNAME, the apex's A record and the TXT", async () => {
+    const { result, resources } = await prodWith([
+      { hostname: 'www.client.com', zoneName: 'client.com' },
+      { hostname: 'client.com', zoneName: 'client.com' },
+    ]);
+    expect([
+      ofType(resources, 'cloudflare:index/dnsRecord:DnsRecord'),
+      await valueOf(result.clientDnsRecords!),
+      await valueOf(result.verification!),
+    ]).toEqual([
+      [],
+      [
+        { hostname: 'www.client.com', type: 'CNAME', name: 'www.client.com', value: 'cname.vercel-dns-017.com' },
+        {
+          hostname: 'www.client.com',
+          type: 'TXT',
+          name: '_vercel.client.com',
+          value: TXT('client.com', 'www.client.com').value,
+        },
+        { hostname: 'client.com', type: 'A', name: 'client.com', value: '76.76.21.21' },
+        {
+          hostname: 'client.com',
+          type: 'TXT',
+          name: '_vercel.client.com',
+          value: TXT('client.com', 'client.com').value,
+        },
+      ],
+      { 'www.client.com': [TXT('client.com', 'www.client.com')], 'client.com': [TXT('client.com', 'client.com')] },
+    ]);
+  });
+
+  test('outputs name the client records and the challenges, and stay empty of challenges once verified', async () => {
+    const { result, resources } = await prodWith([NEW], {}, { 'new.pebbletech.my': true });
+    expect([
+      await valueOf(result.verification!),
+      resources.find((r) => r.type === 'pebbletech:index:VercelProject')!.outputs,
+    ]).toEqual([
+      { 'new.pebbletech.my': [] },
+      {
+        projectId: 'prj_123',
+        customEnvironmentIds: {},
+        clientDnsRecords: [
+          {
+            hostname: 'new.pebbletech.my',
+            type: 'CNAME',
+            name: 'new.pebbletech.my',
+            value: 'cname.vercel-dns-017.com',
+          },
+        ],
+        verification: { 'new.pebbletech.my': [] },
+      },
+    ]);
+  });
+
+  // The record holds the value main passed, whatever Vercel lists now: verified with no challenge (on any release,
+  // also the first, when Vercel verifies it mid-up), or not verified with no challenge at all.
+  test.each<[string, Record<string, boolean>, pulumi.runtime.Mocks['newResource'] | undefined]>([
+    ['verified, no challenge listed', { 'pebbletech.my': true }, undefined],
+    [
+      'unverified, no challenge listed',
+      {},
+      (args) => {
+        const base = mocks().newResource(args) as { id: string; state: Record<string, any> };
+        return { ...base, state: { ...base.state, verifications: [] } };
+      },
+    ],
+  ])('makes the TXT from the value passed when the hostname is %s', async (_what, verified, newResource) => {
+    const { resources } = await runProgram(
+      {
+        project: 'basefresh',
+        stack: 'prod',
+        mocks: { ...mocks(verified), ...(newResource ? { newResource } : {}) },
+      },
+      () => {
+        const stage = new Stage('stage', { product: 'basefresh' });
+        new VercelProject('web', { stage, projectId: 'prj_123', productionDomains: [APEX] });
+      }
+    );
+    const txt = resources.find((r) => r.name === 'web-vercel-txt-pebbletech.my')!;
+    expect([txt.inputs.content, txt.dependencies, txt.protect, txt.retainOnDelete]).toEqual([
+      CHALLENGE,
+      [],
+      false,
+      true,
+    ]);
+  });
+
+  test('without the value there is no TXT record: leaving it out drops the record', async () => {
+    const { resources } = await prodWith([{ ...APEX, verificationTxt: undefined }]);
+    expect(resources.filter((r) => r.name.includes('vercel-txt'))).toEqual([]);
+  });
+
+  test.each([
+    '',
+    'abc123',
+    'vc-domain-verify=pebbletech.my,abc 123',
+    'v=spf1 include:evil',
+    // Another host's challenge, in the same zone or not.
+    'vc-domain-verify=new.pebbletech.my,abc123',
+    'vc-domain-verify=pebbletechxmy,abc123',
+    'vc-domain-verify=client.com,abc123',
+    'vc-domain-verify=,',
+    'vc-domain-verify=pebbletech.my,',
+    'vc-domain-verify=pebbletech.my,abc123\u200b',
+    'vc-domain-verify=pebbletech.my,abc123\n',
+  ])('refuses %j as the TXT value for pebbletech.my', async (verificationTxt) => {
+    await expect(prodWith([{ ...APEX, verificationTxt }])).rejects.toThrow(
+      "`verificationTxt` must be Vercel's challenge for it, vc-domain-verify=pebbletech.my,<code>"
+    );
+  });
+
+  test('refuses a zone id whose zone is not the zone named', async () => {
+    await expect(prodWith([{ ...NEW, zoneId: 'zone-2' }])).rejects.toThrow(
+      'zone zone-2 is client.com, not pebbletech.my (hostname "new.pebbletech.my")'
+    );
+  });
+
+  test.each(['staging', 'shared'])('refuses production domains on %s', async (stack) => {
+    const extra = stack === 'staging' ? { customEnvironmentId: 'env_staging' } : {};
+    await expect(prodWith([NEW], extra, undefined, stack)).rejects.toThrow(OwnershipError);
+  });
+
+  test.each([
+    ['a stage-shaped hostname', { ...NEW, hostname: 'app-basefresh.pebbletech.my' }, /shaped like a stage hostname/],
+    ["another stage's hostname", { ...NEW, hostname: 'app-basefresh-stg.pebbletech.my' }, /shaped like a stage/],
+    ['a hostname outside its zone', { ...NEW, hostname: 'new.other.my' }, /not in the zone pebbletech.my/],
+    ['a trailing dot', { ...NEW, hostname: 'new.pebbletech.my.' }, /not a lowercase domain name/],
+    ['upper case', { ...NEW, hostname: 'New.pebbletech.my' }, /not a lowercase domain name/],
+    ['a zone that is one label', { ...NEW, hostname: 'new.my', zoneName: 'my' }, /zone "my"/],
+    [
+      'the TXT with no zone of ours',
+      { hostname: 'client.com', zoneName: 'client.com', verificationTxt: 'vc-domain-verify=client.com,abc123' },
+      /pass it/,
+    ],
+  ])('refuses %s', async (_what, domain, message) => {
+    await expect(prodWith([domain])).rejects.toThrow(message);
+  });
+
+  // A hostname named as its own zone, with no zoneId to check it against, must not slip a stage-shaped label past the
+  // rule: each is a name inside the stage zone pebbletech.my.
+  test.each(['app-other.pebbletech.my', 'app-other-stg.pebbletech.my', 'web-basefresh.pebbletech.my'])(
+    'refuses %s named as its own zone in a client zone',
+    async (hostname) => {
+      await expect(prodWith([{ hostname, zoneName: hostname }])).rejects.toThrow(
+        `zone "${hostname}" is a name inside the stage zone pebbletech.my`
+      );
+    }
+  );
+
+  test("refuses a zone inside the stage domain's own zone, which need not be pebbletech.my", async () => {
+    const domain = { hostname: 'app-basefresh.example.dev', zoneId: 'zone-9' };
+    await expect(
+      prodWith([{ hostname: 'app-other.example.dev', zoneName: 'app-other.example.dev' }], { domain })
+    ).rejects.toThrow('is a name inside the stage zone example.dev');
+  });
+
+  test("takes a client's hyphenated apex and a name in it", async () => {
+    const { resources } = await prodWith([
+      { hostname: 'my-client.com', zoneName: 'my-client.com' },
+      { hostname: 'www.my-client.com', zoneName: 'my-client.com' },
+    ]);
+    expect(ofType(resources, 'vercel:index/projectDomain:ProjectDomain').map((r) => r.inputs.domain)).toEqual([
+      'my-client.com',
+      'www.my-client.com',
+    ]);
+  });
+
+  test('refuses a hostname bound twice', async () => {
+    await expect(prodWith([NEW, { ...NEW }])).rejects.toThrow('hostname "new.pebbletech.my" is bound twice');
+  });
+});
+
+describe('VercelProject with a project-scoped Vercel token', () => {
+  /** Fails the run on Vercel's domain config lookup, which a fixed CNAME target replaces. */
+  const noLookup: pulumi.runtime.Mocks = {
+    newResource: defaultMocks.newResource,
+    call(args) {
+      if (args.token === 'vercel:index/getDomainConfig:getDomainConfig') throw new Error('getDomainConfig was called');
+      if (args.token === 'cloudflare:index/getZone:getZone') return { id: 'zone-1', name: 'pebbletech.my' };
+      return defaultMocks.call(args);
+    },
+  };
+
+  test.each(['staging', 'prod'])(
+    '%s: cnameTarget points every CNAME at it with no lookup, and keeps every URN',
+    async (stack) => {
+      const args = {
+        ...stageArgs(stack),
+        ...(stack === 'prod'
+          ? { productionDomains: [{ hostname: 'new.pebbletech.my', zoneName: 'pebbletech.my', zoneId: 'zone-1' }] }
+          : {}),
+      };
+      const run = (mocks: pulumi.runtime.Mocks, extra: Partial<VercelProjectArgs>) =>
+        runProgram({ project: 'basefresh', stack, mocks }, () => {
+          const stage = new Stage('stage', { product: 'basefresh' });
+          new VercelProject('web', { stage, ...args, ...extra });
+        });
+      const looked = await run(
+        {
+          ...noLookup,
+          call: (a) =>
+            a.token === 'vercel:index/getDomainConfig:getDomainConfig' ? defaultMocks.call(a) : noLookup.call(a),
+        },
+        {}
+      );
+      const fixed = await run(noLookup, { cnameTarget: 'cname.vercel-dns.com.' });
+      const urns = (resources: Registration[]) => resources.map((r) => r.urn).sort();
+      expect([
+        urns(fixed.resources),
+        ofType(fixed.resources, 'cloudflare:index/dnsRecord:DnsRecord').map((r) => r.inputs.content),
+      ]).toEqual([
+        urns(looked.resources),
+        stack === 'prod' ? ['cname.vercel-dns.com', 'cname.vercel-dns.com'] : ['cname.vercel-dns.com'],
+      ]);
+    }
+  );
+
+  // A DNS change never lands before Vercel serves the hostname: each CNAME waits on its own project domain.
+  test.each([
+    ['with cnameTarget', { cnameTarget: 'cname.vercel-dns.com' }],
+    ['with the lookup', {}],
+  ])('every CNAME waits on its project domain, %s', async (_what, extra) => {
+    const call: pulumi.runtime.Mocks['call'] = (a) =>
+      a.token === 'vercel:index/getDomainConfig:getDomainConfig' ? defaultMocks.call(a) : noLookup.call(a);
+    const { resources } = await runProgram(
+      {
+        project: 'basefresh',
+        stack: 'prod',
+        mocks: { ...noLookup, call: 'cnameTarget' in extra ? noLookup.call : call },
+      },
+      () => {
+        const stage = new Stage('stage', { product: 'basefresh' });
+        new VercelProject('web', {
+          stage,
+          ...stageArgs('prod'),
+          ...extra,
+          productionDomains: [{ hostname: 'new.pebbletech.my', zoneName: 'pebbletech.my', zoneId: 'zone-1' }],
+        });
+      }
+    );
+    const urnOf = (name: string) => resources.find((r) => r.name === name)!.urn;
+    expect(
+      ofType(resources, 'cloudflare:index/dnsRecord:DnsRecord').map((r) => [
+        r.name,
+        r.dependencies.includes(urnOf(r.name.replace('-cname', '-domain'))),
+      ])
+    ).toEqual([
+      ['web-cname', true],
+      ['web-cname-new.pebbletech.my', true],
+    ]);
+  });
+
+  test("two projects in one stack each use their own Vercel provider; Cloudflare stays on the program's default", async () => {
+    const { resources } = await runProgram({ project: 'basefresh', stack: 'prod', mocks: noLookup }, () => {
+      const stage = new Stage('stage', { product: 'basefresh' });
+      const marketing = new vercel.Provider('vercel-marketing', { apiToken: 'marketing-token', team: 'team_1' });
+      const cms = new vercel.Provider('vercel-cms', { apiToken: 'cms-token', team: 'team_1' });
+      const domain = (hostname: string) => ({ hostname, zoneId: 'zone-1' });
+      new VercelProject(
+        'site',
+        {
+          stage,
+          projectId: 'prj_site',
+          cnameTarget: 'cname.vercel-dns.com',
+          domain: domain('site-basefresh.pebbletech.my'),
+          vars: { A: 'a' },
+        },
+        { providers: [marketing] }
+      );
+      new VercelProject(
+        'cms',
+        {
+          stage,
+          projectId: 'prj_cms',
+          cnameTarget: 'cname.vercel-dns.com',
+          domain: domain('cms-basefresh.pebbletech.my'),
+          vars: { A: 'a' },
+        },
+        { providers: [cms] }
+      );
+    });
+    const providerOf = (r: Registration) => r.provider.split('::')[3] ?? '';
+    expect(
+      resources
+        .filter((r) => r.custom && !r.type.startsWith('pulumi:providers:'))
+        .map((r) => [r.name, providerOf(r)])
+        .sort()
+    ).toEqual([
+      ['cms-cname', ''],
+      ['cms-domain', 'vercel-cms'],
+      ['cms-env-A', 'vercel-cms'],
+      ['site-cname', ''],
+      ['site-domain', 'vercel-marketing'],
+      ['site-env-A', 'vercel-marketing'],
+    ]);
   });
 });

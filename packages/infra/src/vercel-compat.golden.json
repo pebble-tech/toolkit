@@ -1,0 +1,1082 @@
+{
+  "shared, defaults": [
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "shared",
+        "namespace": "basefresh-shared",
+        "product": "basefresh"
+      }
+    },
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject::web",
+      "type": "pebbletech:index:VercelProject",
+      "name": "web",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "bypassSecret": "mock-bypass-web-bypass",
+        "customEnvironmentIds": {
+          "staging": "web-staging-id"
+        },
+        "projectId": "web-id"
+      }
+    },
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/customEnvironment:CustomEnvironment::web-staging",
+      "type": "vercel:index/customEnvironment:CustomEnvironment",
+      "name": "web-staging",
+      "parent": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/project:Project::web"
+      ],
+      "inputs": {
+        "name": "staging",
+        "projectId": "web-id"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/deployment:Deployment::web-placeholder",
+      "type": "vercel:index/deployment:Deployment",
+      "name": "web-placeholder",
+      "parent": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "files",
+        "pathPrefix",
+        "production"
+      ],
+      "dependencies": [
+        "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/project:Project::web"
+      ],
+      "inputs": {
+        "files": {
+          "<tmp>/a43dbd03e4854ddf71ae117f55feea23d9104f52/apps/web/index.html": "319~e661350c71072df788ce572883acb4d1ebe2b982",
+          "<tmp>/a43dbd03e4854ddf71ae117f55feea23d9104f52/apps/web/vercel.json": "138~40597e0b180ad18cb0a7355094ec95f0d489f09c"
+        },
+        "pathPrefix": "<tmp>/a43dbd03e4854ddf71ae117f55feea23d9104f52",
+        "projectId": "web-id"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/project:Project::web",
+      "type": "vercel:index/project:Project",
+      "name": "web",
+      "parent": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "buildCommand": "cd ../.. && pnpm --filter '@base/app' build",
+        "devCommand": "cd ../.. && pnpm dev:app",
+        "installCommand": "cd ../.. && pnpm install --prod=false",
+        "name": "basefresh-web",
+        "nodeVersion": "24.x",
+        "publicSource": false,
+        "rootDirectory": "apps/web",
+        "skewProtection": "12 hours",
+        "vercelAuthentication": {
+          "deploymentType": "only_preview_deployments"
+        }
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/projectProtectionBypass:ProjectProtectionBypass::web-bypass",
+      "type": "vercel:index/projectProtectionBypass:ProjectProtectionBypass",
+      "name": "web-bypass",
+      "parent": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/project:Project::web"
+      ],
+      "inputs": {
+        "note": "CI smoke tests and preview checks",
+        "projectId": "web-id"
+      },
+      "secretInputs": [],
+      "outputs": null
+    }
+  ],
+  "shared, every setting and a team": [
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "shared",
+        "namespace": "basefresh-shared",
+        "product": "basefresh"
+      }
+    },
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject::web",
+      "type": "pebbletech:index:VercelProject",
+      "name": "web",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "bypassSecret": "mock-bypass-web-bypass",
+        "customEnvironmentIds": {
+          "qa": "web-qa-id",
+          "staging": "web-staging-id"
+        },
+        "projectId": "web-id"
+      }
+    },
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/customEnvironment:CustomEnvironment::web-qa",
+      "type": "vercel:index/customEnvironment:CustomEnvironment",
+      "name": "web-qa",
+      "parent": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/project:Project::web"
+      ],
+      "inputs": {
+        "name": "qa",
+        "projectId": "web-id",
+        "teamId": "team_1"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/customEnvironment:CustomEnvironment::web-staging",
+      "type": "vercel:index/customEnvironment:CustomEnvironment",
+      "name": "web-staging",
+      "parent": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/project:Project::web"
+      ],
+      "inputs": {
+        "name": "staging",
+        "projectId": "web-id",
+        "teamId": "team_1"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/deployment:Deployment::web-placeholder",
+      "type": "vercel:index/deployment:Deployment",
+      "name": "web-placeholder",
+      "parent": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [
+        "files",
+        "pathPrefix",
+        "production"
+      ],
+      "dependencies": [
+        "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/project:Project::web"
+      ],
+      "inputs": {
+        "files": {
+          "<tmp>/a43dbd03e4854ddf71ae117f55feea23d9104f52/apps/web/index.html": "319~e661350c71072df788ce572883acb4d1ebe2b982",
+          "<tmp>/a43dbd03e4854ddf71ae117f55feea23d9104f52/apps/web/vercel.json": "138~40597e0b180ad18cb0a7355094ec95f0d489f09c"
+        },
+        "pathPrefix": "<tmp>/a43dbd03e4854ddf71ae117f55feea23d9104f52",
+        "projectId": "web-id",
+        "teamId": "team_1"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/project:Project::web",
+      "type": "vercel:index/project:Project",
+      "name": "web",
+      "parent": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "buildCommand": "cd ../.. && pnpm --filter '@base/app' build",
+        "devCommand": "cd ../.. && pnpm dev:app",
+        "installCommand": "cd ../.. && pnpm install --prod=false",
+        "name": "basefresh-site",
+        "nodeVersion": "22.x",
+        "outputDirectory": ".next",
+        "publicSource": false,
+        "rootDirectory": "apps/web",
+        "teamId": "team_1",
+        "vercelAuthentication": {
+          "deploymentType": "all_deployments"
+        }
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/projectProtectionBypass:ProjectProtectionBypass::web-bypass",
+      "type": "vercel:index/projectProtectionBypass:ProjectProtectionBypass",
+      "name": "web-bypass",
+      "parent": "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:shared::basefresh::pebbletech:index:VercelProject$vercel:index/project:Project::web"
+      ],
+      "inputs": {
+        "note": "CI smoke tests and preview checks",
+        "projectId": "web-id",
+        "teamId": "team_1"
+      },
+      "secretInputs": [],
+      "outputs": null
+    }
+  ],
+  "staging, no domain": [
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "staging",
+        "namespace": "basefresh-staging",
+        "product": "basefresh"
+      }
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject::web",
+      "type": "pebbletech:index:VercelProject",
+      "name": "web",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "customEnvironmentIds": {},
+        "projectId": "prj_123"
+      }
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-APP_BASE_URL",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-APP_BASE_URL",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "customEnvironmentIds": [
+          "env_staging"
+        ],
+        "key": "APP_BASE_URL",
+        "projectId": "prj_123",
+        "sensitive": false,
+        "value": "https://app"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-BETTER_AUTH_SECRET",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-BETTER_AUTH_SECRET",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "customEnvironmentIds": [
+          "env_staging"
+        ],
+        "key": "BETTER_AUTH_SECRET",
+        "projectId": "prj_123",
+        "sensitive": true,
+        "value": "shh"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-DATABASE_URL",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-DATABASE_URL",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "customEnvironmentIds": [
+          "env_staging"
+        ],
+        "key": "DATABASE_URL",
+        "projectId": "prj_123",
+        "sensitive": true,
+        "value": "postgresql://x"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-NEXT_PUBLIC_SITE",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-NEXT_PUBLIC_SITE",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "customEnvironmentIds": [
+          "env_staging"
+        ],
+        "key": "NEXT_PUBLIC_SITE",
+        "projectId": "prj_123",
+        "sensitive": false,
+        "value": "basefresh"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    }
+  ],
+  "staging, domain": [
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "staging",
+        "namespace": "basefresh-staging",
+        "product": "basefresh"
+      }
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject::web",
+      "type": "pebbletech:index:VercelProject",
+      "name": "web",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "customEnvironmentIds": {},
+        "projectId": "prj_123",
+        "url": "https://app-basefresh-stg.pebbletech.my"
+      }
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject$cloudflare:index/dnsRecord:DnsRecord::web-cname",
+      "type": "cloudflare:index/dnsRecord:DnsRecord",
+      "name": "web-cname",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject$vercel:index/projectDomain:ProjectDomain::web-domain"
+      ],
+      "inputs": {
+        "content": "cname.vercel-dns.com",
+        "name": "app-basefresh-stg.pebbletech.my",
+        "proxied": false,
+        "ttl": 1,
+        "type": "CNAME",
+        "zoneId": "zone-1"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject$vercel:index/projectDomain:ProjectDomain::web-domain",
+      "type": "vercel:index/projectDomain:ProjectDomain",
+      "name": "web-domain",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": true,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "customEnvironmentId": "env_staging",
+        "domain": "app-basefresh-stg.pebbletech.my",
+        "projectId": "prj_123",
+        "teamId": "team_1"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-APP_BASE_URL",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-APP_BASE_URL",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "customEnvironmentIds": [
+          "env_staging"
+        ],
+        "key": "APP_BASE_URL",
+        "projectId": "prj_123",
+        "sensitive": false,
+        "teamId": "team_1",
+        "value": "https://app"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-BETTER_AUTH_SECRET",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-BETTER_AUTH_SECRET",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "customEnvironmentIds": [
+          "env_staging"
+        ],
+        "key": "BETTER_AUTH_SECRET",
+        "projectId": "prj_123",
+        "sensitive": true,
+        "teamId": "team_1",
+        "value": "shh"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-DATABASE_URL",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-DATABASE_URL",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "customEnvironmentIds": [
+          "env_staging"
+        ],
+        "key": "DATABASE_URL",
+        "projectId": "prj_123",
+        "sensitive": true,
+        "teamId": "team_1",
+        "value": "postgresql://x"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-NEXT_PUBLIC_SITE",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-NEXT_PUBLIC_SITE",
+      "parent": "urn:pulumi:staging::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "customEnvironmentIds": [
+          "env_staging"
+        ],
+        "key": "NEXT_PUBLIC_SITE",
+        "projectId": "prj_123",
+        "sensitive": false,
+        "teamId": "team_1",
+        "value": "basefresh"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    }
+  ],
+  "prod, no domain": [
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "prod",
+        "namespace": "basefresh-prod",
+        "product": "basefresh"
+      }
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject::web",
+      "type": "pebbletech:index:VercelProject",
+      "name": "web",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "customEnvironmentIds": {},
+        "projectId": "prj_123"
+      }
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-APP_BASE_URL",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-APP_BASE_URL",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "key": "APP_BASE_URL",
+        "projectId": "prj_123",
+        "sensitive": false,
+        "targets": [
+          "production"
+        ],
+        "value": "https://app"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-BETTER_AUTH_SECRET",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-BETTER_AUTH_SECRET",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "key": "BETTER_AUTH_SECRET",
+        "projectId": "prj_123",
+        "sensitive": true,
+        "targets": [
+          "production"
+        ],
+        "value": "shh"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-DATABASE_URL",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-DATABASE_URL",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "key": "DATABASE_URL",
+        "projectId": "prj_123",
+        "sensitive": true,
+        "targets": [
+          "production"
+        ],
+        "value": "postgresql://x"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-NEXT_PUBLIC_SITE",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-NEXT_PUBLIC_SITE",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "key": "NEXT_PUBLIC_SITE",
+        "projectId": "prj_123",
+        "sensitive": false,
+        "targets": [
+          "production"
+        ],
+        "value": "basefresh"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    }
+  ],
+  "prod, domain": [
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "prod",
+        "namespace": "basefresh-prod",
+        "product": "basefresh"
+      }
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject::web",
+      "type": "pebbletech:index:VercelProject",
+      "name": "web",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "customEnvironmentIds": {},
+        "projectId": "prj_123",
+        "url": "https://app-basefresh.pebbletech.my"
+      }
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject$cloudflare:index/dnsRecord:DnsRecord::web-cname",
+      "type": "cloudflare:index/dnsRecord:DnsRecord",
+      "name": "web-cname",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject$vercel:index/projectDomain:ProjectDomain::web-domain"
+      ],
+      "inputs": {
+        "content": "cname.vercel-dns.com",
+        "name": "app-basefresh.pebbletech.my",
+        "proxied": false,
+        "ttl": 1,
+        "type": "CNAME",
+        "zoneId": "zone-1"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject$vercel:index/projectDomain:ProjectDomain::web-domain",
+      "type": "vercel:index/projectDomain:ProjectDomain",
+      "name": "web-domain",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": true,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "domain": "app-basefresh.pebbletech.my",
+        "projectId": "prj_123",
+        "teamId": "team_1"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-APP_BASE_URL",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-APP_BASE_URL",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "key": "APP_BASE_URL",
+        "projectId": "prj_123",
+        "sensitive": false,
+        "targets": [
+          "production"
+        ],
+        "teamId": "team_1",
+        "value": "https://app"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-BETTER_AUTH_SECRET",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-BETTER_AUTH_SECRET",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "key": "BETTER_AUTH_SECRET",
+        "projectId": "prj_123",
+        "sensitive": true,
+        "targets": [
+          "production"
+        ],
+        "teamId": "team_1",
+        "value": "shh"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-DATABASE_URL",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-DATABASE_URL",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "key": "DATABASE_URL",
+        "projectId": "prj_123",
+        "sensitive": true,
+        "targets": [
+          "production"
+        ],
+        "teamId": "team_1",
+        "value": "postgresql://x"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject$vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable::web-env-NEXT_PUBLIC_SITE",
+      "type": "vercel:index/projectEnvironmentVariable:ProjectEnvironmentVariable",
+      "name": "web-env-NEXT_PUBLIC_SITE",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "key": "NEXT_PUBLIC_SITE",
+        "projectId": "prj_123",
+        "sensitive": false,
+        "targets": [
+          "production"
+        ],
+        "teamId": "team_1",
+        "value": "basefresh"
+      },
+      "secretInputs": [
+        "value"
+      ],
+      "outputs": null
+    }
+  ],
+  "prod, domain only": [
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:Stage::stage",
+      "type": "pebbletech:index:Stage",
+      "name": "stage",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "env": "prod",
+        "namespace": "basefresh-prod",
+        "product": "basefresh"
+      }
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject::web",
+      "type": "pebbletech:index:VercelProject",
+      "name": "web",
+      "parent": "",
+      "custom": false,
+      "protect": false,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {},
+      "secretInputs": [],
+      "outputs": {
+        "customEnvironmentIds": {},
+        "projectId": "prj_123",
+        "url": "https://www-basefresh.pebbletech.my"
+      }
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject$cloudflare:index/dnsRecord:DnsRecord::web-cname",
+      "type": "cloudflare:index/dnsRecord:DnsRecord",
+      "name": "web-cname",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": true,
+      "deleteBeforeReplace": false,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [
+        "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject$vercel:index/projectDomain:ProjectDomain::web-domain"
+      ],
+      "inputs": {
+        "content": "cname.vercel-dns.com",
+        "name": "www-basefresh.pebbletech.my",
+        "proxied": false,
+        "ttl": 1,
+        "type": "CNAME",
+        "zoneId": "zone-1"
+      },
+      "secretInputs": [],
+      "outputs": null
+    },
+    {
+      "urn": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject$vercel:index/projectDomain:ProjectDomain::web-domain",
+      "type": "vercel:index/projectDomain:ProjectDomain",
+      "name": "web-domain",
+      "parent": "urn:pulumi:prod::basefresh::pebbletech:index:VercelProject::web",
+      "custom": true,
+      "protect": true,
+      "retainOnDelete": false,
+      "deleteBeforeReplace": true,
+      "importId": "",
+      "ignoreChanges": [],
+      "dependencies": [],
+      "inputs": {
+        "domain": "www-basefresh.pebbletech.my",
+        "projectId": "prj_123"
+      },
+      "secretInputs": [],
+      "outputs": null
+    }
+  ]
+}
