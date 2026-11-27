@@ -1,0 +1,23 @@
+name: Site build
+
+# Copy to .github/workflows/site-build.yml. Builds each app's .vercel/output with no secrets; Site deploy deploys it.
+# Replace 0000000000000000000000000000000000000000 with the toolkit commit tagged @pebbletech/infra@<the version
+# infra/ installs>, the same sha in both stubs.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+jobs:
+  marketing:
+    permissions:
+      contents: read
+    uses: pebble-tech/toolkit/.github/workflows/site-build.yml@0000000000000000000000000000000000000000 # @pebbletech/infra@0.8.0
+    with:
+      working-directory: apps/marketing
+      artifact-name: marketing-output
+      build-env: '{"SITE_ENV":"preview"}'

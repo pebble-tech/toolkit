@@ -1,0 +1,32 @@
+name: Site deploy
+
+# Copy to .github/workflows/site-deploy.yml. workflow_run runs the default branch's copy of this file, so a pull
+# request cannot change what deploys it. A pull request's build becomes a preview; a push to main becomes staging.
+# Production is never deployed from here. Replace 0000000000000000000000000000000000000000 with the toolkit commit
+# tagged @pebbletech/infra@<the version infra/ installs>: in `uses:` and in `toolkit-ref`, the same sha.
+
+on:
+  workflow_run:
+    workflows: [Site build]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  marketing:
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    uses: pebble-tech/toolkit/.github/workflows/site-deploy.yml@0000000000000000000000000000000000000000 # @pebbletech/infra@0.8.0
+    with:
+      toolkit-ref: '0000000000000000000000000000000000000000'
+      build-workflow: .github/workflows/site-build.yml
+      artifact-name: marketing-output
+      vercel-project-id: ${{ vars.VERCEL_PROJECT_ID_MARKETING }}
+      vercel-team-id: ${{ vars.VERCEL_TEAM_ID }}
+      vercel-environment: staging
+      alias-template: marketing-pr-{pr}.vercel.app
+      protected-hosts: new.pebbletech.my pebbletech.my
+    secrets:
+      vercel-token: ${{ secrets.VERCEL_TOKEN_MARKETING || secrets.VERCEL_API_TOKEN }}

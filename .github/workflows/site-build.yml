@@ -1,0 +1,84 @@
+name: Site build
+
+# Reusable: builds a site's Vercel Build Output (.vercel/output) and uploads it as an artifact, with no secrets and
+# read-only contents. site-deploy.yml, called from the product's own workflow_run stub, deploys it. A product calls this
+# from a thin stub (docs: packages/infra/README.md#site-deploy-workflows, copyable stubs in .github/site-deploy/stubs).
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: The runner labels as JSON, e.g. '"ubuntu-latest"' or '["ubicloud-standard-2"]'.
+        type: string
+        default: '"ubuntu-latest"'
+      working-directory:
+        description: The app's directory from the repository root; the build writes .vercel/output there.
+        type: string
+        default: apps/marketing
+      build-command:
+        description: Run in working-directory after the shared setup action's pnpm install.
+        type: string
+        default: pnpm build
+      build-env:
+        description: Plain build-time env vars as a JSON object of strings. No secrets reach this workflow.
+        type: string
+        default: '{}'
+      artifact-name:
+        description: The artifact site-deploy downloads; one per app when a repository deploys several.
+        type: string
+        default: site-output
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      # A reusable workflow cannot `uses: ./`, and `uses:` takes no expression, so the setup action is pinned here to
+      # the toolkit commit that holds it unchanged (origin/main at @pebbletech/infra 0.7.0).
+      - name: Set up pnpm, Node.js and the dependencies (no Pulumi)
+        uses: pebble-tech/toolkit/.github/actions/setup@4738a3b5d7819c58331d3c7b760947511258d9a7 # @pebbletech/infra@0.7.0
+        with:
+          pulumi: false
+
+      - name: Build-time env vars (build-env)
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: |
+          node -e '
+            const env = JSON.parse(process.env.BUILD_ENV || "{}");
+            for (const [key, value] of Object.entries(env)) {
+              if (!/^[A-Z_][A-Z0-9_]*$/.test(key) || typeof value !== "string" || /[\r\n]/.test(value)) {
+                console.error(`build-env ${key} is not a NAME with a one-line string value`);
+                process.exit(1);
+              }
+              console.log(`${key}=${value}`);
+            }' >> "$GITHUB_ENV"
+
+      - name: Build
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
+        run: bash -c "$BUILD_COMMAND"
+
+      - name: The Build Output exists
+        working-directory: ${{ inputs.working-directory }}
+        run: test -f .vercel/output/config.json
+
+      # Only the Build Output, as the artifact's root: site-deploy reads nothing else from it and trusts none of it.
+      - name: Upload .vercel/output
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.working-directory }}/.vercel/output
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
