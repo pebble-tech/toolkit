@@ -69,6 +69,93 @@ describe('formatStampNotice', () => {
   });
 });
 
+describe('formatStampNotice details', () => {
+  const textOf = (notice: Parameters<typeof formatStampNotice>[0]) =>
+    (formatStampNotice(notice).blocks as [{ text: { text: string } }])[0].text.text;
+
+  test('given details, each present field gets a labelled line in the same block, after the note', () => {
+    const message = formatStampNotice({
+      ...base,
+      note: 'hello',
+      details: {
+        name: 'Aisyah',
+        company: 'Kedai Kopi',
+        email: 'a@kopi.my',
+        phone: '+60 12-345 6789',
+        business: 'Coffee',
+        stuck: 'Getting found online',
+        tried: 'Instagram',
+        links: ['https://kopi.my', 'https://instagram.com/kopi'],
+      },
+    });
+    expect(message.blocks).toHaveLength(1);
+    expect(
+      textOf({
+        ...base,
+        note: 'hello',
+        details: {
+          name: 'Aisyah',
+          company: 'Kedai Kopi',
+          email: 'a@kopi.my',
+          phone: '+60 12-345 6789',
+          business: 'Coffee',
+          stuck: 'Getting found online',
+          tried: 'Instagram',
+          links: ['https://kopi.my', 'https://instagram.com/kopi'],
+        },
+      })
+        .split('\n')
+        .slice(1, -1)
+    ).toEqual([
+      '> hello',
+      '*Name:* Aisyah',
+      '*Company:* Kedai Kopi',
+      '*Email:* a@kopi.my',
+      '*Phone:* +60 12-345 6789',
+      '*Business:* Coffee',
+      '*Stuck on:* Getting found online',
+      '*Tried:* Instagram',
+      '*Links:* https://kopi.my https://instagram.com/kopi',
+    ]);
+  });
+
+  test('missing details, or only some fields, adds only what is there', () => {
+    for (const details of [undefined, null, {}, { name: '  ', links: [] }]) {
+      expect(textOf({ ...base, details }).split('\n')).toHaveLength(2);
+    }
+    expect(textOf({ ...base, details: { email: 'x@y.my' } }).split('\n')[1]).toBe('*Email:* x@y.my');
+  });
+
+  test('mentions and link markup in any field stay inert text', () => {
+    const attack = '<!channel> <!here|here> <@U123> @channel @here @everyone <https://evil.example|bank> & co';
+    // Everything but the footer, which holds our own album and remove links.
+    const text = textOf({ ...base, note: attack, details: { name: attack, links: attack } })
+      .split('\n')
+      .slice(0, -1)
+      .join('\n');
+    expect(text).not.toMatch(/<[!@]/);
+    expect(text).not.toMatch(/<https?:/);
+    expect(text).not.toMatch(/@(channel|here|everyone)/);
+    expect(text).toContain(
+      '*Name:* &lt;!channel&gt; &lt;!here|here&gt; &lt;@U123&gt; @\u200bchannel @\u200bhere @\u200beveryone &lt;https://evil.example|bank&gt; &amp; co'
+    );
+  });
+
+  test("long fields are cut, and the block stays within Slack's 3000-character section limit with its footer", () => {
+    const long = 'x'.repeat(5000);
+    const text = textOf({
+      ...base,
+      note: long,
+      details: Object.fromEntries(
+        ['name', 'company', 'email', 'phone', 'business', 'stuck', 'tried', 'links'].map((key) => [key, long])
+      ),
+    });
+    expect(text.length).toBeLessThanOrEqual(3000);
+    expect(text).toContain(`*Name:* ${'x'.repeat(299)}…`);
+    expect(text.split('\n').at(-1)).toMatch(/^:clock3: .*\|remove>$/);
+  });
+});
+
 describe('postToSlack', () => {
   // Slack is the external service; the fake stands at its boundary, the fetch call.
   function fakeSlack(status = 200) {

@@ -6,7 +6,6 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
 import {
-  allowRoles,
   createCmsConfig,
   formatStampNotice,
   isStaff,
@@ -15,6 +14,7 @@ import {
   previewLink,
   publishedOrPreview,
   seedFirstAdmin,
+  submissionAccess,
   verifyPreview,
   verifyPurge,
   withRevalidateHooks,
@@ -121,7 +121,7 @@ describe.skipIf(skipped)(`@pebbletech/cms on Postgres${skipped ? ` (${skipReason
     );
     const stamps = {
       slug: 'stamps',
-      access: { read: () => true, create: allowRoles('stamp-submitter') },
+      access: submissionAccess('stamp-submitter'),
       hooks: {
         afterChange: [
           notifySlackOnCreate(
@@ -388,6 +388,22 @@ describe.skipIf(skipped)(`@pebbletech/cms on Postgres${skipped ? ` (${skipReason
       await payload.update({ collection: 'stamps', id: created.json.doc.id, data: { note: 'edited' } });
       expect(slackPosts).toHaveLength(1);
       expect(JSON.stringify(slackPosts[0])).toContain('[staging] :love_letter: *A postcard just landed!*');
+    });
+
+    test('a submissions collection: the service key may only create, staff read, and nothing is public', async () => {
+      const auth = `users API-Key ${submitterKey}`;
+      const created = await api('/stamps', { method: 'POST', auth, body: { note: 'second' } });
+      expect(created.status).toBe(201);
+      const id = created.json.doc.id;
+      expect((await api('/stamps')).status).toBe(403);
+      expect((await api(`/stamps/${id}`)).status).toBe(403);
+      expect((await api('/stamps', { auth })).status).toBe(403);
+      expect((await api(`/stamps/${id}`, { auth })).status).toBe(403);
+      expect((await api('/stamps', { auth: previewAuth })).status).toBe(403);
+      expect((await api(`/stamps/${id}`, { method: 'PATCH', auth, body: { note: 'changed' } })).status).toBe(403);
+      expect((await api(`/stamps/${id}`, { method: 'DELETE', auth })).status).toBe(403);
+      expect((await api('/stamps', { method: 'POST', body: { note: 'anonymous' } })).status).toBe(403);
+      expect((await api('/stamps', { auth: editorAuth })).json.totalDocs).toBe(2);
     });
   });
 });

@@ -66,13 +66,51 @@ export interface StampNotice {
   removeUrl: string;
   /** `prod` (or `production`) posts untagged; any other stage, such as `staging`, is tagged `[staging]`. */
   stage: string;
+  /** What the sender told us about themselves, shown under the note when present. Every field is optional. */
+  details?: StampDetails | null;
 }
+
+export interface StampDetails {
+  name?: string | null;
+  company?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  business?: string | null;
+  stuck?: string | null;
+  tried?: string | null;
+  links?: string | string[] | null;
+}
+
+const DETAIL_LABELS: [keyof StampDetails, string][] = [
+  ['name', 'Name'],
+  ['company', 'Company'],
+  ['email', 'Email'],
+  ['phone', 'Phone'],
+  ['business', 'Business'],
+  ['stuck', 'Stuck on'],
+  ['tried', 'Tried'],
+  ['links', 'Links'],
+];
+const MAX_DETAIL_LENGTH = 300;
+/** Slack's limit for a section block's text. */
+const MAX_SECTION_TEXT = 3000;
 
 const MAX_NOTE_LENGTH = 500;
 
-// Slack mrkdwn treats &, < and > as control characters; a visitor's note must not make links or mentions.
-function escapeMrkdwn(text: string): string {
-  return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/**
+ * Visitor text made inert for Slack mrkdwn: `&`, `<` and `>` are escaped, so `<!channel>`, `<@U123>` and `<url|text>`
+ * stay literal, and a zero-width space after `@` keeps `@channel`, `@here` and `@everyone` from notifying anyone.
+ */
+function inert(text: string): string {
+  return text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replace(/@(channel|here|everyone)\b/gi, '@\u200b$1');
 }
 
 /** `28 Nov 2026, 00:30 MYT`: the time in Asia/Kuala_Lumpur, built from parts so it reads the same on every Node. */
@@ -93,9 +131,15 @@ function malaysiaTime(at: Date): string {
   return `${parts.day} ${parts.month} ${parts.year}, ${parts.hour}:${parts.minute} MYT`;
 }
 
+// The headline and footer always fit; the visitor's part is cut so the whole stays within Slack's section limit.
+function sectionText(headline: string, middle: string, footer: string): string {
+  const room = MAX_SECTION_TEXT - headline.length - footer.length - 2;
+  return [headline, middle ? truncate(middle, room - 1) : '', footer].filter(Boolean).join('\n');
+}
+
 /**
  * The Slack message for a new stamp: one Block Kit section that reads like a postcard arriving, with the stamp as
- * its image, the sender's note quoted when there is one, the running count, the time in Malaysia, a link to the album
+ * its image, the sender's note quoted and their details when given, the running count, the time in Malaysia, a link to the album
  * and a small link to remove it in the CMS. Pure, so a hook builds it with `notifySlackOnCreate`.
  */
 export function formatStampNotice(notice: StampNotice): SlackMessage {
@@ -103,18 +147,23 @@ export function formatStampNotice(notice: StampNotice): SlackMessage {
   const headline = `${tag}:love_letter: *A postcard just landed!* Stamp #${notice.count}`;
   const note = notice.note?.trim();
   const quoted = note
-    ? escapeMrkdwn(note.length > MAX_NOTE_LENGTH ? `${note.slice(0, MAX_NOTE_LENGTH)}…` : note)
+    ? inert(truncate(note, MAX_NOTE_LENGTH))
         .split('\n')
         .map((line) => `> ${line}`)
         .join('\n')
     : undefined;
+  const details = DETAIL_LABELS.flatMap(([key, label]) => {
+    const raw = notice.details?.[key];
+    const value = (Array.isArray(raw) ? raw.join(' ') : (raw ?? '')).replace(/\s+/g, ' ').trim();
+    return value ? [`*${label}:* ${inert(truncate(value, MAX_DETAIL_LENGTH))}`] : [];
+  });
   const footer = `:clock3: ${malaysiaTime(new Date(notice.createdAt))} · <${notice.albumUrl}|See the album> · <${notice.removeUrl}|remove>`;
   return {
     text: `${tag}A postcard just landed! Stamp #${notice.count}`,
     blocks: [
       {
         type: 'section',
-        text: { type: 'mrkdwn', text: [headline, quoted, footer].filter(Boolean).join('\n') },
+        text: { type: 'mrkdwn', text: sectionText(headline, [quoted, ...details].filter(Boolean).join('\n'), footer) },
         accessory: { type: 'image', image_url: notice.stampUrl, alt_text: `Stamp #${notice.count}` },
       },
     ],

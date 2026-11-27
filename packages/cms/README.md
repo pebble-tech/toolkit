@@ -77,6 +77,11 @@ Only the preview reader and service roles can hold an API key; saving an admin o
 Access helpers: `anyone`, `isAdmin`, `isStaff` (admin or editor), `allowRoles(...roles)`, `publishedOrPreview` (staff
 and the preview reader read everything, everyone else only `_status: published`), `adminOnlyField`, `hasRole(user, ...roles)`.
 
+A collection only staff may read, such as form submissions, takes `adminOrEditorOnly` (the same as `isStaff`) for
+`read`. A collection a service key fills takes `submissionAccess('stamp-submitter')`: that role may only create, and
+admins and editors read, update and delete. Nobody else reads it, over REST or GraphQL. Name the role in
+`serviceRoles` and give the key's user that role.
+
 ### First admin
 
 `/admin/create-first-user` would let whoever reaches a fresh database first become admin. `firstAdminGuard`, on the
@@ -171,7 +176,11 @@ nowhere), and refuses a URL that is not `https://hooks.slack.com/`. `notifySlack
 logs a failure instead of failing the create. `formatStampNotice` is the stamp preset: one section that reads like a
 postcard arriving, with the stamp image, the sender's note quoted (escaped, so it cannot make links or mentions),
 `Stamp #N`, the time in Malaysia (`Asia/Kuala_Lumpur`), a link to the album and a small "remove" link to the stamp in
-the admin. Any stage but `prod` is tagged, such as `[staging]`.
+the admin. Any stage but `prod` is tagged, such as `[staging]`. An optional `details` object (`name`, `company`, `email`, `phone`,
+`business`, `stuck`, `tried`, `links`) adds a labelled line for each field present, in the same block. Every visitor
+field is made inert: `&`, `<` and `>` are escaped, so `<!channel>`, `<@U…>` and `<url|text>` stay text, and `@channel`,
+`@here` and `@everyone` get a zero-width space. The note is cut at 500 characters, each detail at 300, and the whole
+section at Slack's 3000.
 
 ## Media
 

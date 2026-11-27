@@ -1,4 +1,4 @@
-import type { Access, FieldAccess } from 'payload';
+import type { Access, CollectionConfig, FieldAccess } from 'payload';
 
 export const ADMIN = 'admin';
 export const EDITOR = 'editor';
@@ -21,6 +21,8 @@ export const anyone: Access = () => true;
 export const isAdmin: Access = allowRoles(ADMIN);
 /** Admins and editors: the people who use the admin panel. */
 export const isStaff: Access = allowRoles(ADMIN, EDITOR);
+/** The same as `isStaff`: for a collection only admins and editors may read, such as form submissions. */
+export const adminOrEditorOnly: Access = isStaff;
 export const adminOnlyField: FieldAccess = ({ req }) => hasRole(req.user, ADMIN);
 
 /**
@@ -31,3 +33,12 @@ export const publishedOrPreview: Access = ({ req }) => {
   if (hasRole(req.user, ADMIN, EDITOR, PREVIEW_READER)) return true;
   return { _status: { equals: 'published' } };
 };
+
+/**
+ * Access for a submissions collection: an API key with one of `roles` (see `serviceRoles`) may only create; reading,
+ * updating and deleting are for admins and editors. Nobody else, and no public REST or GraphQL read, gets in.
+ */
+export function submissionAccess(...roles: string[]): NonNullable<CollectionConfig['access']> {
+  if (roles.length === 0) throw new Error('submissionAccess needs at least one role that may create');
+  return { create: allowRoles(...roles), read: isStaff, update: isStaff, delete: isStaff };
+}
