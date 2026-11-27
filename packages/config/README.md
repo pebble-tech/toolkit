@@ -39,3 +39,60 @@ A product using Tailwind adds `sortTailwindcss: { stylesheet: './path/to/app.css
 
 Product-specific settings stay in the product: `paths` and `references` in tsconfig, file-scoped oxlint `overrides`,
 and the import groups above.
+
+## Site repos: `oxlint-site.json`
+
+`@pebbletech/config/oxlint-site.json` is the oxlint preset plus two things a site repo (a Payload CMS app and the
+apps that read its content) needs:
+
+- It ignores generated files and build output: `node_modules`, `routeTree.gen.ts`, `payload-types.ts`, `importMap.js`,
+  `.next`, `.output`, `.vercel` and `dist`.
+- It makes `next`, `next/*`, `payload`, `payload/*` and `@payloadcms/*` imports errors everywhere except `apps/cms`.
+  A new app or package is covered without a config change.
+
+oxlint applies `ignorePatterns` only from the root config, not from a config it `extends`. So a site takes this preset
+through `oxlint.config.ts`, not through `extends` in `.oxlintrc.json`:
+
+```ts
+// oxlint.config.ts
+import base from '@pebbletech/config/oxlint.json' with { type: 'json' };
+import site from '@pebbletech/config/oxlint-site.json' with { type: 'json' };
+
+export default { ...site, extends: [base] };
+```
+
+oxlint marks TypeScript config files as experimental and loads them only when it runs under Node.js, which the npm
+package does.
+
+## Vite helpers: `@pebbletech/config/vite`
+
+Option builders for a product's `vite.config.ts`, taken from base-app's `apps/web/vite.config.ts`. Each returns a plain
+object for the product's own plugin, so this package needs none of vite, Nitro, TanStack or Sentry.
+
+| Helper | Returns |
+|---|---|
+| `devServerPort(env?)` | `PORT` as a number, or 3000 |
+| `sentryOptions({ project, org? }, env?)` | `undefined` without `SENTRY_AUTH_TOKEN`; otherwise the Sentry plugin options: org from `SENTRY_ORG`, else `org` (default `pebble-tech-sdn-bhd`), release from `SENTRY_RELEASE`, telemetry off |
+| `nitroSkewProtection(deploymentId)` | Nitro's `manifest` and `vercel` options for Vercel Skew Protection. With no id (`undefined` or empty), `skewProtection` is `false`, so Vercel's own `VERCEL_*` variables cannot turn on the cookie route |
+
+`env` defaults to `process.env`.
+
+```ts
+// vite.config.ts
+import { devServerPort, nitroSkewProtection, sentryOptions } from '@pebbletech/config/vite';
+import { sentryTanstackStart } from '@sentry/tanstackstart-react/vite';
+import { nitro } from 'nitro/vite';
+import { defineConfig } from 'vite';
+
+// CI sets one id per deploy; see @pebbletech/infra's README on Skew Protection.
+const sentry = sentryOptions({ project: 'site-web' });
+
+export default defineConfig({
+  server: { port: devServerPort() },
+  plugins: [
+    // ...the framework plugins
+    nitro(nitroSkewProtection(process.env.SITE_DEPLOYMENT_ID)),
+    ...(sentry ? [sentryTanstackStart(sentry)] : []),
+  ],
+});
+```

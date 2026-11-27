@@ -1,7 +1,7 @@
 {
   "name": "@pebbletech/config",
   "version": "0.1.0",
-  "description": "Shared TypeScript, oxlint, oxfmt and lint-staged presets for Pebble product repos",
+  "description": "Shared TypeScript, oxlint, oxfmt and lint-staged presets and Vite option builders for Pebble product repos",
   "keywords": [
     "oxfmt",
     "oxlint",
