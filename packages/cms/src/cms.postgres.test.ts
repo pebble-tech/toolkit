@@ -420,6 +420,30 @@ describe.skipIf(skipped)(`@pebbletech/cms on Postgres${skipped ? ` (${skipReason
       }
     });
 
+    test('a signed key always carries a random segment and never overwrites, so it cannot hit a server-only collection file', async () => {
+      // A server-side upload to an opted-out collection stores `<filename>` at the bucket root (no collection prefix).
+      const serverOnlyKey = '/stamp.png';
+      const attempts = [
+        { filename: 'stamp.png' },
+        { filename: '../stamp.png' },
+        { filename: '/stamp.png', docPrefix: '../..' },
+        { filename: 'stamp.png', docPrefix: '' },
+      ];
+      for (const attempt of attempts) {
+        const signed = await api('/storage-s3-generate-signed-url', {
+          method: 'POST',
+          auth: `users API-Key ${submitterKey}`,
+          body: { collectionSlug: 'stamp-uploads', mimeType: 'image/png', filesize: 100, ...attempt },
+        });
+        expect(signed.status).toBe(200);
+        const key = new URL(signed.json.url).pathname;
+        expect(key).toMatch(/^\/([^/]+\/)*[0-9a-f-]{36}\/stamp\.png$/);
+        expect(key).not.toBe(serverOnlyKey);
+        expect(signed.json.headers['If-None-Match']).toBe('*');
+        expect(new URL(signed.json.url).searchParams.get('X-Amz-SignedHeaders')).toContain('if-none-match');
+      }
+    });
+
     test('media refuses even a harmless SVG uploaded through the CMS', async () => {
       const form = new FormData();
       form.append(
