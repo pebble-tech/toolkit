@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { parse } from 'yaml';
@@ -712,6 +713,22 @@ describe('decide: preview', () => {
     expect([result.code, result.outputs.deploy, result.outputs.pr]).toEqual([0, 'true', '17']);
   });
 
+  test('counts a PR listed on two pages, as it moves between them, as one match', async () => {
+    api = {
+      routes: {
+        [`GET /repos/${REPO}/actions/runs/4242`]: runPayload(),
+        [`GET /repos/${REPO}/pulls?state=open&per_page=100&page=1`]: [
+          pull(17),
+          ...Array.from({ length: 99 }, (_, i) => pull(100 + i, OTHER)),
+        ],
+        [`GET /repos/${REPO}/pulls?state=open&per_page=100&page=2`]: [pull(17)],
+      },
+      calls: [],
+    };
+    const result = await script(['decide', 'preview'], {}, { workflow_run: runPayload() });
+    expect([result.code, result.outputs.deploy, result.outputs.pr]).toEqual([0, 'true', '17']);
+  });
+
   test.each<[string, Record<string, unknown>, string]>([
     ['a fork build', { head_repository: { full_name: 'someone/site' } }, 'ran on someone/site'],
     ['a failed build', { conclusion: 'failure' }, 'concluded failure'],
@@ -1173,14 +1190,11 @@ describe('the build stub', () => {
   });
 });
 
-describe('the script run from a path with a space', () => {
-  test('still runs its command', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'site deploy '));
-    const copy = join(dir, 'site-deploy.mjs');
-    writeFileSync(copy, readFileSync(SCRIPT));
-    const outputFile = join(dir, 'output');
+describe('the script run from an unusual path', () => {
+  const runFrom = async (path: string) => {
+    const outputFile = join(mkdtempSync(join(tmpdir(), 'site-out-')), 'output');
     writeFileSync(outputFile, '');
-    const { stdout } = await run(process.execPath, [copy, 'alias'], {
+    const { stdout } = await run(process.execPath, [path, 'alias'], {
       env: {
         PATH: process.env.PATH,
         GITHUB_OUTPUT: outputFile,
@@ -1188,10 +1202,39 @@ describe('the script run from a path with a space', () => {
         PR: '17',
       },
     });
-    expect([stdout, readFileSync(outputFile, 'utf8')]).toEqual([
-      'alias=marketing-pr-17.vercel.app\n',
-      'alias=marketing-pr-17.vercel.app\n',
-    ]);
+    return [stdout, readFileSync(outputFile, 'utf8')];
+  };
+  const copyInto = (dir: string) => {
+    writeFileSync(join(dir, 'site-deploy.mjs'), readFileSync(SCRIPT));
+    return dir;
+  };
+  const ran = ['alias=marketing-pr-17.vercel.app\n', 'alias=marketing-pr-17.vercel.app\n'];
+
+  test('still runs its command from a path with a space', async () => {
+    const dir = copyInto(mkdtempSync(join(tmpdir(), 'site deploy ')));
+    expect(await runFrom(join(dir, 'site-deploy.mjs'))).toEqual(ran);
+  });
+
+  test('fails loudly, rather than do nothing, when run under its name from a path that is not it', async () => {
+    const loader = `process.argv[1] = '/nowhere/site-deploy.mjs'; await import(${JSON.stringify(pathToFileURL(SCRIPT).href)});`;
+    const result = await run(process.execPath, ['--input-type=module', '-e', loader], {
+      env: { PATH: process.env.PATH },
+    }).then(
+      () => ({ code: 0, stderr: '' }),
+      (error: any) => ({ code: error.code as number, stderr: String(error.stderr) })
+    );
+    expect(result).toEqual({
+      code: 1,
+      stderr: expect.stringContaining('/nowhere/site-deploy.mjs does not resolve to'),
+    });
+  });
+
+  // Node gives the module its real path, while argv[1] keeps the link's.
+  test('still runs its command through a symlinked directory', async () => {
+    const real = copyInto(mkdtempSync(join(tmpdir(), 'site-real-')));
+    const link = join(mkdtempSync(join(tmpdir(), 'site-link-')), 'toolkit');
+    symlinkSync(real, link);
+    expect(await runFrom(join(link, 'site-deploy.mjs'))).toEqual(ran);
   });
 });
 

@@ -21,10 +21,11 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
 } from 'node:fs';
-import { isAbsolute, join, relative, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { basename, isAbsolute, join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 class Refusal extends Error {}
 
@@ -125,9 +126,11 @@ export async function decide(kind, event, context) {
     pr.head?.sha === run.headSha &&
     pr.head?.repo?.full_name === context.repository &&
     pr.base?.repo?.full_name === context.repository;
-  const open = (
-    await all(context, `/repos/${context.repository}/pulls?state=open`, (items) => items.filter(eligible).length > 1)
-  ).filter(eligible);
+  // By number: a PR that moves between pages while they are read is one PR, not two.
+  const matches = (items) => [...new Map(items.filter(eligible).map((pr) => [pr.number, pr])).values()];
+  const open = matches(
+    await all(context, `/repos/${context.repository}/pulls?state=open`, (items) => matches(items).length > 1)
+  );
   if (open.length !== 1) {
     return { deploy: 'false', reason: `${open.length} open pull requests have ${run.headSha} as their head`, ...base };
   }
@@ -362,10 +365,23 @@ async function main([command, ...args]) {
   }
 }
 
-// The file URL Node gives this module, against the path it was run as (a checkout path may hold a space).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Run as a script: the path Node was given and this module's file, both resolved (a symlinked checkout, a path with
+// a space). Run under this file's name from a path that does not resolve to it, fail loudly rather than do nothing.
+const resolved = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
+  }
+};
+const self = resolved(fileURLToPath(import.meta.url));
+const invoked = process.argv[1] ? resolved(process.argv[1]) : undefined;
+if (invoked !== undefined && invoked === self) {
   main(process.argv.slice(2)).catch((error) => {
     process.stderr.write(`::error::${error instanceof Refusal ? error.message : error.stack}\n`);
     process.exit(1);
   });
+} else if (process.argv[1] && basename(process.argv[1]) === basename(fileURLToPath(import.meta.url))) {
+  process.stderr.write(`::error::${process.argv[1]} does not resolve to ${self}: nothing was run\n`);
+  process.exit(1);
 }
