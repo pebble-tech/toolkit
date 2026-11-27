@@ -3,7 +3,7 @@ import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { getPayload, handleEndpoints, type Payload, type SanitizedConfig } from 'payload';
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 
 import {
   createCmsConfig,
@@ -201,6 +201,14 @@ describe.skipIf(skipped)(`@pebbletech/cms on Postgres${skipped ? ` (${skipReason
     await expect(seedFirstAdmin(payload, { email: 'other@example.com', password: PASSWORD })).resolves.toEqual({
       created: false,
     });
+    // A later release job without the bootstrap credentials skips the seed instead of failing.
+    vi.stubEnv('FIRST_ADMIN_EMAIL', '');
+    vi.stubEnv('FIRST_ADMIN_PASSWORD', '');
+    try {
+      await expect(seedFirstAdmin(payload)).resolves.toEqual({ created: false });
+    } finally {
+      vi.unstubAllEnvs();
+    }
     const { docs } = await payload.find({ collection: 'users' });
     expect(docs.map((user) => [user.email, (user as { role?: string }).role])).toEqual([[ADMIN_EMAIL, 'admin']]);
     const { status } = await api('/users/first-register', {
@@ -302,6 +310,23 @@ describe.skipIf(skipped)(`@pebbletech/cms on Postgres${skipped ? ` (${skipReason
       expect(purges).toHaveLength(2);
     });
 
+    test('a slug too long for a cache tag is left out and the rest of the purge still verifies', async () => {
+      purges.length = 0;
+      const slug = 's'.repeat(300);
+      const page = await api('/pages', { method: 'POST', auth: editorAuth, body: { slug, _status: 'published' } });
+      expect(page.status).toBe(201);
+      const [purge] = purges as [Received];
+      expect(
+        verifyPurge({
+          rawBody: purge.body,
+          timestamp: purge.headers['x-pb-timestamp'] as string,
+          signature: purge.headers['x-pb-signature'] as string,
+          secret: REVALIDATE_SECRET,
+        })
+      ).toEqual({ ok: true, tags: ['collection:pages', `doc:pages:${page.json.doc.id}`] });
+      await api(`/pages/${page.json.doc.id}`, { method: 'DELETE', auth: editorAuth });
+    });
+
     test('anonymous readers see only published pages; the preview reader sees drafts with its key', async () => {
       await api('/pages?draft=true', {
         method: 'POST',
@@ -348,6 +373,22 @@ describe.skipIf(skipped)(`@pebbletech/cms on Postgres${skipped ? ` (${skipReason
       expect(ok.json.headers['Content-Length']).toBe('1234');
 
       expect((await sign(1234, previewAuth)).status).toBe(403);
+    });
+
+    test('a signed browser upload is refused for a type media does not list, such as HTML or SVG', async () => {
+      for (const [filename, mimeType] of [
+        ['x.html', 'text/html'],
+        ['x.svg', 'image/svg+xml'],
+        ['x.png', 'application/octet-stream'],
+      ]) {
+        const signed = await api('/storage-s3-generate-signed-url', {
+          method: 'POST',
+          auth: editorAuth,
+          body: { collectionSlug: 'media', filename, mimeType, filesize: 100 },
+        });
+        expect(signed.status).toBe(400);
+        expect(JSON.stringify(signed.json)).toContain('is not allowed for media');
+      }
     });
 
     test('media refuses even a harmless SVG uploaded through the CMS', async () => {

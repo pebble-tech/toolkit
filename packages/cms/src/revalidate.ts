@@ -1,6 +1,15 @@
 import type { CollectionConfig, GlobalConfig, PayloadRequest } from 'payload';
 
-import { SITE_CACHE_TAG, VERCEL_BYPASS_HEADER, collectionTag, docTag, globalTag, signPurge } from './site.js';
+import {
+  MAX_TAGS,
+  MAX_TAG_LENGTH,
+  SITE_CACHE_TAG,
+  VERCEL_BYPASS_HEADER,
+  collectionTag,
+  docTag,
+  globalTag,
+  signPurge,
+} from './site.js';
 
 export interface PurgeTarget {
   /** The marketing app's origin. Default: `MARKETING_URL`. */
@@ -24,7 +33,11 @@ export async function sendPurge(tags: string[], target: PurgeTarget = {}): Promi
   const bypass = target.bypassSecret ?? process.env.VERCEL_PROTECTION_BYPASS_MARKETING;
   if (!siteUrl) throw new Error('MARKETING_URL is not set');
   if (!secret) throw new Error('REVALIDATE_SECRET is not set');
-  const { body, headers } = signPurge({ tags, secret });
+  // The receiver refuses a whole purge for one bad tag, so a tag it would refuse (empty, or over MAX_TAG_LENGTH as a
+  // long slug makes) is dropped here and the rest still purge.
+  const valid = [...new Set(tags)].filter((tag) => tag.length > 0 && tag.length <= MAX_TAG_LENGTH).slice(0, MAX_TAGS);
+  if (valid.length === 0) throw new Error('no purgeable tags');
+  const { body, headers } = signPurge({ tags: valid, secret });
   if (bypass) headers[VERCEL_BYPASS_HEADER] = bypass;
   const response = await (target.fetch ?? globalThis.fetch)(new URL(target.route ?? '/api/revalidate', siteUrl), {
     method: 'POST',

@@ -11,8 +11,8 @@ export const PURGE_WINDOW_SECONDS = 300;
 export const PREVIEW_TTL_SECONDS = 3600;
 export const SITE_CACHE_TAG = 'site';
 
-const MAX_TAGS = 128;
-const MAX_TAG_LENGTH = 256;
+export const MAX_TAGS = 128;
+export const MAX_TAG_LENGTH = 256;
 
 export function collectionTag(slug: string): string {
   return `collection:${slug}`;

@@ -60,7 +60,11 @@ describe('R2 storage', () => {
 describe('shape', () => {
   test('types are written with declare: false; locales default to en; uploads cap at 10 MB', async () => {
     const config = await createCmsConfig({ typesOutputFile: '/tmp/payload-types.ts' });
-    expect(config.typescript).toMatchObject({ declare: false, outputFile: '/tmp/payload-types.ts' });
+    expect(config.typescript).toMatchObject({
+      autoGenerate: false,
+      declare: false,
+      outputFile: '/tmp/payload-types.ts',
+    });
     expect(config.localization).toMatchObject({ defaultLocale: 'en', localeCodes: ['en'], fallback: true });
     expect(DEFAULT_MAX_UPLOAD_BYTES).toBe(10 * 1024 * 1024);
     expect(config.upload.limits?.fileSize).toBe(DEFAULT_MAX_UPLOAD_BYTES);

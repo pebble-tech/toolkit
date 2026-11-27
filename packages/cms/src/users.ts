@@ -106,13 +106,15 @@ export async function seedFirstAdmin(
   payload: Payload,
   options: SeedFirstAdminOptions = {}
 ): Promise<{ created: boolean }> {
-  const email = options.email ?? process.env.FIRST_ADMIN_EMAIL;
-  const password = options.password ?? process.env.FIRST_ADMIN_PASSWORD;
-  if (!email || !password)
-    throw new Error('FIRST_ADMIN_EMAIL and FIRST_ADMIN_PASSWORD must be set to seed the first admin');
-  if (password.length < 12) throw new Error('FIRST_ADMIN_PASSWORD must be at least 12 characters');
+  // Users exist: nothing to seed, so a release job may run without the bootstrap credentials.
   const { totalDocs } = await payload.count({ collection: USERS_SLUG, overrideAccess: true });
   if (totalDocs > 0) return { created: false };
+  const email = options.email ?? process.env.FIRST_ADMIN_EMAIL;
+  const password = options.password ?? process.env.FIRST_ADMIN_PASSWORD;
+  if (!email || !password) {
+    throw new Error('FIRST_ADMIN_EMAIL and FIRST_ADMIN_PASSWORD must be set to seed the first admin');
+  }
+  if (password.length < 12) throw new Error('FIRST_ADMIN_PASSWORD must be at least 12 characters');
   await payload.create({
     collection: USERS_SLUG,
     data: { email, password, role: ADMIN },

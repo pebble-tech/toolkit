@@ -48,6 +48,11 @@ export default createCmsConfig({
   `storage` option). With `MEDIA_BASE_URL` set, media URLs are built from it when read and never stored.
 - An upload cap, `maxUploadBytes`, default 10 MB. Payload refuses to sign an upload URL for a larger file and signs
   `Content-Length` into the URL, so R2 refuses a different size. Uploads through the CMS itself are capped the same.
+- Signed uploads only for the collection's `upload.mimeTypes`. Payload itself checks that list only for uploads through
+  the CMS, so this package wraps the signing endpoint to check it for browser uploads too.
+- `typescript.autoGenerate: false`. Outside production Payload otherwise spawns `payload generate:types` on every
+  start, and in a test, a script or a directory without the config that process never exits. Run
+  `payload generate:types` yourself, under a timeout (`timeout 120 pnpm payload generate:types`).
 - The Lexical editor (`editor` overrides it), localization over `locales` (default `['en']`, the first is the default,
   with fallback), `typescript.declare: false`.
 - `users` and `media` before the client's collections; `serverURL` and `csrf` from `CMS_URL` when set.
@@ -96,7 +101,7 @@ import { getPayload } from 'payload';
 import config from './payload.config';
 
 const payload = await getPayload({ config });
-const { created } = await seedFirstAdmin(payload); // FIRST_ADMIN_EMAIL, FIRST_ADMIN_PASSWORD (12+ characters)
+const { created } = await seedFirstAdmin(payload); // FIRST_ADMIN_EMAIL, FIRST_ADMIN_PASSWORD (12+), only when users is empty
 payload.logger.info(created ? 'first admin created' : 'users exist; seed skipped');
 process.exit(0);
 ```
@@ -114,7 +119,8 @@ After a change that publishes or unpublishes (any change when drafts are off) an
 signed purge to `${MARKETING_URL}/api/revalidate` with `REVALIDATE_SECRET`, and `x-vercel-protection-bypass` set to
 `VERCEL_PROTECTION_BYPASS_MARKETING`. A draft save or autosave sends nothing. Default tags: `collection:<slug>`,
 `doc:<slug>:<id>` and `doc:<slug>:<slug field>` for the new and previous version; a global sends `global:<slug>` and
-`site`. A failed purge is logged and does not fail the save. In development and test with nothing configured it is
+`site`. A tag the receiver would refuse (empty, or over 256 characters, as a long slug makes) is left out and the rest
+still purge. A failed purge is logged and does not fail the save. In development and test with nothing configured it is
 skipped.
 
 Wire format:

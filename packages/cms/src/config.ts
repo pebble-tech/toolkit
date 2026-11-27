@@ -2,8 +2,9 @@ import { postgresAdapter } from '@payloadcms/db-postgres';
 import { lexicalEditor } from '@payloadcms/richtext-lexical';
 import { s3Storage } from '@payloadcms/storage-s3';
 import { randomBytes } from 'node:crypto';
-import { buildConfig } from 'payload';
-import type { CollectionConfig, Config, GlobalConfig, Plugin, SanitizedConfig } from 'payload';
+import { APIError, buildConfig } from 'payload';
+import type { CollectionConfig, Config, GlobalConfig, PayloadHandler, Plugin, SanitizedConfig } from 'payload';
+import { validateMimeType } from 'payload/shared';
 
 import { MEDIA_SLUG, createMediaCollection } from './media.js';
 import { USERS_SLUG, createUsersCollection } from './users.js';
@@ -89,6 +90,36 @@ function storageFromEnv(): R2StorageOptions | undefined {
   throw new Error(`R2 storage needs ${missing.join(', ')} (NODE_ENV=${process.env.NODE_ENV ?? 'unset'})`);
 }
 
+const SIGNED_URL_PATH = '/storage-s3-generate-signed-url';
+
+/**
+ * Payload signs a browser upload for any MIME type except SVG and XML; the collection's `upload.mimeTypes` is only
+ * checked for uploads through the CMS. This wraps the signing endpoint so the collection's list holds for the signed
+ * PUT to R2 too, so nothing but the listed types reaches the public media origin.
+ */
+const signOnlyAllowedTypes: Plugin = (config) => ({
+  ...config,
+  endpoints: (config.endpoints ?? []).map((endpoint) => {
+    if (endpoint.path !== SIGNED_URL_PATH) return endpoint;
+    const sign: PayloadHandler = endpoint.handler;
+    const handler: PayloadHandler = async (req) => {
+      if (!req.json) throw new APIError('Content-Type expected to be application/json', 400);
+      const body = (await req.json()) as { collectionSlug?: unknown; mimeType?: unknown };
+      const upload = req.payload.collections[String(body.collectionSlug)]?.config.upload;
+      const allowed = upload && typeof upload === 'object' ? (upload.mimeTypes ?? []) : [];
+      if (typeof body.mimeType !== 'string' || !validateMimeType(body.mimeType, allowed)) {
+        throw new APIError(
+          `File type ${JSON.stringify(body.mimeType)} is not allowed for ${String(body.collectionSlug)}`,
+          400
+        );
+      }
+      req.json = () => Promise.resolve(body);
+      return sign(req);
+    };
+    return { ...endpoint, handler };
+  }),
+});
+
 function r2Plugin(storage: R2StorageOptions, slugs: string[]): Plugin {
   const base = storage.mediaBaseUrl?.replace(/\/+$/, '');
   const collection = base
@@ -146,7 +177,13 @@ export function createCmsConfig(options: CmsConfigOptions = {}): Promise<Sanitiz
     globals: options.globals,
     editor: options.editor ?? lexicalEditor(),
     localization: { locales, defaultLocale: locales[0]!, fallback: true },
-    typescript: { declare: false, ...(options.typesOutputFile ? { outputFile: options.typesOutputFile } : {}) },
+    // autoGenerate off: outside production Payload otherwise spawns `payload generate:types` on every start, which in a
+    // test, a script or a directory without the config never exits. Types come from an explicit `payload generate:types`.
+    typescript: {
+      autoGenerate: false,
+      declare: false,
+      ...(options.typesOutputFile ? { outputFile: options.typesOutputFile } : {}),
+    },
     upload: { limits: { fileSize: maxUploadBytes } },
     db: postgresAdapter({
       schemaName: CMS_SCHEMA,
@@ -155,7 +192,9 @@ export function createCmsConfig(options: CmsConfigOptions = {}): Promise<Sanitiz
     }),
     sharp: options.sharp,
     plugins: [
-      ...(storage ? [r2Plugin(storage, [MEDIA_SLUG, ...(options.storageCollections ?? [])])] : []),
+      ...(storage
+        ? [r2Plugin(storage, [MEDIA_SLUG, ...(options.storageCollections ?? [])]), signOnlyAllowedTypes]
+        : []),
       ...(options.plugins ?? []),
     ],
   });
