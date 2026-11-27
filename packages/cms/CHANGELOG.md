@@ -1,5 +1,12 @@
 # @pebbletech/cms
 
+## 0.2.0
+
+### Minor Changes
+
+- fdfd17e: `notifySlackOnCreate` takes an async message builder as well as a sync one, so a notice can look something up (such as
+  a running count) before it formats. A throw or rejection while building is logged and never fails the create.
+
 ## 0.1.0
 
 ### Minor Changes
