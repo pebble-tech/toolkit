@@ -24,6 +24,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 class Refusal extends Error {}
 
@@ -54,6 +55,19 @@ async function github(path, init = {}) {
   });
   if (!response.ok) throw new Refusal(`GitHub API ${init.method ?? 'GET'} ${path}: ${response.status}`);
   return response.json();
+}
+
+/**
+ * Every page of a list endpoint, 100 at a time, until a page comes back short or `done` says the items so far are
+ * enough.
+ */
+async function all(context, path, done = () => false) {
+  const items = [];
+  for (let page = 1; ; page += 1) {
+    const batch = await context.api(`${path}${path.includes('?') ? '&' : '?'}per_page=100&page=${page}`);
+    items.push(...batch);
+    if (batch.length < 100 || done(items)) return items;
+  }
 }
 
 /** The fields of a workflow run the decision reads, from the event payload or the API: they have the same shape. */
@@ -104,14 +118,16 @@ export async function decide(kind, event, context) {
     }
     return { deploy: 'true', ...base };
   }
-  const pulls = await context.api(`/repos/${context.repository}/commits/${run.headSha}/pulls`);
-  const open = pulls.filter(
-    (pr) =>
-      pr.state === 'open' &&
-      pr.head?.sha === run.headSha &&
-      pr.head?.repo?.full_name === context.repository &&
-      pr.base?.repo?.full_name === context.repository
-  );
+  // Every open PR, not the commit's associated PRs: a commit already on the default branch is associated with the PR
+  // that merged it, not the open one waiting for a preview. All pages, unless a second match settles it early.
+  const eligible = (pr) =>
+    pr.state === 'open' &&
+    pr.head?.sha === run.headSha &&
+    pr.head?.repo?.full_name === context.repository &&
+    pr.base?.repo?.full_name === context.repository;
+  const open = (
+    await all(context, `/repos/${context.repository}/pulls?state=open`, (items) => items.filter(eligible).length > 1)
+  ).filter(eligible);
   if (open.length !== 1) {
     return { deploy: 'false', reason: `${open.length} open pull requests have ${run.headSha} as their head`, ...base };
   }
@@ -219,6 +235,12 @@ export function prepare(artifact, dir) {
 
 const KEY = /^[A-Z_][A-Z0-9_]*$/;
 
+/**
+ * A value as a workflow command carries it: the runner decodes %25, %0D and %0A in `::add-mask::`, so a secret holding
+ * a literal `%25` would register the decoded text as the mask. Only the mask is escaped; the argument stays as is.
+ */
+export const commandValue = (value) => value.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+
 /** D7: RUNTIME_ENV (a JSON object, secret) and RUNTIME_VARS (plain) as `--env KEY=VALUE` arguments, secrets masked. */
 export function runtimeEnv(secretJson, plainJson) {
   const parse = (what, json) => {
@@ -251,7 +273,10 @@ export function previewAlias(template, pr, protectedHosts) {
   if (!new RegExp(`^[a-z0-9]+(?:-[a-z0-9]+)*-pr-${pr}\\.vercel\\.app$`).test(alias)) {
     throw new Refusal(`alias ${alias} is not <name>-pr-${pr}.vercel.app`);
   }
-  const hosts = protectedHosts.split(/[\s,]+/).filter(Boolean);
+  const hosts = protectedHosts
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .map((host) => host.toLowerCase().replace(/\.$/, ''));
   if (hosts.includes(alias)) throw new Refusal(`alias ${alias} is a production or staging hostname`);
   return alias;
 }
@@ -274,8 +299,11 @@ async function comment(context) {
     `**${env('ARTIFACT_NAME')}** preview of ${env('SHA').slice(0, 7)}: ${env('DEPLOYMENT_URL')}`,
     ...(process.env.ALIAS ? [`Alias: https://${process.env.ALIAS}`] : []),
   ].join('\n\n');
-  const comments = await context.api(`/repos/${context.repository}/issues/${pr}/comments?per_page=100`);
-  const mine = comments.find((c) => c.user?.login === 'github-actions[bot]' && String(c.body).startsWith(marker));
+  const ours = (c) => c.user?.login === 'github-actions[bot]' && String(c.body).startsWith(marker);
+  const comments = await all(context, `/repos/${context.repository}/issues/${pr}/comments`, (items) =>
+    items.some(ours)
+  );
+  const mine = comments.find(ours);
   const path = mine
     ? `/repos/${context.repository}/issues/comments/${mine.id}`
     : `/repos/${context.repository}/issues/${pr}/comments`;
@@ -310,7 +338,7 @@ async function main([command, ...args]) {
     }
     case 'runtime-env': {
       const { masks, args: flags } = runtimeEnv(process.env.RUNTIME_ENV, process.env.RUNTIME_VARS);
-      for (const mask of masks) process.stdout.write(`::add-mask::${mask}\n`);
+      for (const mask of masks) process.stdout.write(`::add-mask::${commandValue(mask)}\n`);
       writeFileSync(args[0], flags.map((flag) => `${flag}\n`).join(''));
       return;
     }
@@ -334,7 +362,8 @@ async function main([command, ...args]) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// The file URL Node gives this module, against the path it was run as (a checkout path may hold a space).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main(process.argv.slice(2)).catch((error) => {
     process.stderr.write(`::error::${error instanceof Refusal ? error.message : error.stack}\n`);
     process.exit(1);

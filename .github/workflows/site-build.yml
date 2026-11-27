@@ -20,7 +20,9 @@ on:
         type: string
         default: pnpm build
       build-env:
-        description: Plain build-time env vars as a JSON object of strings. No secrets reach this workflow.
+        description: >-
+          Plain build-time env vars as a JSON object of strings. No secrets reach this workflow. NODE_OPTIONS is
+          refused (GitHub does not take it from GITHUB_ENV): set it in build-command.
         type: string
         default: '{}'
       artifact-name:
@@ -55,7 +57,16 @@ jobs:
         run: |
           node -e '
             const env = JSON.parse(process.env.BUILD_ENV || "{}");
+            if (!env || typeof env !== "object" || Array.isArray(env)) {
+              console.error("build-env is not a JSON object");
+              process.exit(1);
+            }
             for (const [key, value] of Object.entries(env)) {
+              // GitHub refuses NODE_OPTIONS in GITHUB_ENV; set it in build-command instead.
+              if (key === "NODE_OPTIONS") {
+                console.error("build-env cannot set NODE_OPTIONS (GITHUB_ENV refuses it): put it in build-command");
+                process.exit(1);
+              }
               if (!/^[A-Z_][A-Z0-9_]*$/.test(key) || typeof value !== "string" || /[\r\n]/.test(value)) {
                 console.error(`build-env ${key} is not a NAME with a one-line string value`);
                 process.exit(1);

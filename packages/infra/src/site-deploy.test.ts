@@ -144,9 +144,14 @@ function violations(build: Workflow, deploy: Workflow): string[] {
       found.push(`${where}: the CLI is not installed before the download`);
     }
     // D4: every step after decide runs only on its decision, directly or through a step that does.
+    // Each such step's if is and-ed conditions, one of them the decision or a gated step's output: no `||`.
     const gated = new Set(['decide']);
     for (const s of steps.slice(index('decide') + 1)) {
-      const on = (s.if ?? '').includes(DECIDED) || [...gated].some((g) => (s.if ?? '').includes(`steps.${g}.outputs`));
+      const condition = (s.if ?? '').replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+      const conjuncts = condition.split('&&').map((c) => c.trim());
+      const gate = (c: string) =>
+        c === DECIDED || [...gated].some((g) => new RegExp(`^steps\\.${g}\\.outputs\\.[\\w-]+ [!=]= '[^']*'$`).test(c));
+      const on = !condition.includes('||') && conjuncts.some(gate);
       if (!on) found.push(`${where}: "${s.name}" runs whatever decide decided`);
       else if (s.id) gated.add(s.id);
     }
@@ -224,6 +229,30 @@ function violations(build: Workflow, deploy: Workflow): string[] {
         found.push(`site-deploy#preview: "${key}" is not gated by ${gate}`);
       }
     }
+  }
+  // A stale staging build never cancels the tip's run, nor replaces its pending one; previews still cancel.
+  if (
+    JSON.stringify(staging?.concurrency) !==
+    JSON.stringify({
+      group: 'site-deploy-${{ inputs.artifact-name }}-staging',
+      'cancel-in-progress': false,
+      queue: 'max',
+    })
+  ) {
+    found.push('site-deploy#staging: its concurrency cancels or drops runs');
+  }
+  if ((preview?.concurrency as any)?.['cancel-in-progress'] !== true)
+    found.push('site-deploy#preview: a newer push does not cancel');
+  // A failed alias still leaves the PR its deployment URL, with no alias in it.
+  for (const key of ['before-comment', 'Comment the preview URL']) {
+    if (!step(preview, key)?.if?.startsWith('${{ !cancelled() && '))
+      found.push(`site-deploy#preview: "${key}" is skipped after a failed alias`);
+  }
+  if (
+    step(preview, 'Comment the preview URL')?.env?.ALIAS !==
+    "${{ steps.alias-set.outcome == 'success' && steps.alias.outputs.alias || '' }}"
+  ) {
+    found.push('site-deploy#preview: the comment names an alias that was not set');
   }
   const comment = step(preview, 'Comment the preview URL');
   if (comment?.env?.PR !== '${{ steps.decide.outputs.pr }}') {
@@ -306,6 +335,31 @@ describe('the site workflows', () => {
       'reaches the Vercel CLI',
     ],
     ['no concurrency', (_b, d) => delete d.jobs.preview!.concurrency, 'site-deploy#preview: no concurrency'],
+    [
+      'an || true bypass of the decision',
+      (_b, d) => (p(d, 'Download').if = "steps.decide.outputs.deploy == 'true' || true"),
+      'site-deploy#preview: "Download the artifact by the triggering run id" runs whatever decide decided',
+    ],
+    [
+      'a staging group that cancels',
+      (_b, d) => ((d.jobs.staging!.concurrency as any)['cancel-in-progress'] = true),
+      'site-deploy#staging: its concurrency cancels or drops runs',
+    ],
+    [
+      'a staging group that drops pending runs',
+      (_b, d) => delete (d.jobs.staging!.concurrency as any).queue,
+      'site-deploy#staging: its concurrency cancels or drops runs',
+    ],
+    [
+      'a comment skipped after a failed alias',
+      (_b, d) => (p(d, 'before-comment').if = "steps.deploy.outputs.url != ''"),
+      '"before-comment" is skipped after a failed alias',
+    ],
+    [
+      'a comment naming an alias that failed',
+      (_b, d) => (p(d, 'Comment the preview URL').env!.ALIAS = '${{ steps.alias.outputs.alias }}'),
+      'the comment names an alias that was not set',
+    ],
     // R2-1
     [
       "the preview job in staging's environment",
@@ -594,7 +648,7 @@ const pull = (number: number, sha = SHA, repo = REPO, state = 'open') => ({
 describe('decide: preview', () => {
   const routes = (overrides: Record<string, unknown> = {}) => ({
     [`GET /repos/${REPO}/actions/runs/4242`]: runPayload(),
-    [`GET /repos/${REPO}/commits/${SHA}/pulls`]: [pull(17)],
+    [`GET /repos/${REPO}/pulls?state=open&per_page=100&page=1`]: [pull(17)],
     ...overrides,
   });
 
@@ -605,13 +659,30 @@ describe('decide: preview', () => {
   });
 
   test.each<[string, Record<string, unknown>]>([
-    ['the PR head moved on', { [`GET /repos/${REPO}/commits/${SHA}/pulls`]: [pull(17, OTHER)] }],
-    ['the PR closed', { [`GET /repos/${REPO}/commits/${SHA}/pulls`]: [pull(17, SHA, REPO, 'closed')] }],
-    ['two PRs share the head', { [`GET /repos/${REPO}/commits/${SHA}/pulls`]: [pull(17), pull(18)] }],
-    ['the PR is from a fork', { [`GET /repos/${REPO}/commits/${SHA}/pulls`]: [pull(17, SHA, 'someone/site')] }],
+    ['the PR head moved on', { [`GET /repos/${REPO}/pulls?state=open&per_page=100&page=1`]: [pull(17, OTHER)] }],
+    ['the PR closed', { [`GET /repos/${REPO}/pulls?state=open&per_page=100&page=1`]: [pull(17, SHA, REPO, 'closed')] }],
+    ['two PRs share the head', { [`GET /repos/${REPO}/pulls?state=open&per_page=100&page=1`]: [pull(17), pull(18)] }],
+    [
+      'the PR is from a fork',
+      { [`GET /repos/${REPO}/pulls?state=open&per_page=100&page=1`]: [pull(17, SHA, 'someone/site')] },
+    ],
+    [
+      'a second open PR with the head on a later page',
+      {
+        [`GET /repos/${REPO}/pulls?state=open&per_page=100&page=1`]: [
+          pull(17),
+          ...Array.from({ length: 99 }, (_, i) => pull(100 + i, OTHER)),
+        ],
+        [`GET /repos/${REPO}/pulls?state=open&per_page=100&page=2`]: [pull(18)],
+      },
+    ],
     [
       "the PR's base is another repository",
-      { [`GET /repos/${REPO}/commits/${SHA}/pulls`]: [{ ...pull(17), base: { repo: { full_name: 'someone/site' } } }] },
+      {
+        [`GET /repos/${REPO}/pulls?state=open&per_page=100&page=1`]: [
+          { ...pull(17), base: { repo: { full_name: 'someone/site' } } },
+        ],
+      },
     ],
   ])('skips, without failing, when %s', async (_what, overrides) => {
     api = { routes: routes(overrides), calls: [] };
@@ -621,6 +692,24 @@ describe('decide: preview', () => {
       'false',
       expect.stringContaining('::notice::'),
     ]);
+  });
+
+  // The open PR is found among open PRs, not the commit's associations: a commit already on main is associated with
+  // the PR that merged it, while an open PR to another branch waits for its preview.
+  test('deploys the one open PR whose head is the sha, found on a later page of open PRs', async () => {
+    api = {
+      routes: {
+        [`GET /repos/${REPO}/actions/runs/4242`]: runPayload(),
+        [`GET /repos/${REPO}/commits/${SHA}/pulls`]: [{ ...pull(3, SHA, REPO, 'closed'), merged_at: '2026-11-01' }],
+        [`GET /repos/${REPO}/pulls?state=open&per_page=100&page=1`]: Array.from({ length: 100 }, (_, i) =>
+          pull(100 + i, OTHER)
+        ),
+        [`GET /repos/${REPO}/pulls?state=open&per_page=100&page=2`]: [pull(17)],
+      },
+      calls: [],
+    };
+    const result = await script(['decide', 'preview'], {}, { workflow_run: runPayload() });
+    expect([result.code, result.outputs.deploy, result.outputs.pr]).toEqual([0, 'true', '17']);
   });
 
   test.each<[string, Record<string, unknown>, string]>([
@@ -644,7 +733,7 @@ describe('decide: preview', () => {
 describe('decide: the Vercel ids main passes', () => {
   const routes = {
     [`GET /repos/${REPO}/actions/runs/4242`]: runPayload(),
-    [`GET /repos/${REPO}/commits/${SHA}/pulls`]: [pull(17)],
+    [`GET /repos/${REPO}/pulls?state=open&per_page=100&page=1`]: [pull(17)],
   };
   test.each([
     ['an empty project id', { VERCEL_PROJECT_ID: '' }, 'vercel-project-id "" is not prj_'],
@@ -661,7 +750,7 @@ describe('decide: the Vercel ids main passes', () => {
 describe('decide: the GitHub environments', () => {
   const routes = {
     [`GET /repos/${REPO}/actions/runs/4242`]: runPayload(),
-    [`GET /repos/${REPO}/commits/${SHA}/pulls`]: [pull(17)],
+    [`GET /repos/${REPO}/pulls?state=open&per_page=100&page=1`]: [pull(17)],
   };
   test.each([
     ['the same environment twice', { STAGING_ENVIRONMENT: 'preview' }, 'are both preview: each needs its own'],
@@ -911,6 +1000,15 @@ describe('runtime-env', () => {
     ]);
   });
 
+  test('escapes the mask as a workflow command reads it, and passes the value itself unchanged', async () => {
+    const result = await runtime('{"API_KEY":"a%25b%0Ac"}');
+    expect([result.code, result.stdout, result.args]).toEqual([
+      0,
+      '::add-mask::a%2525b%250Ac\n',
+      ['--env', 'API_KEY=a%25b%0Ac'],
+    ]);
+  });
+
   test.each([
     ['a key that is not an env var name', '{"bad-key":"x"}', 'is not an env var name'],
     ['a value over two lines', '{"A":"x\\ny"}', 'is not a one-line string'],
@@ -948,6 +1046,11 @@ describe('alias', () => {
   ])('refuses an alias with %s', async (_what, template) => {
     const result = await alias(template);
     expect([result.code, result.stderr]).toEqual([1, expect.stringContaining('is not <name>-pr-17.vercel.app')]);
+  });
+
+  test('refuses a protected hostname written in another case', async () => {
+    const result = await alias('marketing-pr-{pr}.vercel.app', '17', 'Marketing-PR-17.vercel.app');
+    expect([result.code, result.stderr]).toEqual([1, expect.stringContaining('is a production or staging hostname')]);
   });
 
   test('refuses a protected hostname even when it has the preview shape', async () => {
@@ -998,27 +1101,66 @@ describe('recheck and comment', () => {
 
   test('comments the URL on the verified PR, then updates that comment on the next push', async () => {
     const env = { PR: '17', SHA, ARTIFACT_NAME: 'marketing-output', DEPLOYMENT_URL: 'https://x.vercel.app', ALIAS: '' };
-    api = { routes: { [`GET /repos/${REPO}/issues/17/comments?per_page=100`]: [] }, calls: [] };
+    api = { routes: { [`GET /repos/${REPO}/issues/17/comments?per_page=100&page=1`]: [] }, calls: [] };
     await script(['comment'], env);
     const posted = api.calls.find((c) => c.method === 'POST')!;
     const body = JSON.parse(posted.body).body as string;
     api = {
       routes: {
-        [`GET /repos/${REPO}/issues/17/comments?per_page=100`]: [
+        [`GET /repos/${REPO}/issues/17/comments?per_page=100&page=1`]: [
           { id: 9, user: { login: 'github-actions[bot]' }, body },
         ],
         [`PATCH /repos/${REPO}/issues/comments/9`]: {},
       },
       calls: [],
     };
-    await script(['comment'], { ...env, DEPLOYMENT_URL: 'https://y.vercel.app' });
-    expect([posted.path, body.includes('https://x.vercel.app'), api.calls.map((c) => `${c.method} ${c.path}`)]).toEqual(
+    const second = await script(['comment'], { ...env, DEPLOYMENT_URL: 'https://y.vercel.app' });
+    const patched = JSON.parse(api.calls.find((c) => c.method === 'PATCH')!.body).body as string;
+    expect([
+      posted.path,
+      body.includes('https://x.vercel.app'),
+      second.code,
+      patched.includes('https://y.vercel.app'),
+      patched.includes('https://x.vercel.app'),
+      api.calls.map((c) => `${c.method} ${c.path}`),
+    ]).toEqual([
+      `/repos/${REPO}/issues/17/comments`,
+      true,
+      0,
+      true,
+      false,
+      [`GET /repos/${REPO}/issues/17/comments?per_page=100&page=1`, `PATCH /repos/${REPO}/issues/comments/9`],
+    ]);
+  });
+
+  test('finds its comment on a later page, and does not post a second one', async () => {
+    const others = Array.from({ length: 100 }, (_, i) => ({ id: 1000 + i, user: { login: 'someone' }, body: 'hi' }));
+    const marker = '<!-- pebbletech site-deploy marketing-output -->';
+    api = {
+      routes: {
+        [`GET /repos/${REPO}/issues/17/comments?per_page=100&page=1`]: others,
+        [`GET /repos/${REPO}/issues/17/comments?per_page=100&page=2`]: [
+          { id: 9, user: { login: 'github-actions[bot]' }, body: `${marker}\n\nold` },
+        ],
+        [`PATCH /repos/${REPO}/issues/comments/9`]: {},
+      },
+      calls: [],
+    };
+    const result = await script(['comment'], {
+      PR: '17',
+      SHA,
+      ARTIFACT_NAME: 'marketing-output',
+      DEPLOYMENT_URL: 'https://y.vercel.app',
+      ALIAS: '',
+    });
+    expect([result.code, api.calls.map((c) => `${c.method} ${c.path}`)]).toEqual([
+      0,
       [
-        `/repos/${REPO}/issues/17/comments`,
-        true,
-        [`GET /repos/${REPO}/issues/17/comments?per_page=100`, `PATCH /repos/${REPO}/issues/comments/9`],
-      ]
-    );
+        `GET /repos/${REPO}/issues/17/comments?per_page=100&page=1`,
+        `GET /repos/${REPO}/issues/17/comments?per_page=100&page=2`,
+        `PATCH /repos/${REPO}/issues/comments/9`,
+      ],
+    ]);
   });
 });
 
@@ -1028,5 +1170,59 @@ describe('the build stub', () => {
     expect(job!.with!['build-env']).toBe(
       `\${{ github.event_name == 'pull_request' && '{"SITE_ENV":"preview"}' || '{"SITE_ENV":"staging"}' }}`
     );
+  });
+});
+
+describe('the script run from a path with a space', () => {
+  test('still runs its command', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'site deploy '));
+    const copy = join(dir, 'site-deploy.mjs');
+    writeFileSync(copy, readFileSync(SCRIPT));
+    const outputFile = join(dir, 'output');
+    writeFileSync(outputFile, '');
+    const { stdout } = await run(process.execPath, [copy, 'alias'], {
+      env: {
+        PATH: process.env.PATH,
+        GITHUB_OUTPUT: outputFile,
+        ALIAS_TEMPLATE: 'marketing-pr-{pr}.vercel.app',
+        PR: '17',
+      },
+    });
+    expect([stdout, readFileSync(outputFile, 'utf8')]).toEqual([
+      'alias=marketing-pr-17.vercel.app\n',
+      'alias=marketing-pr-17.vercel.app\n',
+    ]);
+  });
+});
+
+describe("site-build's build-env step, run as the workflow runs it", () => {
+  const buildEnv = async (BUILD_ENV: string) => {
+    const dir = mkdtempSync(join(tmpdir(), 'site-build-env-'));
+    const githubEnv = join(dir, 'env');
+    writeFileSync(githubEnv, '');
+    const runText = load(WORKFLOWS.build).jobs.build!.steps!.find((s) => s.name?.startsWith('Build-time env'))!.run!;
+    try {
+      await run('bash', ['-e', '-c', runText], { env: { PATH: process.env.PATH, BUILD_ENV, GITHUB_ENV: githubEnv } });
+      return { code: 0, env: readFileSync(githubEnv, 'utf8'), stderr: '' };
+    } catch (error: any) {
+      return { code: error.code as number, env: readFileSync(githubEnv, 'utf8'), stderr: String(error.stderr) };
+    }
+  };
+
+  test('writes each var, and takes an empty object', async () => {
+    expect([await buildEnv('{"SITE_ENV":"preview","API_BASE":"https://x"}'), await buildEnv('{}')]).toEqual([
+      { code: 0, env: 'SITE_ENV=preview\nAPI_BASE=https://x\n', stderr: '' },
+      { code: 0, env: '', stderr: '' },
+    ]);
+  });
+
+  test.each([
+    ['true', 'build-env is not a JSON object'],
+    ['[]', 'build-env is not a JSON object'],
+    ['null', 'build-env is not a JSON object'],
+    ['{"NODE_OPTIONS":"--max-old-space-size=4096"}', 'build-env cannot set NODE_OPTIONS'],
+  ])('refuses %s', async (value, message) => {
+    const result = await buildEnv(value);
+    expect([result.code, result.stderr, result.env]).toEqual([1, expect.stringContaining(message), '']);
   });
 });

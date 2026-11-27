@@ -214,6 +214,7 @@ jobs:
         run: node "$TOOLKIT/site-deploy.mjs" alias
 
       - name: Alias the preview
+        id: alias-set
         if: steps.before-alias.outputs.current == 'true' && steps.alias.outputs.alias != ''
         working-directory: ${{ runner.temp }}/deploy
         env:
@@ -227,7 +228,8 @@ jobs:
 
       - name: The PR still has this sha as its head (before the comment)
         id: before-comment
-        if: steps.deploy.outputs.url != ''
+        # Also after a failed alias: the deployment exists, so the PR still gets its URL; the job stays failed.
+        if: ${{ !cancelled() && steps.deploy.outputs.url != '' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PR: ${{ steps.decide.outputs.pr }}
@@ -235,14 +237,15 @@ jobs:
         run: node "$TOOLKIT/site-deploy.mjs" recheck
 
       - name: Comment the preview URL on the PR (its number from the API, never the artifact)
-        if: steps.before-comment.outputs.current == 'true'
+        if: ${{ !cancelled() && steps.before-comment.outputs.current == 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PR: ${{ steps.decide.outputs.pr }}
           SHA: ${{ steps.decide.outputs.sha }}
           ARTIFACT_NAME: ${{ inputs.artifact-name }}
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
-          ALIAS: ${{ steps.alias.outputs.alias }}
+          # Only an alias that was set.
+          ALIAS: ${{ steps.alias-set.outcome == 'success' && steps.alias.outputs.alias || '' }}
         run: node "$TOOLKIT/site-deploy.mjs" comment
 
   staging:
@@ -257,7 +260,11 @@ jobs:
     environment: ${{ inputs.staging-environment }}
     concurrency:
       group: site-deploy-${{ inputs.artifact-name }}-staging
-      cancel-in-progress: true
+      # Never cancelled, and every pending run kept in order (queue: max): a stale build that finishes late must not
+      # cancel the tip's deploy in progress, nor replace the tip's pending run. Each run then checks the tip itself
+      # (at decide and right before vercel deploy) and skips unless it is the tip.
+      cancel-in-progress: false
+      queue: max
     permissions:
       actions: read
       contents: read
