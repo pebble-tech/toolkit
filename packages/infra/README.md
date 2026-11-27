@@ -454,7 +454,9 @@ the `verification` output lists the challenges Vercel returns for each hostname.
 `new.pebbletech.my`, or the zone's apex, `pebbletech.my`. Staging and previews keep the stage-shaped rule
 (`assertOwnsHostname`) and cannot claim a production name. `Stage.assertCustomHostname(hostname, zoneName)` is the
 rule a production domain passes: a lowercase domain name that is `zoneName` or inside it, with no hyphen in any label
-below the zone, since every stage hostname's first label is `<kind>-<product>[-<suffix>]`.
+below the zone, since every stage hostname's first label is `<kind>-<product>[-<suffix>]`. The zone itself may be a
+stage zone (`STAGE_ZONES`, `pebbletech.my`, plus the stage domain's own zone) or a client's zone (`my-client.com`,
+hyphens and all), never a name inside a stage zone: `app-other.pebbletech.my` named as its own zone is refused.
 
 ```ts
 new VercelProject('web', {
@@ -1005,15 +1007,18 @@ What the deploy trusts, and what it does not:
   The prep refuses a symlink, a path that leaves the artifact, a `.vercel` directory inside the output, a function
   `.vc-config.json` with `filePathMap` or `environment`, and an output with no version 3 `config.json`; it leaves out
   `builds.json` and any `project.json`.
-- **Ids come from main.** `vercel-project-id` and `vercel-team-id` are the stub's inputs, passed as
-  `VERCEL_PROJECT_ID` and `VERCEL_ORG_ID`; the token is the `vercel-token` secret, as `VERCEL_TOKEN`. There is no
+- **Ids come from main.** `vercel-project-id` (`prj_…`) and `vercel-team-id` (`team_…`) are the stub's inputs,
+  passed as `VERCEL_PROJECT_ID` and `VERCEL_ORG_ID`; an empty or other-shaped id is a refusal. There is no
   `vercel link`, `vercel pull` or `--scope`, so a token scoped to the one project works for the deploy.
+- **The token lives in an environment** ([The Vercel token](#the-vercel-token)).
 - **The run is checked.** The jobs' `if:` (before `environment:`: under `workflow_run`, `github.ref` is the default
-  branch, so an environment's branch policy isolates nothing) takes only a successful build of this repository, never
-  a fork's. The script then refuses a run whose path is not `build-workflow`, re-reads the run from the API and refuses
-  any difference, and skips (does not fail) a preview whose PR is closed or has a newer head, or a staging build whose
-  SHA is no longer the default branch's tip. Staging is decided from the event and the tip, never `head_branch`. The PR
-  number comes from the API; it is checked again right before the alias and the comment.
+  branch for every run, so an environment's branch policy cannot tell a PR's build from main's) takes only a
+  successful build of this repository, never a fork's. The script then refuses a run whose path is not
+  `build-workflow`, re-reads the run from the API and refuses any difference, and skips (does not fail) a preview
+  whose PR is closed or has a newer head, or a staging build whose SHA is no longer the default branch's tip. Staging
+  is decided from the event and the tip, never `head_branch`, and the tip is read again right before `vercel deploy`.
+  The PR number comes from the API; it is checked again right before the alias and the comment.
+- **The URL is checked.** The deployment URL is the CLI's last line and must be `https://<name>.vercel.app`.
 - **The alias is main's.** `alias-template` (`marketing-pr-{pr}.vercel.app`) must come out as `<name>-pr-<n>.vercel.app`
   for the verified PR number, and none of `protected-hosts`.
 - **The CLI is locked.** It is installed with `npm ci --ignore-scripts` from `.github/site-deploy/vercel/package-lock.json`;
@@ -1023,16 +1028,40 @@ Inputs of `site-deploy.yml`: `toolkit-ref`, `build-workflow`, `vercel-project-id
 `vercel-environment` (`staging`; `production`, `preview` and `development` are refused), `artifact-name`
 (`site-output`), `alias-template`, `protected-hosts`, `runtime-vars` (plain runtime env, JSON), `runs-on` (JSON,
 `"ubuntu-latest"`), `vercel-cli-version`, `preview-environment` (`preview`), `staging-environment` (`staging`).
-Secrets: `vercel-token` (required), `RUNTIME_ENV` (optional). Inputs of `site-build.yml`: `working-directory`
-(`apps/marketing`), `build-command` (`pnpm build`), `build-env` (plain JSON), `artifact-name`, `runs-on`. A repository
-with two sites (marketing and CMS) calls each workflow once per app, with its own `artifact-name`, project id and
-token.
+Secrets: `VERCEL_TOKEN` and `RUNTIME_ENV`, both environment secrets passed by name (optional at the call; the job
+fails without a token). Inputs of `site-build.yml`: `working-directory` (`apps/marketing`), `build-command`
+(`pnpm build`), `build-env` (plain JSON), `artifact-name`, `runs-on`. A repository with two sites (marketing and CMS)
+calls each workflow once per app, with its own `artifact-name`, project id and pair of environments.
+
+### The Vercel token
+
+`VERCEL_TOKEN` can deploy, so no pull request may read it. A repository secret fails that: a same-repo pull request
+can change its own copy of `site-build.yml`, or add a workflow, that runs on `pull_request` and prints every repository
+secret it names. So the token is a secret of GitHub environments only:
+
+1. Per app, two environments: `preview-<app>` and `staging-<app>` (or `preview` and `staging` for one app), named in
+   the stub's `preview-environment` and `staging-environment`.
+2. In each, the secret `VERCEL_TOKEN` (that app's project-scoped token) and, when the app needs runtime secrets,
+   `RUNTIME_ENV`.
+3. In each, **Deployment branches and tags: Selected branches, the default branch only.** A `workflow_run` job runs on
+   the default branch's ref, so the deploy passes; a job that a pull request's own workflow starts runs on the PR's
+   ref (`refs/pull/<n>/merge`) or its branch, so it cannot enter the environment and never sees the secret.
+4. No repository or organization secret named `VERCEL_TOKEN` or `RUNTIME_ENV`. GitHub gives the environment's value
+   precedence, but a repository copy would still be readable by a pull request's workflow.
+
+The stub passes both by name (`VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}`). GitHub's reusable-workflow docs
+([Reuse workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)) say: "To use an
+environment secret in a reusable workflow, set `environment` on the job in the reusable workflow." "The caller
+workflow must still pass the secret." "You can pass a secret by name even if it only exists in the environment." "The
+job that sets `environment` receives the environment secret's value." "If an environment secret has the same name as a
+repository or organization secret, the environment secret takes precedence." The deploy job checks the token is set
+and fails, naming the environment, when it is not. It cannot check where the value came from: the job's token cannot
+list secrets, so step 4 is a hand check (`gh secret list` must not list `VERCEL_TOKEN`). Not verified here against
+GitHub: the docs' behaviour when the stub maps a different caller-side name (it passes the same name, as the docs show).
 
 Runtime env: `RUNTIME_ENV` is one JSON object, each value masked in the log and passed as `vercel deploy --env`.
-Set it as a secret of the job's GitHub environment (`preview`, `staging`); an environment secret wins over one the
-caller passes, and the caller cannot read environment secrets. Preview runtime env is readable by the code of every
-same-repo pull request, since that code runs in the preview: keep production secrets out of the `preview`
-environment.
+Preview runtime env is readable by the code of every same-repo pull request, since that code runs in the preview:
+keep production secrets out of the preview environments.
 
 Permissions: the stubs set `permissions: {}`; the build job gets `contents: read`, the deploy job `actions: read`
 (the run and its artifact), `contents: read` and `pull-requests: write` (the comment). Each toolkit job lists its own.
@@ -1042,6 +1071,9 @@ fit `site-build`: it runs `vercel pull` and `vercel build` with the Vercel token
 `SENTRY_AUTH_TOKEN` (source map upload) at build time, and its preview job passes `AI_GATEWAY_API_KEY`. `site-build`
 forbids secrets by design, so base-app adopts it only once its build needs none (source maps uploaded from a later,
 trusted step, for example) and produces `.vercel/output` without `vercel pull`.
+
+The download uses the runner image's own `gh` (GitHub's and Ubicloud's images ship it); the step prints its version.
+The Vercel CLI is installed before the artifact is downloaded.
 
 What a project-scoped token may not cover is listed under
 [A project-scoped Vercel token](#a-project-scoped-vercel-token); `vercel alias set` on a `*.vercel.app` name and

@@ -20,4 +20,5 @@ jobs:
     with:
       working-directory: apps/marketing
       artifact-name: marketing-output
-      build-env: '{"SITE_ENV":"preview"}'
+      # A pull request builds a preview; a push to main builds staging.
+      build-env: ${{ github.event_name == 'pull_request' && '{"SITE_ENV":"preview"}' || '{"SITE_ENV":"staging"}' }}

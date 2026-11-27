@@ -7,11 +7,22 @@
 //   node site-deploy.mjs runtime-env <args-file>    masks each RUNTIME_ENV value and writes one `--env` per line
 //   node site-deploy.mjs alias                      the preview alias from ALIAS_TEMPLATE, validated, or nothing
 //   node site-deploy.mjs recheck                    whether PR is still open with SHA as its head
+//   node site-deploy.mjs tip                        whether SHA is still the default branch's tip
+//   node site-deploy.mjs deployment-url <file>      the deployment URL, the CLI output's last line, validated
 //   node site-deploy.mjs comment                    adds or updates the PR's preview comment
 //
 // Values come from the environment (GitHub's own variables plus the step's `env:`), so no attacker-controlled text is
 // ever part of a command line. Outputs go to $GITHUB_OUTPUT as key=value lines.
-import { appendFileSync, copyFileSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 
 class Refusal extends Error {}
@@ -107,6 +118,31 @@ export async function decide(kind, event, context) {
   return { deploy: 'true', pr: String(open[0].number), ...base };
 }
 
+/** F6: staging deploys only while `sha` is the default branch's tip, checked again right before `vercel deploy`. */
+export async function tip(context, sha) {
+  const branch = await context.api(
+    `/repos/${context.repository}/branches/${encodeURIComponent(context.defaultBranch)}`
+  );
+  return branch.commit?.sha === sha;
+}
+
+/** D2: the ids main passes must look like Vercel's, so an empty or mistyped variable is a refusal, not a guess. */
+export function vercelIds(projectId, teamId) {
+  if (!/^prj_[A-Za-z0-9]+$/.test(projectId ?? ''))
+    throw new Refusal(`vercel-project-id ${JSON.stringify(projectId ?? '')} is not prj_…`);
+  if (!/^team_[A-Za-z0-9]+$/.test(teamId ?? ''))
+    throw new Refusal(`vercel-team-id ${JSON.stringify(teamId ?? '')} is not team_…`);
+}
+
+/** The deployment URL: the last line `vercel deploy` printed, and only a `https://<name>.vercel.app` URL. */
+export function deploymentUrl(text) {
+  const last = text.trimEnd().split('\n').at(-1)?.trim() ?? '';
+  if (!/^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(last)) {
+    throw new Refusal(`vercel deploy's last line is not a https://<name>.vercel.app URL: ${JSON.stringify(last)}`);
+  }
+  return last;
+}
+
 /** A8: the PR is still open, from this repository, with `sha` as its head, right before an alias or a comment. */
 export async function recheck(context, pr, sha) {
   const pull = await context.api(`/repos/${context.repository}/pulls/${pr}`);
@@ -121,6 +157,7 @@ export async function recheck(context, pr, sha) {
  * `.vercel` files a project link would use.
  */
 export function prepare(artifact, dir) {
+  if (existsSync(dir) && readdirSync(dir).length > 0) throw new Refusal(`${dir} is not empty`);
   const files = [];
   const walk = (at) => {
     for (const name of readdirSync(at)) {
@@ -234,6 +271,7 @@ async function main([command, ...args]) {
   switch (command) {
     case 'decide': {
       const event = JSON.parse(readFileSync(env('GITHUB_EVENT_PATH'), 'utf8'));
+      vercelIds(process.env.VERCEL_PROJECT_ID, process.env.VERCEL_ORG_ID);
       if (args[0] === 'staging') stagingEnvironment(env('VERCEL_ENVIRONMENT'));
       const decision = await decide(args[0], event, context);
       output(decision);
@@ -256,6 +294,12 @@ async function main([command, ...args]) {
       return;
     case 'recheck':
       output({ current: String(await recheck(context, env('PR'), env('SHA'))) });
+      return;
+    case 'tip':
+      output({ current: String(await tip(context, env('SHA'))) });
+      return;
+    case 'deployment-url':
+      output({ url: deploymentUrl(readFileSync(args[0], 'utf8')) });
       return;
     case 'comment':
       await comment(context);

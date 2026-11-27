@@ -158,7 +158,9 @@ jobs:
         with:
           persist-credentials: false
 
-      # It records where it ran, what it was given and what the directory held, and deploys nothing.
+      # It records where it ran, what it was given and what the directory held, and deploys nothing. These steps run the
+      # script's commands as site-deploy.yml's steps do, not those steps' own text: that text is held to its rules by
+      # packages/infra/src/site-deploy.test.ts, and the real CLI and GitHub API calls are not run here.
       - name: A fake vercel first on PATH
         run: |
           mkdir -p "$RUNNER_TEMP/fake"
@@ -194,7 +196,9 @@ jobs:
         run: |
           node "$SCRIPT" prepare "$RUNNER_TEMP/hostile" "$RUNNER_TEMP/deploy"
           cd "$RUNNER_TEMP/deploy"
-          vercel deploy --prebuilt --environment=preview --yes
+          vercel deploy --prebuilt --environment=preview --yes > "$RUNNER_TEMP/deploy-out"
+          GITHUB_OUTPUT="$RUNNER_TEMP/outputs" node "$SCRIPT" deployment-url "$RUNNER_TEMP/deploy-out"
+          grep -qx 'url=https://fake-deployment.vercel.app' "$RUNNER_TEMP/outputs"
           cat "$RUNNER_TEMP/fake/calls"
           grep -qx "project=prj_main org=team_main" "$RUNNER_TEMP/fake/calls"
           # Every file the CLI could see is under .vercel/output, and no project link or build report is among them.

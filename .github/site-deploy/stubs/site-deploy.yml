@@ -28,5 +28,12 @@ jobs:
       vercel-environment: staging
       alias-template: marketing-pr-{pr}.vercel.app
       protected-hosts: new.pebbletech.my pebbletech.my
+      # One pair of GitHub environments per app, each holding that app's own VERCEL_TOKEN (and RUNTIME_ENV), with its
+      # deployment branches limited to main. A second app (the CMS) is a second job with its own pair.
+      preview-environment: preview-marketing
+      staging-environment: staging-marketing
+    # Passed by name: the values live only in those environments, and the toolkit job that runs in one receives that
+    # environment's value. Never set VERCEL_TOKEN as a repository secret: a pull request's own workflow can read those.
     secrets:
-      vercel-token: ${{ secrets.VERCEL_TOKEN_MARKETING || secrets.VERCEL_API_TOKEN }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      RUNTIME_ENV: ${{ secrets.RUNTIME_ENV }}

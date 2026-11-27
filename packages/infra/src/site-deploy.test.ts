@@ -24,7 +24,9 @@ const WORKFLOWS = {
 };
 
 type Step = {
+  id?: string;
   name?: string;
+  if?: string;
   uses?: string;
   run?: string;
   with?: Record<string, unknown>;
@@ -45,8 +47,14 @@ type Workflow = { name: string; on: any; permissions?: unknown; jobs: Record<str
 const load = (path: string): Workflow => parse(readFileSync(path, 'utf8'));
 const clone = <T>(value: T): T => structuredClone(value);
 
+/** A step by its id, or by the start of its name. */
+const step = (job: Job | undefined, key: string): Step | undefined =>
+  job?.steps?.find((s) => s.id === key || s.name?.startsWith(key));
+
 const PIN = /^[\w.-]+\/[\w.-]+(?:\/[\w./-]+)?@[0-9a-f]{40}$/;
 const FORBIDDEN = [/--prod\b/, /\bpromote\b/, /production/, /\bvercel\s+(?:link|pull)\b/, /--scope\b/, /--target\b/];
+const DECIDED = "steps.decide.outputs.deploy == 'true'";
+const TOKEN = '${{ secrets.VERCEL_TOKEN }}';
 
 /** What the toolkit's own reusable workflows must hold; each entry names the job and the rule it breaks. */
 function violations(build: Workflow, deploy: Workflow): string[] {
@@ -60,10 +68,10 @@ function violations(build: Workflow, deploy: Workflow): string[] {
       const where = `${file}#${id}`;
       if (!job.permissions) found.push(`${where}: no job permissions`);
       if (!job.concurrency && file === 'site-deploy') found.push(`${where}: no concurrency`);
-      for (const step of job.steps ?? []) {
-        if (step.uses?.startsWith('./')) found.push(`${where}: uses ${step.uses}, which a reusable workflow cannot`);
-        if (step.uses && !PIN.test(step.uses)) found.push(`${where}: ${step.uses} is not pinned by sha`);
-        if (step.run?.includes('${{')) found.push(`${where}: an expression in run (${step.name})`);
+      for (const s of job.steps ?? []) {
+        if (s.uses?.startsWith('./')) found.push(`${where}: uses ${s.uses}, which a reusable workflow cannot`);
+        if (s.uses && !PIN.test(s.uses)) found.push(`${where}: ${s.uses} is not pinned by sha`);
+        if (s.run?.includes('${{')) found.push(`${where}: an expression in run (${s.name})`);
       }
     }
   }
@@ -79,6 +87,14 @@ function violations(build: Workflow, deploy: Workflow): string[] {
   if (setup?.with?.pulumi !== false) found.push('site-build: the setup action is not used with pulumi: false');
 
   if (JSON.stringify(deploy.permissions) !== '{}') found.push('site-deploy: top-level permissions are not {}');
+  // F1: the token is an environment secret, VERCEL_TOKEN, optional at the call and checked inside the job.
+  const secrets = deploy.on.workflow_call.secrets ?? {};
+  if (
+    JSON.stringify(Object.keys(secrets).sort()) !== '["RUNTIME_ENV","VERCEL_TOKEN"]' ||
+    secrets.VERCEL_TOKEN?.required
+  ) {
+    found.push('site-deploy: the secrets are not an optional VERCEL_TOKEN and RUNTIME_ENV');
+  }
   // What the jobs run and pass, not the inputs' descriptions (which name production to refuse it).
   const text = Object.values(deploy.jobs)
     .flatMap((job) => (job.steps ?? []).flatMap((s) => [s.run, ...Object.values({ ...s.env, ...s.with })]))
@@ -94,56 +110,120 @@ function violations(build: Workflow, deploy: Workflow): string[] {
       found.push(`${where}: missing`);
       continue;
     }
-    const condition = (job.if ?? '').replace(/\s+/g, ' ');
-    for (const clause of [
+    // D5: the job-level if is exactly these clauses, and-ed: no `||`, no `!`, nothing compared to anything else.
+    const clauses = (job.if ?? '').split('&&').map((clause) => clause.replace(/\s+/g, ' ').trim());
+    const expected = [
+      "github.event_name == 'workflow_run'",
       `github.event.workflow_run.event == '${event}'`,
       "github.event.workflow_run.conclusion == 'success'",
       'github.event.workflow_run.head_repository.full_name == github.repository',
-    ]) {
-      if (!condition.includes(clause)) found.push(`${where}: its job-level if lacks ${clause}`);
+    ];
+    if (JSON.stringify(clauses.sort()) !== JSON.stringify([...expected].sort())) {
+      found.push(`${where}: its job-level if is not exactly ${expected.join(' && ')}`);
     }
     if (!job.environment) found.push(`${where}: no environment`);
     if (JSON.stringify(job.permissions) !== JSON.stringify(permissions)) {
       found.push(`${where}: permissions ${JSON.stringify(job.permissions)}`);
     }
-    for (const step of job.steps ?? []) {
-      if (step.uses?.startsWith('actions/checkout@') && step.with?.repository !== 'pebble-tech/toolkit') {
+    const steps = job.steps ?? [];
+    const index = (key: string) => steps.findIndex((s) => s.id === key || s.name?.startsWith(key));
+    // F9: the toolkit ref is checked before it is checked out; the CLI is installed before the artifact arrives.
+    if (!(index('The toolkit ref is a full commit sha') >= 0 && index('The toolkit ref') < index('Check out'))) {
+      found.push(`${where}: toolkit-ref is not checked before the checkout`);
+    }
+    if (!(index('Install the locked') >= 0 && index('Install the locked') < index('Download'))) {
+      found.push(`${where}: the CLI is not installed before the download`);
+    }
+    // D4: every step after decide runs only on its decision, directly or through a step that does.
+    const gated = new Set(['decide']);
+    for (const s of steps.slice(index('decide') + 1)) {
+      const on = (s.if ?? '').includes(DECIDED) || [...gated].some((g) => (s.if ?? '').includes(`steps.${g}.outputs`));
+      if (!on) found.push(`${where}: "${s.name}" runs whatever decide decided`);
+      else if (s.id) gated.add(s.id);
+    }
+    const download = step(job, 'Download');
+    if (
+      download?.env?.RUN_ID !== '${{ steps.decide.outputs.run-id }}' ||
+      !download.run?.includes('gh run download "$RUN_ID"')
+    ) {
+      found.push(`${where}: the download is not by the decided run id`);
+    }
+    const token = step(job, 'The Vercel token is set');
+    if (!(token && index('The Vercel token is set') < index('deploy') && token.env?.VERCEL_TOKEN === TOKEN)) {
+      found.push(`${where}: no check that the environment holds VERCEL_TOKEN before the deploy`);
+    }
+    for (const s of steps) {
+      if (s.uses?.startsWith('actions/checkout@') && s.with?.repository !== 'pebble-tech/toolkit') {
         found.push(`${where}: checks out something other than the toolkit`);
       }
-      const vercel = step.run?.includes('/vercel/node_modules/.bin/vercel') && !step.run.includes('--version');
-      if (vercel && (step as any)['working-directory'] !== '${{ runner.temp }}/deploy') {
-        found.push(`${where}: runs vercel outside the prepared directory (${step.name})`);
+      const vercel = s.run?.includes('/vercel/node_modules/.bin/vercel') && !s.run.includes('--version');
+      if (vercel && (s as any)['working-directory'] !== '${{ runner.temp }}/deploy') {
+        found.push(`${where}: runs vercel outside the prepared directory (${s.name})`);
       }
-      if (vercel && (step.env?.GITHUB_TOKEN || (job as any).env?.GITHUB_TOKEN)) {
-        found.push(`${where}: the GitHub token reaches the Vercel CLI (${step.name})`);
+      if (vercel && (s.env?.GITHUB_TOKEN || (job as any).env?.GITHUB_TOKEN)) {
+        found.push(`${where}: the GitHub token reaches the Vercel CLI (${s.name})`);
       }
-      if (vercel && step.env?.VERCEL_PROJECT_ID !== '${{ inputs.vercel-project-id }}') {
-        found.push(`${where}: the project id is not main's input (${step.name})`);
+      if (vercel && s.env?.VERCEL_TOKEN !== TOKEN)
+        found.push(`${where}: the Vercel token is not VERCEL_TOKEN (${s.name})`);
+      if (vercel && s.env?.VERCEL_PROJECT_ID !== '${{ inputs.vercel-project-id }}') {
+        found.push(`${where}: the project id is not main's input (${s.name})`);
       }
-      if (vercel && step.env?.VERCEL_ORG_ID !== '${{ inputs.vercel-team-id }}') {
-        found.push(`${where}: the team id is not main's input (${step.name})`);
+      if (vercel && s.env?.VERCEL_ORG_ID !== '${{ inputs.vercel-team-id }}') {
+        found.push(`${where}: the team id is not main's input (${s.name})`);
       }
-      if (step.run?.includes('npm ci') && !step.run.includes('--ignore-scripts')) {
+      if (s.run?.includes('npm ci') && !s.run.includes('--ignore-scripts')) {
         found.push(`${where}: installs with scripts on`);
       }
-      if (/\b(pnpm|npm (?:install|run|exec)|npx|yarn)\b/.test(step.run ?? '')) found.push(`${where}: runs ${step.run}`);
+      if (/\b(pnpm|npm (?:install|run|exec)|npx|yarn)\b/.test(s.run ?? '')) found.push(`${where}: runs ${s.run}`);
     }
-    const deploys = (job.steps ?? []).filter((s) => / deploy --prebuilt /.test(s.run ?? ''));
+    const deploys = steps.filter((s) => / deploy --prebuilt /.test(s.run ?? ''));
     const target = id === 'preview' ? '--environment=preview ' : '--environment="$VERCEL_ENVIRONMENT" ';
-    if (deploys.length !== 1 || !deploys[0]!.run!.includes(target))
+    if (deploys.length !== 1 || !deploys[0]!.run!.includes(target)) {
       found.push(`${where}: does not deploy with ${target}`);
+    }
+    // F5: the URL is the CLI's last line, validated by the script, never the raw output.
+    if (!deploys[0]?.run?.includes('site-deploy.mjs" deployment-url'))
+      found.push(`${where}: the deployment URL is not validated`);
   }
-  const aliases = (deploy.jobs.staging?.steps ?? []).filter((s) => s.run?.includes('alias'));
+  // F6: staging deploys only on a tip check made right before it.
+  const staging = deploy.jobs.staging;
+  const stagingSteps = staging?.steps ?? [];
+  const tipAt = stagingSteps.findIndex((s) => s.id === 'tip');
+  if (
+    !stagingSteps[tipAt]?.run?.endsWith('site-deploy.mjs" tip') ||
+    stagingSteps[tipAt + 1]?.id !== 'deploy' ||
+    step(staging, 'deploy')?.if !== "steps.tip.outputs.current == 'true'"
+  ) {
+    found.push('site-deploy#staging: the deploy is not gated by a tip check right before it');
+  }
+  const aliases = stagingSteps.filter((s) => s.run?.includes('alias'));
   if (aliases.length) found.push('site-deploy#staging: sets an alias');
-  const comment = deploy.jobs.preview?.steps?.find((s) => s.run?.endsWith('site-deploy.mjs" comment'));
-  if (comment?.env?.PR !== '${{ steps.decide.outputs.pr }}')
+  // A8: the alias and the comment each run only on a recheck of the PR made right before them.
+  const preview = deploy.jobs.preview;
+  for (const [gate, gated] of [
+    ['before-alias', ['alias', 'Alias the preview']],
+    ['before-comment', ['Comment the preview URL']],
+  ] as const) {
+    if (!step(preview, gate)?.run?.endsWith('site-deploy.mjs" recheck'))
+      found.push(`site-deploy#preview: ${gate} is not a recheck`);
+    for (const key of gated) {
+      if (!step(preview, key)?.if?.includes(`steps.${gate}.outputs.current == 'true'`)) {
+        found.push(`site-deploy#preview: "${key}" is not gated by ${gate}`);
+      }
+    }
+  }
+  const comment = step(preview, 'Comment the preview URL');
+  if (comment?.env?.PR !== '${{ steps.decide.outputs.pr }}') {
     found.push('site-deploy#preview: the comment PR is not the verified one');
+  }
   return found;
 }
 
 describe('the site workflows', () => {
   const build = load(WORKFLOWS.build);
   const deploy = load(WORKFLOWS.deploy);
+  const p = (d: Workflow, key: string) => step(d.jobs.preview, key)!;
+  const st = (d: Workflow, key: string) => step(d.jobs.staging, key)!;
 
   test('hold every rule', () => {
     expect(violations(build, deploy)).toEqual([]);
@@ -174,23 +254,37 @@ describe('the site workflows', () => {
     [
       'no fork check',
       (_b, d) => (d.jobs.preview!.if = "github.event.workflow_run.event == 'pull_request'"),
-      'head_repository',
+      'is not exactly',
     ],
-    ['a production deploy', (_b, d) => (d.jobs.staging!.steps![6]!.run += ' --prod'), 'matches /--prod\\b/'],
-    ['a promote', (_b, d) => (d.jobs.staging!.steps![6]!.run = 'vercel promote x'), 'matches /\\bpromote\\b/'],
-    ['vercel link', (_b, d) => (d.jobs.preview!.steps![6]!.run += '\nvercel link --yes'), 'vercel'],
+    [
+      'a fork check against another field',
+      (_b, d) =>
+        (d.jobs.preview!.if = d.jobs.preview!.if!.replace(
+          'head_repository.full_name == github.repository',
+          'head_repository.full_name == github.event.workflow_run.head_branch'
+        )),
+      'site-deploy#preview: its job-level if is not exactly',
+    ],
+    [
+      'a fork check or-ed away',
+      (_b, d) => (d.jobs.staging!.if += " || github.event.workflow_run.event == 'push'"),
+      'site-deploy#staging: its job-level if is not exactly',
+    ],
+    ['a production deploy', (_b, d) => (st(d, 'deploy').run += ' --prod'), 'matches /--prod\\b/'],
+    ['a promote', (_b, d) => (st(d, 'deploy').run = 'vercel promote x'), 'matches /\\bpromote\\b/'],
+    ['vercel link', (_b, d) => (p(d, 'deploy').run += '\nvercel link --yes'), 'vercel'],
     [
       'an expression in run',
-      (_b, d) => (d.jobs.preview!.steps![1]!.run = 'echo ${{ github.event.workflow_run.head_branch }}'),
+      (_b, d) => (p(d, 'decide').run = 'echo ${{ github.event.workflow_run.head_branch }}'),
       'an expression in run',
     ],
-    ['a checkout of the product', (_b, d) => (d.jobs.preview!.steps![0]!.with = {}), 'other than the toolkit'],
-    ['scripts on', (_b, d) => (d.jobs.preview!.steps![4]!.run = 'npm ci --prefix x'), 'installs with scripts on'],
-    ['an artifact project id', (_b, d) => (d.jobs.preview!.steps![6]!.env!.VERCEL_PROJECT_ID = 'x'), 'not main'],
-    ['an install from the artifact', (_b, d) => (d.jobs.preview!.steps![3]!.run += '\npnpm install'), 'runs'],
+    ['a checkout of the product', (_b, d) => (p(d, 'Check out').with = {}), 'other than the toolkit'],
+    ['scripts on', (_b, d) => (p(d, 'Install the locked').run = 'npm ci --prefix x'), 'installs with scripts on'],
+    ['an artifact project id', (_b, d) => (p(d, 'deploy').env!.VERCEL_PROJECT_ID = 'x'), 'not main'],
+    ['an install from the artifact', (_b, d) => (p(d, 'Prepare').run += '\npnpm install'), 'runs'],
     [
       'the PR number from elsewhere',
-      (_b, d) => (d.jobs.preview!.steps!.at(-1)!.env!.PR = '${{ env.PR }}'),
+      (_b, d) => (p(d, 'Comment the preview URL').env!.PR = '${{ env.PR }}'),
       'not the verified',
     ],
     [
@@ -199,10 +293,90 @@ describe('the site workflows', () => {
       'reaches the Vercel CLI',
     ],
     ['no concurrency', (_b, d) => delete d.jobs.preview!.concurrency, 'site-deploy#preview: no concurrency'],
+    // F1
+    [
+      'a required token',
+      (_b, d) => (d.on.workflow_call.secrets.VERCEL_TOKEN.required = true),
+      'not an optional VERCEL_TOKEN and RUNTIME_ENV',
+    ],
+    [
+      'the token under another name',
+      (_b, d) => (p(d, 'deploy').env!.VERCEL_TOKEN = '${{ secrets.vercel-token }}'),
+      'is not VERCEL_TOKEN',
+    ],
+    [
+      'no token check',
+      (_b, d) =>
+        (d.jobs.staging!.steps = d.jobs.staging!.steps!.filter((s) => !s.name?.startsWith('The Vercel token'))),
+      'site-deploy#staging: no check that the environment holds VERCEL_TOKEN',
+    ],
+    // D4
+    [
+      'a download by another run id',
+      (_b, d) => (p(d, 'Download').env!.RUN_ID = '${{ github.event.workflow_run.id }}'),
+      'not by the decided run id',
+    ],
+    [
+      'a deploy step that ignores the decision',
+      (_b, d) => delete p(d, 'deploy').if,
+      'site-deploy#preview: "Deploy the preview" runs whatever decide decided',
+    ],
+    [
+      'a prepare that ignores the decision',
+      (_b, d) => (st(d, 'Prepare').if = 'always()'),
+      'site-deploy#staging: "Prepare',
+    ],
+    // A8
+    [
+      'an alias not gated by its recheck',
+      (_b, d) => (p(d, 'Alias the preview').if = "steps.alias.outputs.alias != ''"),
+      '"Alias the preview" is not gated by before-alias',
+    ],
+    [
+      'a comment not gated by its recheck',
+      (_b, d) => (p(d, 'Comment the preview URL').if = "steps.deploy.outputs.url != ''"),
+      'is not gated by before-comment',
+    ],
+    [
+      'a recheck that checks nothing',
+      (_b, d) => (p(d, 'before-comment').run = 'true'),
+      'before-comment is not a recheck',
+    ],
+    // F5, F6, F9
+    [
+      'an unvalidated URL',
+      (_b, d) =>
+        (p(d, 'deploy').run = p(d, 'deploy')
+          .run!.split('\n')
+          .filter((line) => !line.includes('deployment-url'))
+          .join('\n')),
+      'the deployment URL is not validated',
+    ],
+    ['a staging deploy with no tip check', (_b, d) => (st(d, 'deploy').if = DECIDED), 'not gated by a tip check'],
+    [
+      'an unchecked toolkit ref',
+      (_b, d) => (d.jobs.preview!.steps = d.jobs.preview!.steps!.slice(1)),
+      'site-deploy#preview: toolkit-ref is not checked',
+    ],
+    [
+      'a download before the CLI install',
+      (_b, d) => {
+        const steps = d.jobs.staging!.steps!;
+        const [install] = steps.splice(steps.indexOf(st(d, 'Install the locked')), 1);
+        steps.splice(steps.indexOf(st(d, 'Prepare')), 0, install!);
+      },
+      'site-deploy#staging: the CLI is not installed before the download',
+    ],
   ])('fail on %s', (_what, breakIt, message) => {
     const [b, d] = [clone(build), clone(deploy)];
     breakIt(b, d);
     expect(violations(b, d).join('\n')).toContain(message);
+  });
+
+  test('the preview concurrency group is the PR number GitHub set, or the run id: never a branch name', () => {
+    expect(deploy.jobs.preview!.concurrency!.group).toBe(
+      "site-deploy-${{ inputs.artifact-name }}-preview-${{ github.event.workflow_run.pull_requests[0].number || format('run-{0}', github.event.workflow_run.id) }}"
+    );
   });
 
   test('the pinned Vercel CLI default is the version the committed lockfile locks', () => {
@@ -214,14 +388,14 @@ describe('the site workflows', () => {
     ]);
   });
 
-  test('takes the Vercel token as a required secret named vercel-token, and the ids as inputs', () => {
+  test('takes the Vercel token as an optional VERCEL_TOKEN secret, and the ids as inputs', () => {
     const call = deploy.on.workflow_call;
     expect([
-      call.secrets['vercel-token'].required,
+      call.secrets.VERCEL_TOKEN.required,
       call.inputs['vercel-project-id'].required,
       call.inputs['vercel-team-id'].required,
       call.inputs['vercel-environment'].default,
-    ]).toEqual([true, true, true, 'staging']);
+    ]).toEqual([false, true, true, 'staging']);
   });
 });
 
@@ -264,13 +438,13 @@ describe('the copyable stubs', () => {
       deployJob!.with!['build-workflow'],
       deployJob!.with!['artifact-name'],
       Object.keys(deployJob!.with!).filter((key) => !(key in inputs)),
-      Object.keys(deployJob!.secrets!),
+      deployJob!.secrets,
     ]).toEqual([
       { workflows: [buildStub.name], types: ['completed'] },
       '.github/workflows/site-build.yml',
       buildJob!.with!['artifact-name'],
       [],
-      ['vercel-token'],
+      { VERCEL_TOKEN: '${{ secrets.VERCEL_TOKEN }}', RUNTIME_ENV: '${{ secrets.RUNTIME_ENV }}' },
     ]);
   });
 });
@@ -335,6 +509,8 @@ async function script(args: string[], env: Record<string, string>, event?: unkno
         GITHUB_EVENT_PATH: eventFile,
         GITHUB_OUTPUT: outputFile,
         BUILD_WORKFLOW: '.github/workflows/site-build.yml',
+        VERCEL_PROJECT_ID: 'prj_abc123',
+        VERCEL_ORG_ID: 'team_abc123',
         ...env,
       },
     });
@@ -375,6 +551,10 @@ describe('decide: preview', () => {
     ['the PR closed', { [`GET /repos/${REPO}/commits/${SHA}/pulls`]: [pull(17, SHA, REPO, 'closed')] }],
     ['two PRs share the head', { [`GET /repos/${REPO}/commits/${SHA}/pulls`]: [pull(17), pull(18)] }],
     ['the PR is from a fork', { [`GET /repos/${REPO}/commits/${SHA}/pulls`]: [pull(17, SHA, 'someone/site')] }],
+    [
+      "the PR's base is another repository",
+      { [`GET /repos/${REPO}/commits/${SHA}/pulls`]: [{ ...pull(17), base: { repo: { full_name: 'someone/site' } } }] },
+    ],
   ])('skips, without failing, when %s', async (_what, overrides) => {
     api = { routes: routes(overrides), calls: [] };
     const result = await script(['decide', 'preview'], {}, { workflow_run: runPayload() });
@@ -403,6 +583,23 @@ describe('decide: preview', () => {
   });
 });
 
+describe('decide: the Vercel ids main passes', () => {
+  const routes = {
+    [`GET /repos/${REPO}/actions/runs/4242`]: runPayload(),
+    [`GET /repos/${REPO}/commits/${SHA}/pulls`]: [pull(17)],
+  };
+  test.each([
+    ['an empty project id', { VERCEL_PROJECT_ID: '' }, 'vercel-project-id "" is not prj_'],
+    ['a project name', { VERCEL_PROJECT_ID: 'marketing-web' }, 'vercel-project-id "marketing-web" is not prj_'],
+    ['an empty team id', { VERCEL_ORG_ID: '' }, 'vercel-team-id "" is not team_'],
+    ['a team slug', { VERCEL_ORG_ID: 'pebble-tech' }, 'vercel-team-id "pebble-tech" is not team_'],
+  ])('refuses %s', async (_what, env, message) => {
+    api = { routes, calls: [] };
+    const result = await script(['decide', 'preview'], env, { workflow_run: runPayload() });
+    expect([result.code, result.stderr, result.outputs]).toEqual([1, expect.stringContaining(message), {}]);
+  });
+});
+
 describe('decide: staging', () => {
   const push = () => runPayload({ event: 'push', head_branch: 'main' });
   const routes = (tip: string) => ({
@@ -410,6 +607,35 @@ describe('decide: staging', () => {
     [`GET /repos/${REPO}/branches/main`]: { commit: { sha: tip } },
   });
   const env = { DEFAULT_BRANCH: 'main', VERCEL_ENVIRONMENT: 'staging' };
+
+  // A7: the tip read is the default branch's, whatever branch the event names.
+  test("skips a push of another branch whose own tip is the sha, since it is not the default branch's tip", async () => {
+    api = {
+      routes: {
+        [`GET /repos/${REPO}/actions/runs/4242`]: runPayload({ event: 'push', head_branch: 'feature' }),
+        [`GET /repos/${REPO}/branches/feature`]: { commit: { sha: SHA } },
+        [`GET /repos/${REPO}/branches/main`]: { commit: { sha: OTHER } },
+      },
+      calls: [],
+    };
+    const result = await script(['decide', 'staging'], env, {
+      workflow_run: runPayload({ event: 'push', head_branch: 'feature' }),
+    });
+    expect([result.code, result.outputs.deploy, api.calls.map((c) => c.path)]).toEqual([
+      0,
+      'false',
+      [`/repos/${REPO}/actions/runs/4242`, `/repos/${REPO}/branches/main`],
+    ]);
+  });
+
+  // F6: the tip is read again right before the deploy.
+  test("tip is true while the sha is the default branch's tip, false once it moved", async () => {
+    const outcome = async (tip: string) => {
+      api = { routes: routes(tip), calls: [] };
+      return (await script(['tip'], { DEFAULT_BRANCH: 'main', SHA })).outputs.current;
+    };
+    expect([await outcome(SHA), await outcome(OTHER)]).toEqual(['true', 'false']);
+  });
 
   test("deploys a push build whose sha is the default branch's tip", async () => {
     api = { routes: routes(SHA), calls: [] };
@@ -515,6 +741,18 @@ describe('prepare', () => {
     expect([result.code, result.stderr, readdirSync(to)]).toEqual([1, expect.stringContaining(message), []]);
   });
 
+  // F7: the destination is the fresh directory; anything already there could ride along with the deploy.
+  test('refuses a destination that is not empty', async () => {
+    const to = mkdtempSync(join(tmpdir(), 'site-deploy-dir-'));
+    writeFileSync(join(to, 'package.json'), '{"scripts":{"postinstall":"curl evil"}}');
+    const result = await script(['prepare', artifact(OUTPUT), to], {});
+    expect([result.code, result.stderr, readdirSync(to)]).toEqual([
+      1,
+      expect.stringContaining('is not empty'),
+      ['package.json'],
+    ]);
+  });
+
   test.each([
     ['a file symlink', '/etc/passwd'],
     ['a directory symlink', '/'],
@@ -572,9 +810,45 @@ describe('alias', () => {
     expect([result.code, result.stderr]).toEqual([1, expect.stringContaining(message)]);
   });
 
+  test.each([
+    ['a prefix before the preview name', 'x.marketing-pr-{pr}.vercel.app'],
+    ['a suffix after vercel.app', 'marketing-pr-{pr}.vercel.app.evil.com'],
+    ['a path', 'marketing-pr-{pr}.vercel.app/x'],
+    ['a second PR number', 'marketing-pr-{pr}-pr-{pr}.vercel.app.x'],
+  ])('refuses an alias with %s', async (_what, template) => {
+    const result = await alias(template);
+    expect([result.code, result.stderr]).toEqual([1, expect.stringContaining('is not <name>-pr-17.vercel.app')]);
+  });
+
   test('refuses a protected hostname even when it has the preview shape', async () => {
     const result = await alias('marketing-pr-{pr}.vercel.app', '17', 'marketing-pr-17.vercel.app');
     expect([result.code, result.stderr]).toEqual([1, expect.stringContaining('is a production or staging hostname')]);
+  });
+});
+
+describe('deployment-url', () => {
+  const url = async (text: string) => {
+    const file = join(mkdtempSync(join(tmpdir(), 'site-url-')), 'out');
+    writeFileSync(file, text);
+    return script(['deployment-url', file], {});
+  };
+
+  test("is the CLI output's last line, a https://<name>.vercel.app URL", async () => {
+    const result = await url(
+      'Vercel CLI 65.15.0\nInspect: https://vercel.com/x\nhttps://marketing-abc123.vercel.app\n'
+    );
+    expect([result.code, result.outputs]).toEqual([0, { url: 'https://marketing-abc123.vercel.app' }]);
+  });
+
+  test.each([
+    ['another host last', 'https://marketing-abc.vercel.app\nhttps://evil.example.com'],
+    ['a production domain', 'https://pebbletech.my'],
+    ['a path', 'https://marketing-abc.vercel.app/x'],
+    ['nothing', ''],
+    ['an injected output line', 'https://a.vercel.app\nurl=https://evil.example.com'],
+  ])('refuses %s', async (_what, text) => {
+    const result = await url(text);
+    expect([result.code, result.stderr, result.outputs]).toEqual([1, expect.stringContaining('is not a https://'), {}]);
   });
 });
 
@@ -588,7 +862,8 @@ describe('recheck and comment', () => {
       await outcome(pull(17)),
       await outcome(pull(17, OTHER)),
       await outcome(pull(17, SHA, REPO, 'closed')),
-    ]).toEqual(['true', 'false', 'false']);
+      await outcome(pull(17, SHA, 'someone/site')),
+    ]).toEqual(['true', 'false', 'false', 'false']);
   });
 
   test('comments the URL on the verified PR, then updates that comment on the next push', async () => {
@@ -613,6 +888,15 @@ describe('recheck and comment', () => {
         true,
         [`GET /repos/${REPO}/issues/17/comments?per_page=100`, `PATCH /repos/${REPO}/issues/comments/9`],
       ]
+    );
+  });
+});
+
+describe('the build stub', () => {
+  test('marks only a pull request build as a preview', () => {
+    const [job] = Object.values(load(WORKFLOWS.buildStub).jobs);
+    expect(job!.with!['build-env']).toBe(
+      `\${{ github.event_name == 'pull_request' && '{"SITE_ENV":"preview"}' || '{"SITE_ENV":"staging"}' }}`
     );
   });
 });
