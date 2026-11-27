@@ -11,11 +11,11 @@
   "platformAutomerge": true,
   "customManagers": [
     {
-      "description": "The toolkit's action pins: a SHA with a # @pebbletech/infra@<version> comment, read from the toolkit's release tags",
+      "description": "The toolkit's action and reusable-workflow pins: a SHA with a # @pebbletech/infra@<version> comment, read from the toolkit's release tags. A toolkit-ref input right below the pin (the site-deploy stub) is part of the match, so its SHA moves with the pin's",
       "customType": "regex",
       "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
       "matchStrings": [
-        "uses: pebble-tech/toolkit/\\.github/actions/[a-z-]+@(?<currentDigest>[0-9a-f]{40}) # @pebbletech/infra@(?<currentValue>\\S+)"
+        "uses: pebble-tech/toolkit/\\.github/(?:actions/[a-z-]+|workflows/[a-z-]+\\.ya?ml)@(?<currentDigest>[0-9a-f]{40}) # @pebbletech/infra@(?<currentValue>\\S+)(?:\\s+with:\\s+toolkit-ref: '?[0-9a-f]{40}'?)?"
       ],
       "depNameTemplate": "@pebbletech/infra",
       "packageNameTemplate": "pebble-tech/toolkit",
@@ -42,14 +42,18 @@
       "groupName": null
     },
     {
-      "description": "Payload: payload and every @payloadcms package share one version, so they move together, majors included",
+      "description": "Payload: payload and every @payloadcms package share one version, so they move together, majors included. Patches get their own branch (renovate/patch-payload), so a branch GitHub was told to auto-merge never later holds a minor: Renovate does not take auto-merge off a PR",
+      "matchDatasources": ["npm"],
       "matchPackageNames": ["payload", "/^@payloadcms\\//"],
-      "groupName": "payload"
+      "groupName": "payload",
+      "separateMinorPatch": true
     },
     {
-      "description": "Next.js: next and its @next packages share one version, so they move together, majors included",
+      "description": "Next.js: next and its @next packages share one version, so they move together, majors included. Patches get their own branch (renovate/patch-next), for the same reason as Payload's",
+      "matchDatasources": ["npm"],
       "matchPackageNames": ["next", "/^@next\\//", "eslint-config-next"],
-      "groupName": "next"
+      "groupName": "next",
+      "separateMinorPatch": true
     },
     {
       "description": "Node and pnpm pins move on purpose, not by bot; by dep name, so setup-node's node-version input is covered too",
@@ -69,14 +73,18 @@
       "minimumReleaseAge": "0 days"
     },
     {
-      "description": "Payload and Next.js patches auto-merge once the required checks pass; their minors and majors wait for a person",
+      "description": "Payload and Next.js patches auto-merge once the required checks pass, unless Renovate marks them breaking (a prerelease step, a 0.x patch); their minors and majors wait for a person",
+      "matchDatasources": ["npm"],
       "matchPackageNames": ["payload", "/^@payloadcms\\//", "next", "/^@next\\//", "eslint-config-next"],
       "matchUpdateTypes": ["patch"],
+      "matchJsonata": ["$not(isBreaking = true)"],
       "automerge": true
     },
     {
-      "description": "Payload and Next.js security fixes auto-merge once the required checks pass, whatever the update type. Renovate sets isVulnerabilityAlert from its alert rules, which it appends after every rule here and applies before this rule is read again",
+      "description": "Payload and Next.js security fixes that are a patch or a minor auto-merge once the required checks pass; a major security fix waits for a person. Renovate sets isVulnerabilityAlert from its alert rules, which it appends after every rule here and applies before this rule is read again",
+      "matchDatasources": ["npm"],
       "matchPackageNames": ["payload", "/^@payloadcms\\//", "next", "/^@next\\//", "eslint-config-next"],
+      "matchUpdateTypes": ["patch", "minor"],
       "matchJsonata": ["isVulnerabilityAlert = true"],
       "automerge": true
     }
