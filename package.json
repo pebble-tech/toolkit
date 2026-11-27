@@ -37,7 +37,7 @@
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}": [
-      "oxfmt"
+      "oxfmt --no-error-on-unmatched-pattern"
     ],
     "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}": "oxlint"
   }

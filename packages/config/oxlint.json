@@ -13,7 +13,16 @@
     "no-console": "error",
     "react/exhaustive-deps": "error",
     "react/rules-of-hooks": "error",
-    "vitest/expect-expect": "error",
+    "vitest/expect-expect": [
+      "error",
+      {
+        "assertFunctionNames": [
+          "expect",
+          "expectUnauthenticated",
+          "expectForbiddenRole"
+        ]
+      }
+    ],
     "vitest/no-conditional-expect": "error",
     "vitest/valid-expect": "error",
     "vitest/no-disabled-tests": "error",

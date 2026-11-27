@@ -3,7 +3,7 @@
  * oxfmt formats code files, oxlint lints them. Markdown, JSON and YAML stay unformatted on purpose.
  */
 export const lintStaged = {
-  '*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}': ['oxfmt'],
+  '*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}': ['oxfmt --no-error-on-unmatched-pattern'],
   '**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}': 'oxlint',
 } as const satisfies Record<string, string | readonly string[]>;
 
@@ -11,5 +11,6 @@ export const lintStaged = {
 export const presets = {
   tsconfig: '@pebbletech/config/tsconfig.base.json',
   oxlint: '@pebbletech/config/oxlint.json',
+  oxlintSite: '@pebbletech/config/oxlint-site.json',
   oxfmt: '@pebbletech/config/oxfmt.json',
 } as const;

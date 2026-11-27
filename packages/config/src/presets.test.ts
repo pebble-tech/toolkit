@@ -44,7 +44,16 @@ describe('presets', () => {
 
   test('the packed tarball holds the presets, the compiled entry and nothing else', () => {
     expect(packedFiles()).toEqual(
-      ['LICENSE', 'README.md', 'dist/index.d.ts', 'dist/index.js', 'package.json', ...presetFiles].sort()
+      [
+        'LICENSE',
+        'README.md',
+        'dist/index.d.ts',
+        'dist/index.js',
+        'dist/vite.d.ts',
+        'dist/vite.js',
+        'package.json',
+        ...presetFiles,
+      ].sort()
     );
   });
 
