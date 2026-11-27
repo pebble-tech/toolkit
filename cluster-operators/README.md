@@ -19,7 +19,7 @@ its admin, the cluster admin, is a role no product uses.
   a list of role names grants nothing. The cluster admin's URL is never stack config: the program reads it from
   `CLUSTER_ADMIN_URL`, so it is in no file. Pulumi keeps the provider's credentials in the state, encrypted, under the
   path no deploy role reads.
-- **No `Stage`**: a cluster is not a product stage. `Stage` refuses the `pebble` prefix and any stack name but
+- **No `Stage`**: a cluster is not a product stage. `Stage` refuses the product id `pebble` and any stack name but
   `pr-<n>`, `staging`, `prod` and `shared`, so `Operators` takes `cluster` (the stack name) instead and protects and
   keeps the group as on prod.
 - **The check before every preview and apply**: the program reads the group's memberships first. A membership that

@@ -13,7 +13,7 @@ export type StageEnv = 'staging' | 'prod' | 'shared' | `pr-${number}`;
 export type StageKind = 'preview' | 'staging' | 'prod' | 'shared';
 
 export interface StageArgs {
-  /** Product id: one DNS label (`base`, `basefresh`). The `pebble` prefix is reserved for shared infrastructure. */
+  /** Product id: one DNS label (`base`, `basefresh`). The id `pebble` is reserved for shared infrastructure. */
   product: string;
   /** Pulumi stack name; defaults to the running stack. */
   stack?: string;

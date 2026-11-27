@@ -7,7 +7,11 @@ import type { StageEnv, StageKind } from './stage.js';
 export const LABEL = /^[a-z][a-z0-9]{1,}$/;
 const PREVIEW = /^pr-([1-9][0-9]*)$/;
 
-/** Throws StageError unless `product` is one DNS label outside the reserved `pebble` prefix. */
+/**
+ * Throws StageError unless `product` is one DNS label, not an env word and not `pebble`. `pebble-*` names are shared
+ * infrastructure's (`pebble-stg`, `pebble-prd-shared`); a product's names are `<product>-<env>`, and a product id has no
+ * hyphen, so only the id `pebble` itself could fall inside them. `pebbletech` or `pebbleshop` cannot.
+ */
 export function assertProduct(product: string): void {
   if (!LABEL.test(product)) {
     throw new StageError(
@@ -18,8 +22,8 @@ export function assertProduct(product: string): void {
   if (['pr', 'staging', 'prod', 'shared'].includes(product)) {
     throw new StageError(`product id "${product}" is an env word (pr, staging, prod, shared)`);
   }
-  if (product.startsWith('pebble')) {
-    throw new StageError(`product id "${product}" starts with "pebble", which is reserved for shared infrastructure`);
+  if (product === 'pebble') {
+    throw new StageError('product id "pebble" is reserved: `pebble-*` names are shared infrastructure\'s');
   }
 }
 

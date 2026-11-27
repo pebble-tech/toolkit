@@ -225,11 +225,11 @@ describe('prepare', () => {
   });
 
   test('a product id the toolkit refuses stops before any pulumi call', async () => {
-    const p = product('pebbleshop');
+    const p = product('pebble');
     const result = await p.run(['prepare', 'prod']);
     expect([result.code, result.stderr, p.commands()]).toEqual([
       1,
-      'product id "pebbleshop" starts with "pebble", which is reserved for shared infrastructure\n',
+      'product id "pebble" is reserved: `pebble-*` names are shared infrastructure\'s\n',
       [],
     ]);
   });

@@ -69,8 +69,21 @@ describe('Stage', () => {
     expect(stage.tags).toEqual({ product: 'basefresh', env: 'prod', 'managed-by': 'pulumi' });
   });
 
-  test.each(['pebble', 'pebble-stg', 'pebblefresh'])('refuses the reserved product id %s', (product) => {
-    expect(() => new Stage('stage', { product, stack: 'staging' })).toThrow(StageError);
+  test.each([
+    ['pebble', /product id "pebble" is reserved/],
+    ['pebble-stg', /one DNS label/],
+  ])('refuses the reserved product id %s', (product, message) => {
+    expect(() => new Stage('stage', { product, stack: 'staging' })).toThrow(message);
+  });
+
+  // Only the id `pebble` could name a `pebble-*` resource: a product id has no hyphen, so `pebbletech-prod` is never
+  // `pebble-<anything>`'s.
+  test.each(['pebbletech', 'pebblefresh'])('accepts the product id %s, whose names stay its own', (product) => {
+    const stage = new Stage('stage', { product, stack: 'prod' });
+    expect([stage.name('web'), stage.hostname('app', 'pebbletech.my')]).toEqual([
+      `${product}-prod-web`,
+      `app-${product}.pebbletech.my`,
+    ]);
   });
 
   test.each(['Base', 'base_app', '-base', '', 'a', 'base-staging', 'base-pr', 'shared-tools'])(

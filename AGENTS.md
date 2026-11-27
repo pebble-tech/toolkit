@@ -52,7 +52,8 @@ compiled ESM (`dist/`) plus any files its `files` list names. See `README.md` fo
 ## Naming
 
 Product resources are named `<product>-<env>`, with env one of `pr-N`, `staging`, `prod`. The `pebble-*` prefix is
-for internal or shared resources only (`pebble-stg`, `pebble-prd-shared`); a product never uses it.
+for internal or shared resources only (`pebble-stg`, `pebble-prd-shared`); a product never uses it. A product id has
+no hyphen, so only the id `pebble` is refused; `pebbletech` names `pebbletech-prod`, never a `pebble-*` resource.
 
 ## Git and PRs
 
