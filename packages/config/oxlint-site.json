@@ -1,0 +1,38 @@
+{
+  "extends": ["./oxlint.json"],
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/routeTree.gen.ts",
+    "**/payload-types.ts",
+    "**/importMap.js",
+    "**/.next/**",
+    "**/.output/**",
+    "**/.vercel/**",
+    "**/dist/**"
+  ],
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": ["next", "next/**"],
+            "message": "Next.js is confined to apps/cms."
+          },
+          {
+            "group": ["payload", "payload/**", "@payloadcms/**"],
+            "message": "Payload runtime imports are confined to apps/cms. Import generated types and REST helpers from the content package instead."
+          }
+        ]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["apps/cms/**"],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    }
+  ]
+}

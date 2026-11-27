@@ -1,7 +1,7 @@
 {
   "name": "@pebbletech/config",
   "version": "0.1.0",
-  "description": "Shared TypeScript, oxlint, oxfmt and lint-staged presets for Pebble product repos",
+  "description": "Shared TypeScript, oxlint, oxfmt and lint-staged presets and Vite option builders for Pebble product repos",
   "keywords": [
     "oxfmt",
     "oxlint",
@@ -25,8 +25,14 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "import": "./dist/vite.js",
+      "default": "./dist/vite.js"
+    },
     "./tsconfig.base.json": "./tsconfig.base.json",
     "./oxlint.json": "./oxlint.json",
+    "./oxlint-site.json": "./oxlint-site.json",
     "./oxfmt.json": "./oxfmt.json",
     "./package.json": "./package.json"
   },
@@ -34,6 +40,7 @@
     "dist",
     "tsconfig.base.json",
     "oxlint.json",
+    "oxlint-site.json",
     "oxfmt.json"
   ],
   "scripts": {
@@ -58,6 +65,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "oxlint": "1.89.0",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },

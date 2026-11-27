@@ -341,13 +341,13 @@ importers:
       oxfmt:
         specifier: '>=0.74.0'
         version: 0.74.0
-      oxlint:
-        specifier: '>=1.89.0'
-        version: 1.89.0
     devDependencies:
       '@types/node':
         specifier: 24.19.2
         version: 24.19.2
+      oxlint:
+        specifier: 1.89.0
+        version: 1.89.0
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
