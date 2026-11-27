@@ -67,6 +67,8 @@ export class DeployRole extends pulumi.ComponentResource {
     super('pebbletech:index:DeployRole', name, {}, opts);
 
     const { product, env, apex } = args;
+    // Read once here: the policy is built in an apply, after a caller may have changed or reused `args`.
+    const stateOnlyPolicy = env === 'preview' || args.awsResources === false;
     const scope = env === 'preview' ? `${product}-pr-*` : `${product}-${env}-*`;
     const roleName = `${product}-${env}-deploy`;
     const boundaryName = boundaryPolicyName(product, env);
@@ -165,7 +167,7 @@ export class DeployRole extends pulumi.ComponentResource {
     ];
     const statements = (boundaryArn: string, kmsKeyArn: string): Statement[] => {
       const stateOnly = stateStatements(kmsKeyArn);
-      if (env === 'preview' || args.awsResources === false) return stateOnly;
+      if (stateOnlyPolicy) return stateOnly;
       // Hostname suffix Stage.domainSuffix uses: `stg` on staging, none on prod (`<kind>-<product>[-stg].<apex>`).
       // The apex is literal. `*` still matches a dot, so a name in a sub-zone of the apex whose label ends with
       // `-<product>[-stg]` matches too.

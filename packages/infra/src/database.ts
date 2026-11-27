@@ -339,6 +339,8 @@ export class Database extends pulumi.ComponentResource {
 
     // The runtime role's grants. The pooled URL waits for them, so no consumer gets it before the role can log in.
     const runtimeGrants: pulumi.CustomResource[] = [];
+    // The grants and default privileges on schemas other than public, which the direct URL waits for too.
+    const schemaGrants: pulumi.CustomResource[] = [];
     if (runtime) {
       const role = runtime.role;
       const grant = (
@@ -360,6 +362,7 @@ export class Database extends pulumi.ComponentResource {
         const suffix = schema === PUBLIC ? '' : `-${schema}`;
         const made = created.get(schema);
         const extra = made ? { dependsOn: [made] } : undefined;
+        const before = runtimeGrants.length;
         grant(`schema${suffix}`, { objectType: 'schema', schema, privileges: ['USAGE'] }, extra);
         grant(`tables${suffix}`, { objectType: 'table', schema, privileges: TABLE_PRIVILEGES }, extra);
         grant(`sequences${suffix}`, { objectType: 'sequence', schema, privileges: SEQUENCE_PRIVILEGES }, extra);
@@ -382,6 +385,7 @@ export class Database extends pulumi.ComponentResource {
           );
           runtimeGrants.push(defaults);
         }
+        if (made) schemaGrants.push(...runtimeGrants.slice(before));
       }
     }
 
@@ -397,10 +401,14 @@ export class Database extends pulumi.ComponentResource {
       );
     }
 
-    // With schemas beyond public the direct URL waits for them too, so a migration run in the same update finds them.
+    // With schemas beyond public the direct URL waits for them and their grants too, so a migration run in the same
+    // update finds them, and the tables it creates there are the runtime role's by default. Public-only programs keep
+    // 0.7.0's output as it was.
     const databaseReady =
       created.size > 0
-        ? pulumi.all([database.name, ...[...created.values()].map((schema) => schema.id)]).apply(([db]) => db)
+        ? pulumi
+            .all([database.name, ...[...created.values(), ...schemaGrants].map((resource) => resource.id)])
+            .apply(([db]) => db)
         : database.name;
     const poolerHost = (host: string) => args.pooler?.host ?? (flavor === 'neon' ? neonPoolerHost(host) : host);
     const poolerPort = args.pooler?.port ?? (flavor === 'neon' ? DIRECT_PORT : 6432);

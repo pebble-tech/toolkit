@@ -530,6 +530,19 @@ describe('Database schemas', () => {
     expect(result.directWaitsFor).toEqual(expect.arrayContaining(['db-schema-audit', 'db-schema-cms']));
   });
 
+  test('with a runtime role the direct URL also waits for the grants and default privileges on each schema', async () => {
+    const { result } = await databaseIn('staging', { schemas: ['public', 'cms'] });
+    expect(result.directWaitsFor).toEqual(
+      expect.arrayContaining([
+        'db-runtime-default-sequences-cms',
+        'db-runtime-default-tables-cms',
+        'db-runtime-schema-cms',
+        'db-runtime-sequences-cms',
+        'db-runtime-tables-cms',
+      ])
+    );
+  });
+
   test('refuses schemas given as a string, not a list', async () => {
     await expect(databaseIn('staging', { schemas: 'cms' } as never)).rejects.toThrow(
       'schemas must be a list of schema names'

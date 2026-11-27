@@ -4,6 +4,7 @@ import { DeployRole, type DeployRoleArgs, Stage, StageError } from './index.js';
 import { runProgram } from './testing.js';
 
 const OIDC = 'arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com';
+const GITHUB = { org: 'pebble-tech', repo: 'basefresh' };
 
 async function roleFor(env: DeployRoleArgs['env'], extra: Partial<DeployRoleArgs> = {}) {
   return runProgram(
@@ -590,6 +591,17 @@ describe('DeployRole', () => {
         );
       }
     );
+
+    test('the policy follows awsResources as it was at construction, not a later change to the args', async () => {
+      const built = await runProgram({ project: 'basefresh-bootstrap', stack: 'staging' }, () => {
+        const args: DeployRoleArgs = { product: 'basefresh', env: 'staging', apex: 'pebbletech.my', github: GITHUB };
+        new DeployRole('deploy', args);
+        // A program reusing the object for another role must not change the one already built.
+        args.awsResources = false;
+      });
+      expect(shape(built.resources)).toEqual(shape((await roleFor('staging')).resources));
+      expect(sids(built.resources)).toContain('Lambda');
+    });
 
     test('only awsResources false turns the AWS statements off, and a preview ignores it', async () => {
       const staging = (await roleFor('staging')).resources;
