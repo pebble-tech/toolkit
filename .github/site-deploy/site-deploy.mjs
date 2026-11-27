@@ -131,15 +131,21 @@ export async function tip(context, sha) {
  * site-deploy never runs where production secrets live.
  */
 export function environments(preview, staging) {
-  for (const [what, name] of [
+  const names = [
     ['preview-environment', preview],
     ['staging-environment', staging],
-  ]) {
+  ];
+  for (const [what, name] of names) {
     if (!name) throw new Refusal(`${what} is not set`);
-    if (name.toLowerCase() === 'production')
+    // ASCII only, so no space, tab, zero-width or full-width letter makes production look like another name.
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(name)) {
+      throw new Refusal(`${what} ${JSON.stringify(name)} is not a plain environment name (letters, digits, _ . -)`);
+    }
+    if (['prod', 'production'].includes(name.trim().toLowerCase())) {
       throw new Refusal(`${what} is ${name}: site-deploy never runs in production`);
+    }
   }
-  if (preview.toLowerCase() === staging.toLowerCase()) {
+  if (preview.trim().toLowerCase() === staging.trim().toLowerCase()) {
     throw new Refusal(`preview-environment and staging-environment are both ${preview}: each needs its own`);
   }
 }

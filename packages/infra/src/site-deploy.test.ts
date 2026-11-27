@@ -158,6 +158,10 @@ function violations(build: Workflow, deploy: Workflow): string[] {
       found.push(`${where}: the download is not by the decided run id`);
     }
     const token = step(job, 'The Vercel token is set');
+    const tokenTest = /^\s*if \[ -z "\$VERCEL_TOKEN" \]; then\n[^\n]*\n\s*exit 1\n\s*fi\s*$/m;
+    if (!tokenTest.test(token?.run ?? '') || token?.if !== DECIDED) {
+      found.push(`${where}: the token check does not fail on an empty VERCEL_TOKEN`);
+    }
     if (!(token && index('The Vercel token is set') < index('deploy') && token.env?.VERCEL_TOKEN === TOKEN)) {
       found.push(`${where}: no check that the environment holds VERCEL_TOKEN before the deploy`);
     }
@@ -329,6 +333,17 @@ describe('the site workflows', () => {
       (_b, d) => (p(d, 'The toolkit ref').run = p(d, 'The toolkit ref').run!.replace('^[0-9a-f]', '^[0-9a-z]')),
       'site-deploy#preview: toolkit-ref is not checked against',
     ],
+    ...(['preview', 'staging'] as const).map(
+      (id) =>
+        [
+          `a token check that never fails (${id})`,
+          (_b: Workflow, d: Workflow) => {
+            const check = step(d.jobs[id], 'The Vercel token is set')!;
+            check.run = check.run!.replace('if [ -z "$VERCEL_TOKEN" ]; then', 'if false; then');
+          },
+          `site-deploy#${id}: the token check does not fail on an empty VERCEL_TOKEN`,
+        ] as [string, (b: Workflow, d: Workflow) => void, string]
+    ),
     [
       'decide without the environment names',
       (_b, d) => delete st(d, 'decide').env!.STAGING_ENVIRONMENT,
@@ -650,6 +665,25 @@ describe('decide: the GitHub environments', () => {
   };
   test.each([
     ['the same environment twice', { STAGING_ENVIRONMENT: 'preview' }, 'are both preview: each needs its own'],
+    ['production with a trailing space', { STAGING_ENVIRONMENT: 'production ' }, 'is not a plain environment name'],
+    ['production after a tab', { STAGING_ENVIRONMENT: '\tproduction' }, 'is not a plain environment name'],
+    [
+      'production with a zero-width space',
+      { PREVIEW_ENVIRONMENT: 'produc\u200btion' },
+      'is not a plain environment name',
+    ],
+    [
+      'production in full-width letters',
+      { STAGING_ENVIRONMENT: '\uff50\uff52\uff4f\uff44' },
+      'is not a plain environment name',
+    ],
+    ['prod', { STAGING_ENVIRONMENT: 'prod' }, 'staging-environment is prod: site-deploy never runs in production'],
+    ['PROD', { PREVIEW_ENVIRONMENT: 'PROD' }, 'preview-environment is PROD'],
+    [
+      'preview and "preview " as two names',
+      { STAGING_ENVIRONMENT: 'preview ' },
+      'staging-environment "preview " is not a plain',
+    ],
     ['the same environment in another case', { STAGING_ENVIRONMENT: 'Preview' }, 'are both preview'],
     [
       'production as the preview environment',
