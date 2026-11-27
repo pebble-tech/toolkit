@@ -92,6 +92,12 @@ export function githubEnvironment(env: DeployEnv): string {
   return env === 'prod' ? 'production' : env;
 }
 
+/**
+ * The zones Pebble's stage hostnames (`<kind>-<product>[-<suffix>].<zone>`) live in. A custom hostname's zone may be
+ * one of them, or a client's zone, but never a name inside one.
+ */
+export const STAGE_ZONES: readonly string[] = ['pebbletech.my'];
+
 const SLUG = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 /** Two or more lowercase DNS labels, no trailing dot: `pebbletech.my`, `new.pebbletech.my`. */
 const FQDN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -182,9 +188,11 @@ export class Stage extends pulumi.ComponentResource {
    * Throws unless `hostname` may be one of prod's custom or apex hostnames (`new.pebbletech.my`, `pebbletech.my`): on
    * `prod` only (OwnershipError), a lowercase FQDN that is `zoneName` or inside it, with no hyphen in any label below the
    * zone (NamespaceError). Every stage hostname's first label is `<kind>-<product>[-<suffix>]`, so a custom hostname can
-   * never take another stage's or another product's name. `assertOwnsHostname` keeps the stage-shaped rule.
+   * never take another stage's or another product's name. `zoneName` may not be a name inside one of `stageZones`
+   * (the zones stage hostnames live in, `STAGE_ZONES` by default): naming `app-other.pebbletech.my` as its own zone
+   * would put a stage-shaped label in the zone and none below it. `assertOwnsHostname` keeps the stage-shaped rule.
    */
-  assertCustomHostname(hostname: string, zoneName: string): void {
+  assertCustomHostname(hostname: string, zoneName: string, stageZones: readonly string[] = STAGE_ZONES): void {
     this.requireKind('a custom or apex hostname', ['prod']);
     if (!FQDN.test(zoneName) || zoneName.length > 253) {
       throw new NamespaceError(`zone "${zoneName}" is not a lowercase domain name such as pebbletech.my`);
@@ -194,6 +202,12 @@ export class Stage extends pulumi.ComponentResource {
     }
     if (hostname !== zoneName && !hostname.endsWith(`.${zoneName}`)) {
       throw new NamespaceError(`hostname "${hostname}" is not in the zone ${zoneName}`);
+    }
+    const stageZone = stageZones.find((zone) => zoneName.endsWith(`.${zone}`));
+    if (stageZone) {
+      throw new NamespaceError(
+        `zone "${zoneName}" is a name inside the stage zone ${stageZone}: name ${stageZone} as the zone of "${hostname}"`
+      );
     }
     const below = hostname === zoneName ? [] : hostname.slice(0, -zoneName.length - 1).split('.');
     if (below.some((label) => label.includes('-'))) {

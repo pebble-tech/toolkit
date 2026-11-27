@@ -588,6 +588,35 @@ describe('VercelProject production domains (custom and apex hostnames on prod)',
     await expect(prodWith([domain])).rejects.toThrow(message);
   });
 
+  // A hostname named as its own zone, with no zoneId to check it against, must not slip a stage-shaped label past the
+  // rule: each is a name inside the stage zone pebbletech.my.
+  test.each(['app-other.pebbletech.my', 'app-other-stg.pebbletech.my', 'web-basefresh.pebbletech.my'])(
+    'refuses %s named as its own zone in a client zone',
+    async (hostname) => {
+      await expect(prodWith([{ hostname, zoneName: hostname }])).rejects.toThrow(
+        `zone "${hostname}" is a name inside the stage zone pebbletech.my`
+      );
+    }
+  );
+
+  test("refuses a zone inside the stage domain's own zone, which need not be pebbletech.my", async () => {
+    const domain = { hostname: 'app-basefresh.example.dev', zoneId: 'zone-9' };
+    await expect(
+      prodWith([{ hostname: 'app-other.example.dev', zoneName: 'app-other.example.dev' }], { domain })
+    ).rejects.toThrow('is a name inside the stage zone example.dev');
+  });
+
+  test("takes a client's hyphenated apex and a name in it", async () => {
+    const { resources } = await prodWith([
+      { hostname: 'my-client.com', zoneName: 'my-client.com' },
+      { hostname: 'www.my-client.com', zoneName: 'my-client.com' },
+    ]);
+    expect(ofType(resources, 'vercel:index/projectDomain:ProjectDomain').map((r) => r.inputs.domain)).toEqual([
+      'my-client.com',
+      'www.my-client.com',
+    ]);
+  });
+
   test('refuses a hostname bound twice', async () => {
     await expect(prodWith([NEW, { ...NEW }])).rejects.toThrow('hostname "new.pebbletech.my" is bound twice');
   });

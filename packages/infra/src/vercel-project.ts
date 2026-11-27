@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { NamespaceError, OwnershipError } from './errors.js';
 import { assertNoSecretsInPlainText } from './secrets.js';
-import type { Stage } from './stage.js';
+import { STAGE_ZONES, type Stage } from './stage.js';
 
 /**
  * What `shared` deploys once to a new project, shipped in the package: a static page and the `vercel.json` that builds
@@ -339,8 +339,13 @@ function assertProductionDomains(stage: Stage, args: VercelProjectArgs): void {
   const domains = args.productionDomains ?? [];
   if (domains.length === 0) return;
   const seen = new Set<string>();
+  // The stage domain's zone is a stage zone too: its apex is what follows the `<kind>-<product>[-<suffix>]` label.
+  const stageZones = [
+    ...STAGE_ZONES,
+    ...(args.domain ? [args.domain.hostname.slice(args.domain.hostname.indexOf('.') + 1)] : []),
+  ];
   for (const { hostname, zoneName, zoneId, verificationTxt } of domains) {
-    stage.assertCustomHostname(hostname, zoneName);
+    stage.assertCustomHostname(hostname, zoneName, stageZones);
     if (seen.has(hostname)) throw new NamespaceError(`hostname "${hostname}" is bound twice`);
     seen.add(hostname);
     if (verificationTxt && zoneId === undefined) {

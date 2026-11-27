@@ -1,5 +1,6 @@
 export * from './errors.js';
 export {
+  STAGE_ZONES,
   Stage,
   alarmTopicName,
   assertProduct,

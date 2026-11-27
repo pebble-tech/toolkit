@@ -153,6 +153,8 @@ describe('Stage', () => {
     ['NEW.pebbletech.my', 'pebbletech.my', /not a lowercase domain name/],
     ['new.pebbletech.my', 'my', /zone "my"/],
     ['new..pebbletech.my', 'pebbletech.my', /not a lowercase domain name/],
+    ['app-other.pebbletech.my', 'app-other.pebbletech.my', /is a name inside the stage zone pebbletech.my/],
+    ['new.sub.pebbletech.my', 'sub.pebbletech.my', /is a name inside the stage zone pebbletech.my/],
   ])('prod refuses the custom hostname %s in zone %s', async (hostname, zone, message) => {
     const { stage } = await stageIn('prod');
     expect(() => stage.assertCustomHostname(hostname, zone)).toThrow(message);
