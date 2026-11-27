@@ -34,8 +34,12 @@ export interface CmsConfigOptions {
   locales?: string[];
   /** Extra API-key-only roles, see `createUsersCollection`. */
   serviceRoles?: string[];
-  /** Upload collections besides media that store files in R2. */
-  storageCollections?: string[];
+  /**
+   * Upload collections besides media that store files in R2. A plain slug gets signed browser uploads like media. Write
+   * `{ slug, clientUploads: false }` for a collection whose files must pass its own server-side checks: the signing
+   * endpoint refuses it for every user and the admin uploads through the CMS instead.
+   */
+  storageCollections?: (string | { slug: string; clientUploads: false })[];
   /** Largest file accepted, in bytes, both in a signed R2 upload URL and in an upload through the CMS. Default 10 MB. */
   maxUploadBytes?: number;
   /** Where `payload generate:types` writes, such as `packages/content/src/payload-types.ts`. */
@@ -97,30 +101,35 @@ const SIGNED_URL_PATH = '/storage-s3-generate-signed-url';
  * checked for uploads through the CMS. This wraps the signing endpoint so the collection's list holds for the signed
  * PUT to R2 too, so nothing but the listed types reaches the public media origin.
  */
-const signOnlyAllowedTypes: Plugin = (config) => ({
-  ...config,
-  endpoints: (config.endpoints ?? []).map((endpoint) => {
-    if (endpoint.path !== SIGNED_URL_PATH) return endpoint;
-    const sign: PayloadHandler = endpoint.handler;
-    const handler: PayloadHandler = async (req) => {
-      if (!req.json) throw new APIError('Content-Type expected to be application/json', 400);
-      const body = (await req.json()) as { collectionSlug?: unknown; mimeType?: unknown };
-      const upload = req.payload.collections[String(body.collectionSlug)]?.config.upload;
-      const allowed = upload && typeof upload === 'object' ? (upload.mimeTypes ?? []) : [];
-      if (typeof body.mimeType !== 'string' || !validateMimeType(body.mimeType, allowed)) {
-        throw new APIError(
-          `File type ${JSON.stringify(body.mimeType)} is not allowed for ${String(body.collectionSlug)}`,
-          400
-        );
-      }
-      req.json = () => Promise.resolve(body);
-      return sign(req);
-    };
-    return { ...endpoint, handler };
-  }),
-});
+const signOnlyAllowedTypes =
+  (serverOnly: ReadonlySet<string>): Plugin =>
+  (config) => ({
+    ...config,
+    endpoints: (config.endpoints ?? []).map((endpoint) => {
+      if (endpoint.path !== SIGNED_URL_PATH) return endpoint;
+      const sign: PayloadHandler = endpoint.handler;
+      const handler: PayloadHandler = async (req) => {
+        if (!req.json) throw new APIError('Content-Type expected to be application/json', 400);
+        const body = (await req.json()) as { collectionSlug?: unknown; mimeType?: unknown };
+        if (serverOnly.has(String(body.collectionSlug))) {
+          throw new APIError(`${String(body.collectionSlug)} does not accept signed browser uploads`, 403);
+        }
+        const upload = req.payload.collections[String(body.collectionSlug)]?.config.upload;
+        const allowed = upload && typeof upload === 'object' ? (upload.mimeTypes ?? []) : [];
+        if (typeof body.mimeType !== 'string' || !validateMimeType(body.mimeType, allowed)) {
+          throw new APIError(
+            `File type ${JSON.stringify(body.mimeType)} is not allowed for ${String(body.collectionSlug)}`,
+            400
+          );
+        }
+        req.json = () => Promise.resolve(body);
+        return sign(req);
+      };
+      return { ...endpoint, handler };
+    }),
+  });
 
-function r2Plugin(storage: R2StorageOptions, slugs: string[]): Plugin {
+function r2Plugin(storage: R2StorageOptions, slugs: string[], clientUploads: boolean): Plugin {
   const base = storage.mediaBaseUrl?.replace(/\/+$/, '');
   const collection = base
     ? {
@@ -131,7 +140,7 @@ function r2Plugin(storage: R2StorageOptions, slugs: string[]): Plugin {
     : true;
   return s3Storage({
     bucket: storage.bucket,
-    clientUploads: true,
+    clientUploads,
     collections: Object.fromEntries(slugs.map((slug) => [slug, collection])),
     config: {
       endpoint: `https://${storage.accountId}.r2.cloudflarestorage.com`,
@@ -142,6 +151,21 @@ function r2Plugin(storage: R2StorageOptions, slugs: string[]): Plugin {
       responseChecksumValidation: 'WHEN_REQUIRED',
     },
   });
+}
+
+// One s3Storage instance per upload mode: `clientUploads` is an instance option, and an instance with it off adds no
+// signing route or browser upload handler for its collections, so they upload through the CMS only.
+function storagePlugins(
+  storage: R2StorageOptions,
+  entries: NonNullable<CmsConfigOptions['storageCollections']>
+): Plugin[] {
+  const serverOnly = entries.filter((entry) => typeof entry === 'object').map((entry) => entry.slug);
+  const signed = entries.filter((entry) => typeof entry === 'string').filter((slug) => !serverOnly.includes(slug));
+  return [
+    r2Plugin(storage, [MEDIA_SLUG, ...signed], true),
+    ...(serverOnly.length > 0 ? [r2Plugin(storage, serverOnly, false)] : []),
+    signOnlyAllowedTypes(new Set(serverOnly)),
+  ];
 }
 
 /**
@@ -194,9 +218,7 @@ export function createCmsConfig(options: CmsConfigOptions = {}): Promise<Sanitiz
     }),
     sharp: options.sharp,
     plugins: [
-      ...(storage
-        ? [r2Plugin(storage, [MEDIA_SLUG, ...(options.storageCollections ?? [])]), signOnlyAllowedTypes]
-        : []),
+      ...(storage ? storagePlugins(storage, options.storageCollections ?? []) : []),
       ...(options.plugins ?? []),
     ],
   });

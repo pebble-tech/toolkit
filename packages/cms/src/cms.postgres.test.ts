@@ -148,9 +148,17 @@ describe.skipIf(skipped)(`@pebbletech/cms on Postgres${skipped ? ` (${skipReason
       fields: [{ name: 'note', type: 'text' as const }],
     };
 
+    const uploads = ['stamp-uploads', 'stamp-pngs'].map((slug) => ({
+      slug,
+      access: submissionAccess('stamp-submitter'),
+      upload: { mimeTypes: ['image/png'] },
+      fields: [],
+    }));
+
     config = await createCmsConfig({
       databaseUrl: databaseUrl(DATABASE),
-      collections: [pages, stamps],
+      collections: [pages, stamps, ...uploads],
+      storageCollections: ['stamp-uploads', { slug: 'stamp-pngs', clientUploads: false }],
       serviceRoles: ['stamp-submitter'],
       maxUploadBytes: CAP,
       storage: {
@@ -388,6 +396,27 @@ describe.skipIf(skipped)(`@pebbletech/cms on Postgres${skipped ? ` (${skipReason
         });
         expect(signed.status).toBe(400);
         expect(JSON.stringify(signed.json)).toContain('is not allowed for media');
+      }
+    });
+
+    test('a create-only key gets a signed URL for a listed storage collection, but never for one that opted out', async () => {
+      const sign = (collectionSlug: string, auth: string, mimeType = 'image/png') =>
+        api('/storage-s3-generate-signed-url', {
+          method: 'POST',
+          auth,
+          body: { collectionSlug, filename: 'stamp.png', mimeType, filesize: 100 },
+        });
+      const submitterAuth = `users API-Key ${submitterKey}`;
+      const listed = await sign('stamp-uploads', submitterAuth);
+      expect(listed.status).toBe(200);
+      expect(new URL(listed.json.url).hostname).toBe('test-media.test-account.r2.cloudflarestorage.com');
+      expect((await sign('stamp-uploads', submitterAuth, 'text/html')).status).toBe(400);
+
+      for (const auth of [submitterAuth, editorAuth, adminAuth]) {
+        const refused = await sign('stamp-pngs', auth);
+        expect(refused.status).toBe(403);
+        expect(JSON.stringify(refused.json)).toContain('does not accept signed browser uploads');
+        expect(refused.json.url).toBeUndefined();
       }
     });
 

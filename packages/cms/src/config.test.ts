@@ -57,6 +57,28 @@ describe('R2 storage', () => {
   });
 });
 
+describe('storageCollections', () => {
+  const uploadCollection = (slug: string) => ({ slug, upload: true, fields: [] });
+  const clientUploadSlugs = (config: Awaited<ReturnType<typeof createCmsConfig>>) =>
+    ((config.admin.components?.providers ?? []) as { clientProps?: { collectionSlug?: string } }[])
+      .map((provider) => provider.clientProps?.collectionSlug)
+      .filter(Boolean);
+
+  test('a plain slug gets browser uploads like media; one that opts out is uploaded through the CMS only', async () => {
+    const config = await createCmsConfig({
+      storage: r2,
+      collections: [uploadCollection('plain'), uploadCollection('server-only')],
+      storageCollections: ['plain', { slug: 'server-only', clientUploads: false }],
+    });
+    expect(clientUploadSlugs(config)).toEqual(['media', 'plain']);
+    expect(
+      config.endpoints.filter((endpoint) => endpoint.path?.startsWith('/storage-s3-generate-signed-url'))
+    ).toHaveLength(1);
+    const stored = (slug: string) => config.collections.find((collection) => collection.slug === slug)?.upload;
+    expect(stored('server-only')).toMatchObject({ disableLocalStorage: true });
+  });
+});
+
 describe('shape', () => {
   test('types are written with declare: false; locales default to en; uploads cap at 10 MB', async () => {
     const config = await createCmsConfig({ typesOutputFile: '/tmp/payload-types.ts' });
