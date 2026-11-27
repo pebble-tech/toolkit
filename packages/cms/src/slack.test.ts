@@ -206,3 +206,49 @@ test('a message builder that throws is logged and the create still succeeds', as
   await expect(hook({ doc, operation: 'create', req } as never)).resolves.toBe(doc);
   expect(logged).toHaveLength(1);
 });
+
+describe('notifySlackOnCreate', () => {
+  function hookWorld() {
+    const logged: unknown[] = [];
+    const posted: unknown[] = [];
+    // Slack is faked at its boundary (fetch); of Payload's request the hook uses only the logger.
+    const fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      posted.push(JSON.parse(String(init?.body)));
+      return new Response('ok');
+    }) as typeof globalThis.fetch;
+    const req = { payload: { logger: { error: (...args: unknown[]) => logged.push(args) } } };
+    return { logged, posted, req, options: { webhookUrl: 'https://hooks.slack.com/services/T/B/x', fetch } };
+  }
+
+  test('an async builder is awaited and its message posted', async () => {
+    const world = hookWorld();
+    const hook = notifySlackOnCreate(async (doc) => {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      return `stamp ${String(doc.id)} of 7`;
+    }, world.options);
+    const doc = { id: 3 };
+    await expect(hook({ doc, operation: 'create', req: world.req } as never)).resolves.toBe(doc);
+    expect(world.posted).toEqual([{ text: 'stamp 3 of 7' }]);
+    expect(world.logged).toEqual([]);
+  });
+
+  test('a builder that rejects is logged and the create still succeeds', async () => {
+    const world = hookWorld();
+    const hook = notifySlackOnCreate(async () => {
+      throw new Error('postcard lookup failed');
+    }, world.options);
+    const doc = { id: 4 };
+    await expect(hook({ doc, operation: 'create', req: world.req } as never)).resolves.toBe(doc);
+    expect(world.posted).toEqual([]);
+    expect(world.logged).toHaveLength(1);
+  });
+
+  test('a sync builder still posts, an async null posts nothing, and an update never posts', async () => {
+    const world = hookWorld();
+    const doc = { id: 5 };
+    await notifySlackOnCreate(() => 'sync', world.options)({ doc, operation: 'create', req: world.req } as never);
+    await notifySlackOnCreate(async () => null, world.options)({ doc, operation: 'create', req: world.req } as never);
+    await notifySlackOnCreate(() => 'update', world.options)({ doc, operation: 'update', req: world.req } as never);
+    expect(world.posted).toEqual([{ text: 'sync' }]);
+  });
+});

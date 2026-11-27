@@ -179,7 +179,8 @@ hooks: {
 
 `postToSlack(message)` posts text or Block Kit to `SLACK_WEBHOOK_URL`, sends nothing when it is unset (staging may post
 nowhere), and refuses a URL that is not `https://hooks.slack.com/`. `notifySlackOnCreate` runs it on create only and
-logs a failure instead of failing the create. `formatStampNotice` is the stamp preset: one section that reads like a
+logs a failure instead of failing the create. Its message builder may be async, for a lookup such as a running count
+before formatting; a throw or rejection is logged the same way. `formatStampNotice` is the stamp preset: one section that reads like a
 postcard arriving, with the stamp image, the sender's note quoted (escaped, so it cannot make links or mentions),
 `Stamp #N`, the time in Malaysia (`Asia/Kuala_Lumpur`), a link to the album and a small "remove" link to the stamp in
 the admin. Any stage but `prod` is tagged, such as `[staging]`. An optional `details` object (`name`, `company`, `email`, `phone`,
