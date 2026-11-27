@@ -16,7 +16,7 @@ import {
   VercelProject,
   type VercelProjectArgs,
 } from './index.js';
-import { runProgram, valueOf } from './testing.js';
+import { defaultMocks, type Registration, runProgram, valueOf } from './testing.js';
 
 const PROJECT = {
   rootDirectory: 'apps/web',
@@ -326,5 +326,268 @@ describe('VercelProject on staging and prod', () => {
     await expect(vercelIn('prod', { ...stageArgs('prod'), domain: stageArgs('staging').domain })).rejects.toThrow(
       NamespaceError
     );
+  });
+});
+
+describe('VercelProject production domains (custom and apex hostnames on prod)', () => {
+  const ZONES: Record<string, string> = { 'zone-1': 'pebbletech.my', 'zone-2': 'client.com' };
+  const TXT = (zone: string, host: string) => ({
+    domain: `_vercel.${zone}`,
+    reason: 'pending_domain_verification',
+    type: 'TXT',
+    value: `vc-domain-verify=${host},abc123`,
+  });
+  /** The engine faked as the providers answer: Cloudflare zone names, Vercel's challenges and recommended records. */
+  const mocks = (verified: Record<string, boolean> = {}): pulumi.runtime.Mocks => ({
+    newResource(args) {
+      const base = defaultMocks.newResource(args) as { id: string; state: Record<string, any> };
+      if (args.type !== 'vercel:index/projectDomain:ProjectDomain') return base;
+      const host = String(args.inputs.domain);
+      const zone = host.endsWith('client.com') ? 'client.com' : 'pebbletech.my';
+      const done = verified[host] ?? false;
+      return { ...base, state: { ...base.state, verified: done, verifications: done ? [] : [TXT(zone, host)] } };
+    },
+    call(args) {
+      if (args.token === 'cloudflare:index/getZone:getZone') {
+        return { id: args.inputs.zoneId, zoneId: args.inputs.zoneId, name: ZONES[args.inputs.zoneId] ?? '' };
+      }
+      if (args.token === 'vercel:index/getDomainConfig:getDomainConfig') {
+        return { ...args.inputs, recommendedCname: 'cname.vercel-dns-017.com.', recommendedIpv4s: ['76.76.21.21'] };
+      }
+      return defaultMocks.call(args);
+    },
+  });
+
+  const prodWith = (
+    productionDomains: VercelProjectArgs['productionDomains'],
+    extra: Partial<VercelProjectArgs> = {},
+    verified?: Record<string, boolean>,
+    stack = 'prod'
+  ) =>
+    runProgram({ project: 'basefresh', stack, mocks: mocks(verified) }, () => {
+      const stage = new Stage('stage', { product: 'basefresh' });
+      return new VercelProject('web', { stage, projectId: 'prj_123', productionDomains, ...extra });
+    });
+
+  const NEW = { hostname: 'new.pebbletech.my', zoneName: 'pebbletech.my', zoneId: 'zone-1' };
+  const APEX = { hostname: 'pebbletech.my', zoneName: 'pebbletech.my', zoneId: 'zone-1', verificationTxt: true };
+
+  test('binds each hostname to production with an unproxied CNAME, the apex by its full name, and the opt-in TXT', async () => {
+    const { resources } = await prodWith([NEW, APEX]);
+    const children = resources.filter((r) => r.custom).sort((a, b) => a.name.localeCompare(b.name));
+    expect(
+      children.map((r) => [
+        r.type,
+        r.name,
+        r.inputs,
+        r.protect,
+        r.retainOnDelete,
+        r.deleteBeforeReplace,
+        r.ignoreChanges,
+      ])
+    ).toEqual([
+      [
+        'cloudflare:index/dnsRecord:DnsRecord',
+        'web-cname-new.pebbletech.my',
+        {
+          zoneId: 'zone-1',
+          name: 'new.pebbletech.my',
+          type: 'CNAME',
+          content: 'cname.vercel-dns-017.com',
+          ttl: 1,
+          proxied: false,
+        },
+        true,
+        true,
+        false,
+        [],
+      ],
+      [
+        'cloudflare:index/dnsRecord:DnsRecord',
+        'web-cname-pebbletech.my',
+        {
+          zoneId: 'zone-1',
+          name: 'pebbletech.my',
+          type: 'CNAME',
+          content: 'cname.vercel-dns-017.com',
+          ttl: 1,
+          proxied: false,
+        },
+        true,
+        true,
+        false,
+        [],
+      ],
+      [
+        'vercel:index/projectDomain:ProjectDomain',
+        'web-domain-new.pebbletech.my',
+        { projectId: 'prj_123', domain: 'new.pebbletech.my' },
+        true,
+        false,
+        true,
+        [],
+      ],
+      [
+        'vercel:index/projectDomain:ProjectDomain',
+        'web-domain-pebbletech.my',
+        { projectId: 'prj_123', domain: 'pebbletech.my' },
+        true,
+        false,
+        true,
+        [],
+      ],
+      [
+        'cloudflare:index/dnsRecord:DnsRecord',
+        'web-vercel-txt-pebbletech.my',
+        {
+          zoneId: 'zone-1',
+          name: '_vercel.pebbletech.my',
+          type: 'TXT',
+          content: 'vc-domain-verify=pebbletech.my,abc123',
+          ttl: 1,
+        },
+        true,
+        true,
+        false,
+        ['content'],
+      ],
+    ]);
+  });
+
+  test('the stage domain keeps its resources and names beside production domains', async () => {
+    const domain = { hostname: 'app-basefresh.pebbletech.my', zoneId: 'zone-1' };
+    const alone = await prodWith(undefined, { domain });
+    const beside = await prodWith([NEW, APEX], { domain });
+    const stageDomain = (resources: Registration[]) =>
+      resources
+        .filter((r) => r.name === 'web-domain' || r.name === 'web-cname')
+        .map((r) => [r.urn, r.inputs, r.protect, r.retainOnDelete, r.deleteBeforeReplace])
+        .sort();
+    expect([stageDomain(beside.resources), stageDomain(alone.resources).length]).toEqual([
+      stageDomain(alone.resources),
+      2,
+    ]);
+  });
+
+  test('a hostname keeps its URNs when another is added, removed or listed first', async () => {
+    const urnsOf = async (domains: (typeof NEW)[]) =>
+      (await prodWith(domains)).resources
+        .filter((r) => r.name.endsWith('new.pebbletech.my'))
+        .map((r) => r.urn)
+        .sort();
+    const alone = await urnsOf([NEW]);
+    expect([await urnsOf([NEW, APEX]), await urnsOf([APEX, NEW]), alone.length]).toEqual([alone, alone, 2]);
+  });
+
+  test("a client's zone gets no DNS from Pulumi: clientDnsRecords lists the CNAME, the apex's A record and the TXT", async () => {
+    const { result, resources } = await prodWith([
+      { hostname: 'www.client.com', zoneName: 'client.com' },
+      { hostname: 'client.com', zoneName: 'client.com' },
+    ]);
+    expect([
+      ofType(resources, 'cloudflare:index/dnsRecord:DnsRecord'),
+      await valueOf(result.clientDnsRecords!),
+      await valueOf(result.verification!),
+    ]).toEqual([
+      [],
+      [
+        { hostname: 'www.client.com', type: 'CNAME', name: 'www.client.com', value: 'cname.vercel-dns-017.com' },
+        {
+          hostname: 'www.client.com',
+          type: 'TXT',
+          name: '_vercel.client.com',
+          value: TXT('client.com', 'www.client.com').value,
+        },
+        { hostname: 'client.com', type: 'A', name: 'client.com', value: '76.76.21.21' },
+        {
+          hostname: 'client.com',
+          type: 'TXT',
+          name: '_vercel.client.com',
+          value: TXT('client.com', 'client.com').value,
+        },
+      ],
+      { 'www.client.com': [TXT('client.com', 'www.client.com')], 'client.com': [TXT('client.com', 'client.com')] },
+    ]);
+  });
+
+  test('outputs name the client records and the challenges, and stay empty of challenges once verified', async () => {
+    const { result, resources } = await prodWith([NEW], {}, { 'new.pebbletech.my': true });
+    expect([
+      await valueOf(result.verification!),
+      resources.find((r) => r.type === 'pebbletech:index:VercelProject')!.outputs,
+    ]).toEqual([
+      { 'new.pebbletech.my': [] },
+      {
+        projectId: 'prj_123',
+        customEnvironmentIds: {},
+        clientDnsRecords: [
+          {
+            hostname: 'new.pebbletech.my',
+            type: 'CNAME',
+            name: 'new.pebbletech.my',
+            value: 'cname.vercel-dns-017.com',
+          },
+        ],
+        verification: { 'new.pebbletech.my': [] },
+      },
+    ]);
+  });
+
+  test('a verified hostname with the TXT on keeps the record it made: no refusal, the content is left to state', async () => {
+    const { resources } = await prodWith([APEX], {}, { 'pebbletech.my': true });
+    const txt = resources.find((r) => r.name === 'web-vercel-txt-pebbletech.my')!;
+    expect([txt.ignoreChanges, txt.inputs.content]).toEqual([['content'], undefined]);
+  });
+
+  test('refuses the TXT when Vercel lists no challenge and the hostname is not verified', async () => {
+    const program = runProgram(
+      {
+        project: 'basefresh',
+        stack: 'prod',
+        mocks: {
+          ...mocks(),
+          newResource: (args) => {
+            const base = mocks().newResource(args) as { id: string; state: Record<string, any> };
+            return { ...base, state: { ...base.state, verifications: [] } };
+          },
+        },
+      },
+      () => {
+        const stage = new Stage('stage', { product: 'basefresh' });
+        new VercelProject('web', { stage, projectId: 'prj_123', productionDomains: [APEX] });
+      }
+    );
+    await expect(program).rejects.toThrow(/lists no _vercel.pebbletech.my TXT challenge/);
+  });
+
+  test('refuses a zone id whose zone is not the zone named', async () => {
+    await expect(prodWith([{ ...NEW, zoneId: 'zone-2' }])).rejects.toThrow(
+      'zone zone-2 is client.com, not pebbletech.my (hostname "new.pebbletech.my")'
+    );
+  });
+
+  test.each(['staging', 'shared'])('refuses production domains on %s', async (stack) => {
+    const extra = stack === 'staging' ? { customEnvironmentId: 'env_staging' } : {};
+    await expect(prodWith([NEW], extra, undefined, stack)).rejects.toThrow(OwnershipError);
+  });
+
+  test.each([
+    ['a stage-shaped hostname', { ...NEW, hostname: 'app-basefresh.pebbletech.my' }, /shaped like a stage hostname/],
+    ["another stage's hostname", { ...NEW, hostname: 'app-basefresh-stg.pebbletech.my' }, /shaped like a stage/],
+    ['a hostname outside its zone', { ...NEW, hostname: 'new.other.my' }, /not in the zone pebbletech.my/],
+    ['a trailing dot', { ...NEW, hostname: 'new.pebbletech.my.' }, /not a lowercase domain name/],
+    ['upper case', { ...NEW, hostname: 'New.pebbletech.my' }, /not a lowercase domain name/],
+    ['a zone that is one label', { ...NEW, hostname: 'new.my', zoneName: 'my' }, /zone "my"/],
+    [
+      'the TXT with no zone of ours',
+      { hostname: 'client.com', zoneName: 'client.com', verificationTxt: true },
+      /pass it/,
+    ],
+  ])('refuses %s', async (_what, domain, message) => {
+    await expect(prodWith([domain])).rejects.toThrow(message);
+  });
+
+  test('refuses a hostname bound twice', async () => {
+    await expect(prodWith([NEW, { ...NEW }])).rejects.toThrow('hostname "new.pebbletech.my" is bound twice');
   });
 });
