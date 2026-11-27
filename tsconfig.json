@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/config" },
+    { "path": "./packages/cms" },
     { "path": "./packages/infra" },
     { "path": "./examples/basefresh" },
     { "path": "./examples/web-only" },

@@ -5,6 +5,7 @@ copying config and infrastructure code from base-app.
 
 | Package | What it carries |
 |---|---|
+| [`@pebbletech/cms`](packages/cms) | The Payload CMS wiring client sites share: `createCmsConfig()`, users and roles, media on R2, signed purge and preview links, and `@pebbletech/cms/site` for the marketing app |
 | [`@pebbletech/config`](packages/config) | base-app's tsconfig base, oxlint and oxfmt presets, and the lint-staged map |
 | [`@pebbletech/infra`](packages/infra) | Pulumi components for a product's `infra/` program (`Stage`, `VercelProject`, `Database`, `ApiFunction`, `Worker`, `DeployRole`, `Operators`), the `pebble-infra` CLI its workflows run, and `@pebbletech/infra/testing` |
 

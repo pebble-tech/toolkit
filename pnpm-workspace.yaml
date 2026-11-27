@@ -7,6 +7,9 @@ allowBuilds:
   # protobufjs (through @pulumi/pulumi) only prints a version-scheme warning from postinstall
   protobufjs: false
   simple-git-hooks: true
+  # esbuild (through payload's tsx and drizzle-kit, dev-only in @pebbletech/cms) only checks its platform binary from
+  # postinstall; the binary comes from its optional platform package either way
+  esbuild: false
 catalog:
   '@pulumi/pulumi': 3.271.0
   '@types/node': 24.19.2

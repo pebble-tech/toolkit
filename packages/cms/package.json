@@ -1,0 +1,75 @@
+{
+  "name": "@pebbletech/cms",
+  "version": "0.0.0",
+  "description": "Shared Payload CMS wiring for Pebble client sites: config, users, media, signed purge and preview",
+  "keywords": [
+    "payload",
+    "pebbletech"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pebble-tech/toolkit.git",
+    "directory": "packages/cms"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24.22.3"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./site": {
+      "types": "./dist/site.d.ts",
+      "import": "./dist/site.js",
+      "default": "./dist/site.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc --project tsconfig.build.json",
+    "prepack": "\"$npm_execpath\" run build"
+  },
+  "peerDependencies": {
+    "@payloadcms/db-postgres": "^3.94.2",
+    "@payloadcms/richtext-lexical": "^3.94.2",
+    "@payloadcms/storage-s3": "^3.94.2",
+    "payload": "^3.94.2"
+  },
+  "peerDependenciesMeta": {
+    "@payloadcms/db-postgres": {
+      "optional": true
+    },
+    "@payloadcms/richtext-lexical": {
+      "optional": true
+    },
+    "@payloadcms/storage-s3": {
+      "optional": true
+    },
+    "payload": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@payloadcms/db-postgres": "3.94.2",
+    "@payloadcms/richtext-lexical": "3.94.2",
+    "@payloadcms/storage-s3": "3.94.2",
+    "@types/node": "catalog:",
+    "@types/pg": "8.23.1",
+    "graphql": "16.10.0",
+    "payload": "3.94.2",
+    "pg": "8.23.1",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
