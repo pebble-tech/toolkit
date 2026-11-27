@@ -56,7 +56,13 @@ jobs:
           BUILD_ENV: ${{ inputs.build-env }}
         run: |
           node -e '
-            const env = JSON.parse(process.env.BUILD_ENV || "{}");
+            let env;
+            try {
+              env = JSON.parse(process.env.BUILD_ENV || "{}");
+            } catch {
+              console.error("build-env is not valid JSON");
+              process.exit(1);
+            }
             if (!env || typeof env !== "object" || Array.isArray(env)) {
               console.error("build-env is not a JSON object");
               process.exit(1);

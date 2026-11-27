@@ -192,6 +192,15 @@ export async function recheck(context, pr, sha) {
   return pull.state === 'open' && pull.head?.sha === sha && pull.head?.repo?.full_name === context.repository;
 }
 
+/** An artifact's JSON file, or a refusal that names the file and quotes none of it. */
+function parseFile(artifact, rel) {
+  try {
+    return JSON.parse(readFileSync(join(artifact, rel), 'utf8'));
+  } catch {
+    throw new Refusal(`${rel} in the artifact is not valid JSON`);
+  }
+}
+
 /**
  * A5: copies the artifact's Build Output into `<dir>/.vercel/output`, and nothing else into `<dir>`. Refuses a
  * symlink or anything but a file or directory, a path that leaves the artifact, a `.vercel` directory inside it, a
@@ -217,13 +226,13 @@ export function prepare(artifact, dir) {
     }
   };
   walk(artifact);
-  const config = files.includes('config.json') ? JSON.parse(readFileSync(join(artifact, 'config.json'), 'utf8')) : {};
+  const config = files.includes('config.json') ? parseFile(artifact, 'config.json') : {};
   if (config.version !== 3) throw new Refusal('the artifact has no Build Output config.json with version 3');
   const skipped = new Set(['builds.json', 'project.json', 'repo.json', 'README.txt']);
   const kept = files.filter((rel) => !skipped.has(rel));
   for (const rel of kept) {
     if (rel.split(sep).at(-1) !== '.vc-config.json') continue;
-    const fn = JSON.parse(readFileSync(join(artifact, rel), 'utf8'));
+    const fn = parseFile(artifact, rel);
     for (const key of ['filePathMap', 'environment']) {
       if (fn && typeof fn === 'object' && key in fn) throw new Refusal(`${rel} sets ${key}`);
     }
@@ -247,7 +256,14 @@ export const commandValue = (value) => value.replaceAll('%', '%25').replaceAll('
 /** D7: RUNTIME_ENV (a JSON object, secret) and RUNTIME_VARS (plain) as `--env KEY=VALUE` arguments, secrets masked. */
 export function runtimeEnv(secretJson, plainJson) {
   const parse = (what, json) => {
-    const value = JSON.parse(json || '{}');
+    // Never the parser's message: it quotes the input's first characters, which would print a secret before any
+    // add-mask line runs.
+    let value;
+    try {
+      value = JSON.parse(json || '{}');
+    } catch {
+      throw new Refusal(`${what} is not valid JSON`);
+    }
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Refusal(`${what} is not a JSON object`);
     for (const [key, item] of Object.entries(value)) {
       if (!KEY.test(key)) throw new Refusal(`${what} key ${JSON.stringify(key)} is not an env var name`);

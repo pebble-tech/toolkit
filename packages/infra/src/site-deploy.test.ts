@@ -971,6 +971,11 @@ describe('prepare', () => {
     ],
     ['no config.json', { 'static/index.html': 'x' }, 'no Build Output config.json with version 3'],
     ['config.json of another version', { ...OUTPUT, 'config.json': '{"version":2}' }, 'version 3'],
+    [
+      'a config.json that is not JSON',
+      { ...OUTPUT, 'config.json': 'secretish{' },
+      'config.json in the artifact is not valid JSON',
+    ],
   ])('refuses %s', async (_what, files, message) => {
     const to = mkdtempSync(join(tmpdir(), 'site-deploy-dir-'));
     const result = await script(['prepare', artifact(files), to], {});
@@ -1014,6 +1019,19 @@ describe('runtime-env', () => {
       0,
       '::add-mask::postgres://x y\n::add-mask::k1\n',
       ['--env', 'SITE_ENV=preview', '--env', 'DATABASE_URL=postgres://x y', '--env', 'API_KEY=k1'],
+    ]);
+  });
+
+  // The parser's own message quotes the input's first characters, before any add-mask line could hide them.
+  test('refuses a RUNTIME_ENV that is not JSON without printing any of it', async () => {
+    const secret = 'postgres://user:pw@host/db';
+    const result = await runtime(secret);
+    const printed = `${result.stdout}${result.stderr}`;
+    const prefixes = Array.from({ length: secret.length - 1 }, (_, i) => secret.slice(0, i + 2));
+    expect([result.code, result.stderr, prefixes.filter((prefix) => printed.includes(prefix))]).toEqual([
+      1,
+      expect.stringContaining('RUNTIME_ENV is not valid JSON'),
+      [],
     ]);
   });
 
@@ -1264,8 +1282,15 @@ describe("site-build's build-env step, run as the workflow runs it", () => {
     ['[]', 'build-env is not a JSON object'],
     ['null', 'build-env is not a JSON object'],
     ['{"NODE_OPTIONS":"--max-old-space-size=4096"}', 'build-env cannot set NODE_OPTIONS'],
+    ['postgres://user:pw@host/db', 'build-env is not valid JSON'],
   ])('refuses %s', async (value, message) => {
     const result = await buildEnv(value);
-    expect([result.code, result.stderr, result.env]).toEqual([1, expect.stringContaining(message), '']);
+    // Nothing of the value itself in the message: the parser's own would quote it.
+    expect([result.code, result.stderr, result.env, result.stderr.includes(value.slice(0, 10))]).toEqual([
+      1,
+      expect.stringContaining(message),
+      '',
+      false,
+    ]);
   });
 });
