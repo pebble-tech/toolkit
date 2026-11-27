@@ -1033,7 +1033,7 @@ What the deploy trusts, and what it does not:
 Inputs of `site-deploy.yml`: `toolkit-ref`, `build-workflow`, `vercel-project-id`, `vercel-team-id` (required);
 `vercel-environment` (`staging`; `production`, `preview` and `development` are refused), `artifact-name`
 (`site-output`), `alias-template`, `protected-hosts`, `runtime-vars` (plain runtime env, JSON), `runs-on` (JSON,
-`"ubuntu-latest"`), `vercel-cli-version`, `preview-environment` (`preview`), `staging-environment` (`staging`).
+`"ubuntu-latest"`), `vercel-cli-version`, `preview-environment` (`preview`), `staging-environment` (`staging`; the two must differ, and neither may be `production`).
 Secrets: `VERCEL_TOKEN` and `RUNTIME_ENV`, both environment secrets passed by name (optional at the call; the job
 fails without a token). Inputs of `site-build.yml`: `working-directory` (`apps/marketing`), `build-command`
 (`pnpm build`), `build-env` (plain JSON), `artifact-name`, `runs-on`. A repository with two sites (marketing and CMS)

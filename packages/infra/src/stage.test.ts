@@ -137,6 +137,9 @@ describe('Stage', () => {
       ['www.new.pebbletech.my', 'pebbletech.my'],
       ['site2.client.com.my', 'client.com.my'],
       ['my-brand.com', 'my-brand.com'],
+      // A zone whose name ends in a stage zone's name without the dot is not inside it.
+      ['new.xpebbletech.my', 'xpebbletech.my'],
+      ['xpebbletech.my', 'xpebbletech.my'],
     ];
     expect(() => {
       for (const [host, zone] of accepted) stage.assertCustomHostname(host!, zone!);

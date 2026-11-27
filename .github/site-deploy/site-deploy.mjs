@@ -126,6 +126,24 @@ export async function tip(context, sha) {
   return branch.commit?.sha === sha;
 }
 
+/**
+ * The two GitHub environments must differ (each holds its own token and runtime env), and neither may be production's:
+ * site-deploy never runs where production secrets live.
+ */
+export function environments(preview, staging) {
+  for (const [what, name] of [
+    ['preview-environment', preview],
+    ['staging-environment', staging],
+  ]) {
+    if (!name) throw new Refusal(`${what} is not set`);
+    if (name.toLowerCase() === 'production')
+      throw new Refusal(`${what} is ${name}: site-deploy never runs in production`);
+  }
+  if (preview.toLowerCase() === staging.toLowerCase()) {
+    throw new Refusal(`preview-environment and staging-environment are both ${preview}: each needs its own`);
+  }
+}
+
 /** D2: the ids main passes must look like Vercel's, so an empty or mistyped variable is a refusal, not a guess. */
 export function vercelIds(projectId, teamId) {
   if (!/^prj_[A-Za-z0-9]+$/.test(projectId ?? ''))
@@ -272,6 +290,7 @@ async function main([command, ...args]) {
     case 'decide': {
       const event = JSON.parse(readFileSync(env('GITHUB_EVENT_PATH'), 'utf8'));
       vercelIds(process.env.VERCEL_PROJECT_ID, process.env.VERCEL_ORG_ID);
+      environments(process.env.PREVIEW_ENVIRONMENT, process.env.STAGING_ENVIRONMENT);
       if (args[0] === 'staging') stagingEnvironment(env('VERCEL_ENVIRONMENT'));
       const decision = await decide(args[0], event, context);
       output(decision);

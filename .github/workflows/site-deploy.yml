@@ -131,6 +131,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           VERCEL_PROJECT_ID: ${{ inputs.vercel-project-id }}
           VERCEL_ORG_ID: ${{ inputs.vercel-team-id }}
+          PREVIEW_ENVIRONMENT: ${{ inputs.preview-environment }}
+          STAGING_ENVIRONMENT: ${{ inputs.staging-environment }}
         run: node "$TOOLKIT/site-deploy.mjs" decide preview
 
       # The token is an environment secret: present only because this job runs in its environment. Its absence is a
@@ -289,6 +291,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           VERCEL_PROJECT_ID: ${{ inputs.vercel-project-id }}
           VERCEL_ORG_ID: ${{ inputs.vercel-team-id }}
+          PREVIEW_ENVIRONMENT: ${{ inputs.preview-environment }}
+          STAGING_ENVIRONMENT: ${{ inputs.staging-environment }}
         run: node "$TOOLKIT/site-deploy.mjs" decide staging
 
       # The token is an environment secret: present only because this job runs in its environment. Its absence is a

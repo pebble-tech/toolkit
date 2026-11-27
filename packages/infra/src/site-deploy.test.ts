@@ -121,13 +121,22 @@ function violations(build: Workflow, deploy: Workflow): string[] {
     if (JSON.stringify(clauses.sort()) !== JSON.stringify([...expected].sort())) {
       found.push(`${where}: its job-level if is not exactly ${expected.join(' && ')}`);
     }
-    if (!job.environment) found.push(`${where}: no environment`);
+    if (job.environment !== `\${{ inputs.${id}-environment }}`) {
+      found.push(`${where}: its environment is ${job.environment}, not its own input ${id}-environment`);
+    }
     if (JSON.stringify(job.permissions) !== JSON.stringify(permissions)) {
       found.push(`${where}: permissions ${JSON.stringify(job.permissions)}`);
     }
     const steps = job.steps ?? [];
     const index = (key: string) => steps.findIndex((s) => s.id === key || s.name?.startsWith(key));
     // F9: the toolkit ref is checked before it is checked out; the CLI is installed before the artifact arrives.
+    if (!step(job, 'The toolkit ref')?.run?.includes('[[ ! "$TOOLKIT_REF" =~ ^[0-9a-f]{40}$ ]]')) {
+      found.push(`${where}: toolkit-ref is not checked against ^[0-9a-f]{40}$`);
+    }
+    for (const name of ['PREVIEW_ENVIRONMENT', 'STAGING_ENVIRONMENT']) {
+      const input = `\${{ inputs.${name.split('_')[0]!.toLowerCase()}-environment }}`;
+      if (step(job, 'decide')?.env?.[name] !== input) found.push(`${where}: decide does not get ${name}`);
+    }
     if (!(index('The toolkit ref is a full commit sha') >= 0 && index('The toolkit ref') < index('Check out'))) {
       found.push(`${where}: toolkit-ref is not checked before the checkout`);
     }
@@ -293,6 +302,38 @@ describe('the site workflows', () => {
       'reaches the Vercel CLI',
     ],
     ['no concurrency', (_b, d) => delete d.jobs.preview!.concurrency, 'site-deploy#preview: no concurrency'],
+    // R2-1
+    [
+      "the preview job in staging's environment",
+      (_b, d) => (d.jobs.preview!.environment = '${{ inputs.staging-environment }}'),
+      'site-deploy#preview: its environment is ${{ inputs.staging-environment }}, not its own input preview-environment',
+    ],
+    [
+      'the staging job in a literal environment',
+      (_b, d) => (d.jobs.staging!.environment = 'staging'),
+      'site-deploy#staging: its environment is staging',
+    ],
+    [
+      'no token check in the preview job',
+      (_b, d) =>
+        (d.jobs.preview!.steps = d.jobs.preview!.steps!.filter((s) => !s.name?.startsWith('The Vercel token'))),
+      'site-deploy#preview: no check that the environment holds VERCEL_TOKEN',
+    ],
+    [
+      'a looser toolkit-ref check in staging',
+      (_b, d) => (st(d, 'The toolkit ref').run = st(d, 'The toolkit ref').run!.replace('{40}', '+')),
+      'site-deploy#staging: toolkit-ref is not checked against',
+    ],
+    [
+      'a looser toolkit-ref check in preview',
+      (_b, d) => (p(d, 'The toolkit ref').run = p(d, 'The toolkit ref').run!.replace('^[0-9a-f]', '^[0-9a-z]')),
+      'site-deploy#preview: toolkit-ref is not checked against',
+    ],
+    [
+      'decide without the environment names',
+      (_b, d) => delete st(d, 'decide').env!.STAGING_ENVIRONMENT,
+      'site-deploy#staging: decide does not get STAGING_ENVIRONMENT',
+    ],
     // F1
     [
       'a required token',
@@ -511,6 +552,8 @@ async function script(args: string[], env: Record<string, string>, event?: unkno
         BUILD_WORKFLOW: '.github/workflows/site-build.yml',
         VERCEL_PROJECT_ID: 'prj_abc123',
         VERCEL_ORG_ID: 'team_abc123',
+        PREVIEW_ENVIRONMENT: 'preview',
+        STAGING_ENVIRONMENT: 'staging',
         ...env,
       },
     });
@@ -600,6 +643,47 @@ describe('decide: the Vercel ids main passes', () => {
   });
 });
 
+describe('decide: the GitHub environments', () => {
+  const routes = {
+    [`GET /repos/${REPO}/actions/runs/4242`]: runPayload(),
+    [`GET /repos/${REPO}/commits/${SHA}/pulls`]: [pull(17)],
+  };
+  test.each([
+    ['the same environment twice', { STAGING_ENVIRONMENT: 'preview' }, 'are both preview: each needs its own'],
+    ['the same environment in another case', { STAGING_ENVIRONMENT: 'Preview' }, 'are both preview'],
+    [
+      'production as the preview environment',
+      { PREVIEW_ENVIRONMENT: 'production' },
+      'preview-environment is production',
+    ],
+    [
+      'Production as the staging environment',
+      { STAGING_ENVIRONMENT: 'Production' },
+      'staging-environment is Production',
+    ],
+    [
+      'PRODUCTION as the staging environment',
+      { STAGING_ENVIRONMENT: 'PRODUCTION' },
+      'staging-environment is PRODUCTION',
+    ],
+    ['no staging environment', { STAGING_ENVIRONMENT: '' }, 'staging-environment is not set'],
+  ])('refuses %s', async (_what, env, message) => {
+    api = { routes, calls: [] };
+    const result = await script(['decide', 'preview'], env, { workflow_run: runPayload() });
+    expect([result.code, result.stderr, result.outputs]).toEqual([1, expect.stringContaining(message), {}]);
+  });
+
+  test('takes two distinct environments per app', async () => {
+    api = { routes, calls: [] };
+    const result = await script(
+      ['decide', 'preview'],
+      { PREVIEW_ENVIRONMENT: 'preview-marketing', STAGING_ENVIRONMENT: 'staging-marketing' },
+      { workflow_run: runPayload() }
+    );
+    expect([result.code, result.outputs.deploy]).toEqual([0, 'true']);
+  });
+});
+
 describe('decide: staging', () => {
   const push = () => runPayload({ event: 'push', head_branch: 'main' });
   const routes = (tip: string) => ({
@@ -635,6 +719,18 @@ describe('decide: staging', () => {
       return (await script(['tip'], { DEFAULT_BRANCH: 'main', SHA })).outputs.current;
     };
     expect([await outcome(SHA), await outcome(OTHER)]).toEqual(['true', 'false']);
+  });
+
+  test('tip reads the default branch the event names, such as trunk, not main', async () => {
+    api = {
+      routes: {
+        [`GET /repos/${REPO}/branches/trunk`]: { commit: { sha: SHA } },
+        [`GET /repos/${REPO}/branches/main`]: { commit: { sha: OTHER } },
+      },
+      calls: [],
+    };
+    const result = await script(['tip'], { DEFAULT_BRANCH: 'trunk', SHA });
+    expect([result.outputs.current, api.calls.map((c) => c.path)]).toEqual(['true', [`/repos/${REPO}/branches/trunk`]]);
   });
 
   test("deploys a push build whose sha is the default branch's tip", async () => {
