@@ -140,7 +140,8 @@ export interface ProductionDomain {
   zoneId?: pulumi.Input<string>;
   /**
    * Make the `_vercel.<zoneName>` TXT record Vercel asks for to verify the hostname, in `zoneId`'s zone. Default
-   * false; turn it on when the domain shows a TXT challenge (`verification`). Needs `zoneId`.
+   * false; turn it on while the domain shows a TXT challenge (`verification`), and off once it is verified: with no
+   * challenge listed the preview fails, and turning it off leaves the record in the zone. Needs `zoneId`.
    */
   verificationTxt?: boolean;
 }
@@ -410,21 +411,25 @@ function productionDomain(name: string, spec: ProductionDomain, context: DomainC
   }
   const txtName = `_vercel.${zoneName}`;
   if (zoneId && spec.verificationTxt) {
-    // Vercel lists the challenge until the hostname is verified, then none: the record keeps the value it was made
-    // with (`ignoreChanges`), and a hostname with no challenge and not verified is a refusal, not an empty record.
+    // The record exists to answer a challenge Vercel lists. A hostname with no TXT challenge is a refusal, never an
+    // empty record: not verified, Vercel asks for something else; verified (also on a first release, when Vercel
+    // verified it on its own), there is nothing to answer, and the flag goes off. Turning it off drops the record from
+    // the state and leaves it in the zone: it is retained and, unlike the stage's other prod records, not protected, so
+    // dropping it is not a refused delete.
     const content = pulumi.all([domain.verifications, domain.verified]).apply(([challenges, verified]) => {
       const challenge = (challenges ?? []).find((c) => c.type === 'TXT' && c.domain.replace(/\.$/, '') === txtName);
-      if (!challenge && !verified) {
-        throw new OwnershipError(
-          `Vercel lists no ${txtName} TXT challenge for "${hostname}": turn \`verificationTxt\` off`
-        );
-      }
-      return challenge?.value as string;
+      if (challenge) return challenge.value;
+      throw new OwnershipError(
+        verified
+          ? `"${hostname}" is verified and Vercel lists no ${txtName} challenge: turn \`verificationTxt\` off ` +
+              '(a record made earlier stays in the zone)'
+          : `Vercel lists no ${txtName} TXT challenge for "${hostname}": turn \`verificationTxt\` off`
+      );
     });
     new cloudflare.DnsRecord(
       `${name}-vercel-txt-${hostname}`,
       { zoneId, name: txtName, type: 'TXT', content, ttl: 1 },
-      child({ ignoreChanges: ['content'] })
+      { ...child(), protect: false, retainOnDelete: true }
     );
   }
   // An apex in a client's zone gets Vercel's A records, unless a fixed CNAME target is given: then the client's DNS

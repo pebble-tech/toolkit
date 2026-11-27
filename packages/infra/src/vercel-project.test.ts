@@ -447,10 +447,10 @@ describe('VercelProject production domains (custom and apex hostnames on prod)',
           content: 'vc-domain-verify=pebbletech.my,abc123',
           ttl: 1,
         },
-        true,
+        false,
         true,
         false,
-        ['content'],
+        [],
       ],
     ]);
   });
@@ -534,10 +534,11 @@ describe('VercelProject production domains (custom and apex hostnames on prod)',
     ]);
   });
 
-  test('a verified hostname with the TXT on keeps the record it made: no refusal, the content is left to state', async () => {
-    const { resources } = await prodWith([APEX], {}, { 'pebbletech.my': true });
-    const txt = resources.find((r) => r.name === 'web-vercel-txt-pebbletech.my')!;
-    expect([txt.ignoreChanges, txt.inputs.content]).toEqual([['content'], undefined]);
+  // Also a first release: Vercel can verify a hostname on its own, and then lists no challenge to answer.
+  test('refuses the TXT for a verified hostname, saying to turn it off, rather than make an empty record', async () => {
+    await expect(prodWith([APEX], {}, { 'pebbletech.my': true })).rejects.toThrow(
+      '"pebbletech.my" is verified and Vercel lists no _vercel.pebbletech.my challenge: turn `verificationTxt` off'
+    );
   });
 
   test('refuses the TXT when Vercel lists no challenge and the hostname is not verified', async () => {

@@ -484,10 +484,11 @@ Outputs (both only when `productionDomains` is set, so a program that does not u
 
 Resource names carry the hostname, never a list index: `<name>-domain-<hostname>`, `<name>-cname-<hostname>`,
 `<name>-vercel-txt-<hostname>`. Adding, removing or reordering one hostname leaves every other in place, and the stage
-domain keeps `<name>-domain` and `<name>-cname`. The TXT record keeps the value it was made with
-(`ignoreChanges: ['content']`), since Vercel lists no challenge once the hostname is verified; with `verificationTxt` on
-and no challenge listed for an unverified hostname, the preview fails rather than make an empty record. A new
-challenge on a verified hostname needs `pulumi up --replace <the TXT record's URN>`.
+domain keeps `<name>-domain` and `<name>-cname`. The TXT record answers the challenge Vercel lists, and follows it
+if Vercel issues a new one. With `verificationTxt` on and no TXT challenge listed, the preview fails rather than make
+an empty record, whether the hostname is unverified or already verified (also on its first release, when Vercel
+verified it on its own): turn the flag off once the hostname is verified. The record is retained and not protected,
+so turning the flag off drops it from the state and leaves it in the zone.
 
 Hand steps:
 
