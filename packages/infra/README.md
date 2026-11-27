@@ -6,7 +6,7 @@ pinning a version; the guardrails are defaults it cannot turn off.
 | Component | Creates | Refuses |
 |---|---|---|
 | `Stage` | nothing; parses the stack name and names, tags and protects everything else | a product id that is not one DNS label, is `pebble`, or is `pr`/`staging`/`prod`/`shared`; a kind that is not one DNS label; any stack other than `pr-<n>`, `staging`, `prod`, `shared` |
-| `VercelProject` | `shared`: the project (no Git connection, private source, Vercel Authentication on previews, Node `24.x` unless `nodeVersion` names another, Skew Protection at 12 hours unless `skewProtection` names another age or `false` ([Skew Protection](#skew-protection))), custom environments, the protection bypass, and a placeholder deployment so a pull request's preview is never the project's first deployment ([First deployment](#first-deployment)). `staging`/`prod`: env vars (secrets `sensitive`), the domain bound to the stage's environment (replaced delete-first, because a hostname is on one project: a new `projectId` leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname), an unproxied Cloudflare CNAME (not the `_vercel` TXT record Vercel may ask for: [Verify a Vercel domain](#verify-a-vercel-domain)) | previews; the project outside `shared`; env vars or domains on `shared`; a secret-looking name in `vars` |
+| `VercelProject` | `shared`: the project (no Git connection, private source, Vercel Authentication on previews, Node `24.x` unless `nodeVersion` names another, Skew Protection at 12 hours unless `skewProtection` names another age or `false` ([Skew Protection](#skew-protection))), custom environments, the protection bypass, and a placeholder deployment so a pull request's preview is never the project's first deployment ([First deployment](#first-deployment)). `staging`/`prod`: env vars (secrets `sensitive`), the domain bound to the stage's environment (replaced delete-first, because a hostname is on one project: a new `projectId` leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname), an unproxied Cloudflare CNAME (not the `_vercel` TXT record Vercel may ask for: [Verify a Vercel domain](#verify-a-vercel-domain)). `prod`: custom and apex `productionDomains` with their CNAMEs, an opt-in `_vercel` TXT, and the `clientDnsRecords` and `verification` outputs ([Custom and apex domains](#custom-and-apex-domains)) | previews; the project outside `shared`; env vars or domains on `shared`; a secret-looking name in `vars`; `productionDomains` outside `prod`, outside their zone, with a hyphen below the zone, named twice, or in a `zoneId` whose zone is not `zoneName` |
 | `Database` | an explicit Postgres provider on port 5432 with `sslmode=verify-full`, the owner login role, the database owned by it, the owner's grant to `pebble_operators`, the `public` revoke, and on staging/prod the runtime role (made, unless `runtime` names one) and its grants; `directUrl` (owner) and `pooledUrl` (runtime) as secrets. See [Database](#database) | any `owner*` argument; `runtime` on a preview; a runtime role that is the owner or the operators group; a database or owner name longer than 63 characters. The names are always derived from `stage.databaseName()` |
 | `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, a CloudWatch alarm on the function's errors (see [Errors alarm](#errors-alarm); `alarm: false` opts out), HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; a boundary other than the stage's own `<product>-<env>-boundary` in the current account (a typed `PermissionsBoundaryArn` from `Stage` or `DeployRole`, checked when it resolves, so `pulumi preview` fails). Timeouts above 29 s are clamped |
 | `Worker` | Workers script from a prebuilt module with Workers observability on (`headSamplingRate`, 0 to 1, default 1: every request), R2 bucket `<product>-<env>-<kind>` (on prod, `adoptExisting` imports that same name instead of creating it), plain and secret bindings, custom domain (replaced delete-first, because a hostname has one custom domain: a new script name leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname) | a secret-looking name in `vars` unless listed in `plainTextAllowed`; `adoptExisting` outside prod |
@@ -368,11 +368,92 @@ What a product needs besides the setting:
 
 ### Verify a Vercel domain
 
-`VercelProject` creates the CNAME but not the TXT record Vercel asks for when it cannot verify a hostname on its own
-(for example when the apex is in use elsewhere in Vercel). After the first `staging` or `prod` release that binds the
-domain, open the project's Settings, Domains in Vercel: if the domain shows a TXT record to add, add that record, name
-`_vercel` on the apex and the value Vercel shows, unproxied, in the apex's Cloudflare zone. Making it automatic is
-TEC-432's follow-up card.
+For the stage domain (`domain`), `VercelProject` creates the CNAME but not the TXT record Vercel asks for when it cannot
+verify a hostname on its own (for example when the apex is in use elsewhere in Vercel). After the first `staging` or
+`prod` release that binds the domain, open the project's Settings, Domains in Vercel: if the domain shows a TXT record
+to add, add that record, name `_vercel` on the apex and the value Vercel shows, unproxied, in the apex's Cloudflare
+zone.
+
+For a production domain (`productionDomains`, [Custom and apex domains](#custom-and-apex-domains)) Pulumi can make it:
+the `verification` output lists the challenges Vercel returns for each hostname. When one shows a `TXT` challenge on
+`_vercel.<zone>`, set `verificationTxt: true` on that hostname (its zone must be ours, `zoneId`) and release again:
+`<name>-vercel-txt-<hostname>` holds the challenge's value. For a client's zone, add what `clientDnsRecords` lists.
+
+### Custom and apex domains
+
+`productionDomains` (on `prod` only) binds hostnames outside the stage shape to production: a name in a zone, such as
+`new.pebbletech.my`, or the zone's apex, `pebbletech.my`. Staging and previews keep the stage-shaped rule
+(`assertOwnsHostname`) and cannot claim a production name. `Stage.assertCustomHostname(hostname, zoneName)` is the
+rule a production domain passes: a lowercase domain name that is `zoneName` or inside it, with no hyphen in any label
+below the zone, since every stage hostname's first label is `<kind>-<product>[-<suffix>]`.
+
+```ts
+new VercelProject('web', {
+  stage,
+  projectId: project.id,
+  domain: { hostname: stage.hostname('www', 'pebbletech.my'), zoneId },
+  productionDomains: [
+    { hostname: 'new.pebbletech.my', zoneName: 'pebbletech.my', zoneId },
+    { hostname: 'pebbletech.my', zoneName: 'pebbletech.my', zoneId, verificationTxt: true },
+    // A client's zone: no zoneId, so Pulumi makes no DNS; clientDnsRecords lists what to add there.
+    { hostname: 'www.client.com', zoneName: 'client.com' },
+  ],
+});
+```
+
+For each hostname: a `vercel.ProjectDomain` on `production`, replaced delete-first, protected and not retained, like
+the stage domain. With `zoneId`, an unproxied CNAME to Vercel's recommended target, in the zone, named the hostname: on
+the apex the record's name is the zone's full name, and Cloudflare flattens the CNAME. `zoneName` is checked against
+the zone `zoneId` names (`cloudflare.getZone`, so the Cloudflare token needs Zone Read): a mismatch fails the preview,
+and the domain and its records wait on that check. Without `zoneId`, nothing is made in DNS.
+
+Outputs (both only when `productionDomains` is set, so a program that does not use it registers what it did before):
+
+- `clientDnsRecords`: `{ hostname, type, name, value }` per record a client's zone needs: the CNAME (for an apex
+  without `zoneId`, Vercel's recommended A records instead), and every challenge Vercel lists.
+- `verification`: Vercel's ownership challenges, by hostname; empty once a hostname is verified.
+
+Resource names carry the hostname, never a list index: `<name>-domain-<hostname>`, `<name>-cname-<hostname>`,
+`<name>-vercel-txt-<hostname>`. Adding, removing or reordering one hostname leaves every other in place, and the stage
+domain keeps `<name>-domain` and `<name>-cname`. The TXT record keeps the value it was made with
+(`ignoreChanges: ['content']`), since Vercel lists no challenge once the hostname is verified; with `verificationTxt` on
+and no challenge listed for an unverified hostname, the preview fails rather than make an empty record. A new
+challenge on a verified hostname needs `pulumi up --replace <the TXT record's URN>`.
+
+Hand steps:
+
+- **Apex with an existing record.** Cloudflare refuses a CNAME beside another record of that name: an existing apex
+  A, AAAA or CNAME (a parked page, an old host) conflicts with the new CNAME. Delete it in Cloudflare right before the
+  release that adds the apex (the apex is unserved until that release's CNAME is in place). An existing apex CNAME can
+  be adopted instead: `pulumi import cloudflare:index/dnsRecord:DnsRecord '<name>-cname-<apex>' '<zone id>/<record id>'
+  --parent '<the VercelProject URN>' -s prod`, after which the release updates its target in place. An A record cannot:
+  a type change replaces the record, and the new one is created before the old is deleted.
+- **Moving `new.` to the apex.** Add the apex hostname first and release; check it serves; then remove `new.` from the
+  list and release again (it is protected on prod: [Remove a protected prod resource](#remove-a-protected-prod-resource)).
+  Doing both in one release would leave the site unserved between the delete and the apex's DNS taking effect.
+
+#### A project-scoped Vercel token
+
+A Vercel token can be scoped to one project. A stack that holds two projects (a marketing site and a CMS) gives each
+`VercelProject` its own provider through the component's `providers` option; every Vercel resource and lookup under it
+uses that provider, and Cloudflare stays on the program's default:
+
+```ts
+const marketing = new vercel.Provider('vercel-marketing', { apiToken: marketingToken, team: teamId });
+const cms = new vercel.Provider('vercel-cms', { apiToken: cmsToken, team: teamId });
+new VercelProject('site', { stage, projectId: siteId, cnameTarget: 'cname.vercel-dns.com', ... }, { providers: [marketing] });
+new VercelProject('cms', { stage, projectId: cmsId, cnameTarget: 'cname.vercel-dns.com', ... }, { providers: [cms] });
+```
+
+A provider is not part of a URN, so moving an existing project to its own provider changes no resource name; the
+preview shows the provider change. `cnameTarget` fixes every CNAME's target and skips `getDomainConfig`, a lookup a
+project-scoped token may not be allowed to make; without it each CNAME is Vercel's recommendation for its hostname.
+
+What may still need a team-scoped token, as far as the provider and CLI show (none of it checked against Vercel):
+creating the project, its custom environments and the protection bypass (`shared`), `getDomainConfig`, adding a
+domain the team has not verified, reading `ProjectDomain.verifications`, and aliasing a custom domain with
+`vercel alias set`. Deploys, env vars and a `*.vercel.app` alias need the project only, if Vercel scopes them as it
+documents.
 
 ### Remove a protected prod resource
 
@@ -827,6 +908,76 @@ which Renovate's npm manager already bumps.
 }
 ```
 
+## Site deploy workflows
+
+Two reusable workflows build and deploy a site to Vercel from the product's own Actions (no Vercel Git integration):
+
+- `.github/workflows/site-build.yml` builds `.vercel/output` and uploads it as an artifact. It gets no secrets and
+  `contents: read` only, so it runs on every pull request, a fork's included. Package manager steps come from the
+  `setup` action with `pulumi: false`.
+- `.github/workflows/site-deploy.yml` deploys it: a pull request's build as a preview (`--environment=preview`, the
+  CLI's current spelling of `--target=preview`), a push to the default branch to the `staging` custom environment.
+  Nothing here deploys to production, promotes or runs `--prod`; production stays the release workflow's.
+
+A `workflow_run` trigger cannot be reusable, so the product holds two thin stubs: copy
+[`.github/site-deploy/stubs/site-build.yml`](../../.github/site-deploy/stubs/site-build.yml) and
+[`site-deploy.yml`](../../.github/site-deploy/stubs/site-deploy.yml) into its `.github/workflows/`, and pin both at
+the commit tagged `@pebbletech/infra@<version>`. The deploy stub passes that same SHA as `toolkit-ref`: the deploy
+checks out the toolkit's `.github/site-deploy/` there and runs its script and its locked Vercel CLI from it. A reusable
+workflow cannot `uses: ./`, and `uses:` takes no expression, so `site-build.yml` pins the `setup` action at a fixed
+toolkit commit (bumped with the toolkit, like any pin). `workflow_run` runs the default branch's copy of the stub, so a
+pull request cannot change what deploys it.
+
+What the deploy trusts, and what it does not:
+
+- **The artifact is data.** It is downloaded by the triggering run's id and copied into a fresh directory that holds
+  only `.vercel/output`: no install, no `node` or `pnpm` on its files, no `package.json` or lifecycle script from it.
+  The prep refuses a symlink, a path that leaves the artifact, a `.vercel` directory inside the output, a function
+  `.vc-config.json` with `filePathMap` or `environment`, and an output with no version 3 `config.json`; it leaves out
+  `builds.json` and any `project.json`.
+- **Ids come from main.** `vercel-project-id` and `vercel-team-id` are the stub's inputs, passed as
+  `VERCEL_PROJECT_ID` and `VERCEL_ORG_ID`; the token is the `vercel-token` secret, as `VERCEL_TOKEN`. There is no
+  `vercel link`, `vercel pull` or `--scope`, so a token scoped to the one project works for the deploy.
+- **The run is checked.** The jobs' `if:` (before `environment:`: under `workflow_run`, `github.ref` is the default
+  branch, so an environment's branch policy isolates nothing) takes only a successful build of this repository, never
+  a fork's. The script then refuses a run whose path is not `build-workflow`, re-reads the run from the API and refuses
+  any difference, and skips (does not fail) a preview whose PR is closed or has a newer head, or a staging build whose
+  SHA is no longer the default branch's tip. Staging is decided from the event and the tip, never `head_branch`. The PR
+  number comes from the API; it is checked again right before the alias and the comment.
+- **The alias is main's.** `alias-template` (`marketing-pr-{pr}.vercel.app`) must come out as `<name>-pr-<n>.vercel.app`
+  for the verified PR number, and none of `protected-hosts`.
+- **The CLI is locked.** It is installed with `npm ci --ignore-scripts` from `.github/site-deploy/vercel/package-lock.json`;
+  `vercel-cli-version` must be the version it locks.
+
+Inputs of `site-deploy.yml`: `toolkit-ref`, `build-workflow`, `vercel-project-id`, `vercel-team-id` (required);
+`vercel-environment` (`staging`; `production`, `preview` and `development` are refused), `artifact-name`
+(`site-output`), `alias-template`, `protected-hosts`, `runtime-vars` (plain runtime env, JSON), `runs-on` (JSON,
+`"ubuntu-latest"`), `vercel-cli-version`, `preview-environment` (`preview`), `staging-environment` (`staging`).
+Secrets: `vercel-token` (required), `RUNTIME_ENV` (optional). Inputs of `site-build.yml`: `working-directory`
+(`apps/marketing`), `build-command` (`pnpm build`), `build-env` (plain JSON), `artifact-name`, `runs-on`. A repository
+with two sites (marketing and CMS) calls each workflow once per app, with its own `artifact-name`, project id and
+token.
+
+Runtime env: `RUNTIME_ENV` is one JSON object, each value masked in the log and passed as `vercel deploy --env`.
+Set it as a secret of the job's GitHub environment (`preview`, `staging`); an environment secret wins over one the
+caller passes, and the caller cannot read environment secrets. Preview runtime env is readable by the code of every
+same-repo pull request, since that code runs in the preview: keep production secrets out of the `preview`
+environment.
+
+Permissions: the stubs set `permissions: {}`; the build job gets `contents: read`, the deploy job `actions: read`
+(the run and its artifact), `contents: read` and `pull-requests: write` (the comment). Each toolkit job lists its own.
+
+For base-app (TEC-401) this covers the deploy side and a build that needs no secrets. base-app's build today does not
+fit `site-build`: it runs `vercel pull` and `vercel build` with the Vercel token, and its production build reads
+`SENTRY_AUTH_TOKEN` (source map upload) at build time, and its preview job passes `AI_GATEWAY_API_KEY`. `site-build`
+forbids secrets by design, so base-app adopts it only once its build needs none (source maps uploaded from a later,
+trusted step, for example) and produces `.vercel/output` without `vercel pull`.
+
+What a project-scoped token may not cover is listed under
+[A project-scoped Vercel token](#a-project-scoped-vercel-token); `vercel alias set` on a `*.vercel.app` name and
+`vercel deploy --prebuilt` with `VERCEL_ORG_ID`/`VERCEL_PROJECT_ID` are expected to need the project only, and were not
+run against Vercel here.
+
 ## Test a program
 
 `@pebbletech/infra/testing` runs a program against Pulumi's mocks and returns every registered resource with the
@@ -840,6 +991,10 @@ import { runProgram } from '@pebbletech/infra/testing';
 const { resources } = await runProgram({ project: 'basefresh', stack: 'prod' }, () => program());
 expect(resources.filter((r) => r.type === 'aws:lambda/function:Function' && !r.protect)).toEqual([]);
 ```
+
+Each registration also names the `provider` it was sent with (empty for the default one). A program with
+`productionDomains` and a `zoneId` looks its zone up (`cloudflare:index/getZone:getZone`), which the default mocks do
+not answer with a name: wrap `defaultMocks.call` to return `{ id, name }` for the zone, or the check refuses it.
 
 [`examples/basefresh`](https://github.com/pebble-tech/toolkit/tree/main/examples/basefresh) is a whole product program
 with its tests.

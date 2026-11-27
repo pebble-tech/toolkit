@@ -38,7 +38,10 @@ only its state path and KMS key. A staging or prod deploy role works only on HTT
 product composes 0.4: the program, its entries module, `pebble-infra`, the `setup` and `pulumi` actions in
 [.github/actions](.github/actions), the workflow checks and the Renovate group. [examples/web-only](examples/web-only)
 is a web-only product's program and production workflow; [examples/basefresh](examples/basefresh) is a whole product
-program with its three workflows, all tested.
+program with its three workflows, all tested. A site's previews and staging deploys come from two reusable workflows,
+[site-build](.github/workflows/site-build.yml) and [site-deploy](.github/workflows/site-deploy.yml), called from
+copyable stubs ([.github/site-deploy/stubs](.github/site-deploy/stubs)); packages/infra/README.md "Site deploy
+workflows" has how.
 
 Two Pulumi programs here belong to no product and are applied by hand: [bootstrap/](bootstrap/README.md), each AWS
 account's shared bootstrap (GitHub OIDC provider, state bucket, state KMS keys, alarm topic), once per account; and
