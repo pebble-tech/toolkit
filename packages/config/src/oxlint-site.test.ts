@@ -5,26 +5,76 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { beforeAll, describe, expect, test } from 'vitest';
 
-// Lints a site repo laid out the way the README describes (the package installed under node_modules, the
-// README's oxlint.config.ts at the root) with the pinned oxlint CLI, and reads which files break which rule.
+// Lints a site repo laid out the way the README describes (the package installed under node_modules, a config at
+// the root) with the pinned oxlint CLI, and reads which files break which rule.
 const packageDir = join(import.meta.dirname, '..');
 const oxlintBin = join(dirname(createRequire(import.meta.url).resolve('oxlint/package.json')), 'bin', 'oxlint');
 
-const consumerConfig = `import base from '@pebbletech/config/oxlint.json' with { type: 'json' };
+// The README's config: oxlint reads ignorePatterns only from the root config, so the site spreads the preset.
+const consumerConfig = {
+  'oxlint.config.ts': `import base from '@pebbletech/config/oxlint.json' with { type: 'json' };
 import site from '@pebbletech/config/oxlint-site.json' with { type: 'json' };
 
 export default { ...site, extends: [base] };
-`;
+`,
+};
 
-const confinedImports = `import Link from 'next/link';
+// A plain extends: the rules arrive, through the preset's own extends of oxlint.json too, but its ignores do not.
+const extendsConfig = {
+  '.oxlintrc.json': JSON.stringify({ extends: ['./node_modules/@pebbletech/config/oxlint-site.json'] }),
+};
+
+const confinedImports = `import 'next';
+import Link from 'next/link';
+import NextLink from 'next/dist/client/link';
 import { getPayload } from 'payload';
+import { sanitizeConfig } from 'payload/shared';
 import { postgresAdapter } from '@payloadcms/db-postgres';
+import { RichText } from '@payloadcms/richtext-lexical/react';
+import { RootPage } from '@payloadcms/next/views';
 import { useTheme } from 'next-themes';
+import NextAuth from 'next-auth';
+import { Post } from 'payload-types';
+import payloadcms from 'payloadcms';
+import nextjs from 'nextjs';
 
-export const used = [Link, getPayload, postgresAdapter, useTheme];
+export const used = [
+  Link,
+  NextLink,
+  getPayload,
+  sanitizeConfig,
+  postgresAdapter,
+  RichText,
+  RootPage,
+  useTheme,
+  NextAuth,
+  Post,
+  payloadcms,
+  nextjs,
+];
 `;
+
+const confined = [
+  '@payloadcms/db-postgres',
+  '@payloadcms/next/views',
+  '@payloadcms/richtext-lexical/react',
+  'next',
+  'next/dist/client/link',
+  'next/link',
+  'payload',
+  'payload/shared',
+].map((source) => `eslint(no-restricted-imports): '${source}' import is restricted from being used by a pattern.`);
 
 const looseEquality = 'export const same = (a, b) => a == b;\n';
+const eqeqeq = 'eslint(eqeqeq): Expected === and instead saw ==';
+
+// Outside apps/cms, including directories whose names only start with or end in cms.
+const outsideCms = [
+  'apps/marketing/src/page.tsx',
+  'packages/x/src/index.ts',
+  'packages/cms/src/index.ts',
+  'apps/cms-admin/src/index.ts',
+];
 
 // Each of these would be reported if it were linted: the base preset's eqeqeq applies everywhere.
 const ignored = [
@@ -39,71 +89,82 @@ const ignored = [
 ];
 
 const fixtures: Record<string, string> = {
-  'apps/marketing/src/page.tsx': confinedImports,
-  'packages/x/src/index.ts': confinedImports,
+  ...Object.fromEntries(outsideCms.map((file) => [file, confinedImports])),
   'apps/cms/src/payload.config.ts': confinedImports,
   'apps/cms/src/loose.ts': looseEquality,
   ...Object.fromEntries(ignored.map((file) => [file, confinedImports + looseEquality])),
 };
 
 type Diagnostic = { code: string; filename: string; message: string };
-let diagnostics: Diagnostic[] = [];
+type Findings = (file: string) => string[];
 
-const findings = (file: string): string[] =>
-  diagnostics
-    .filter((diagnostic) => diagnostic.filename === file)
-    .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
-    .sort();
-
-beforeAll(() => {
+function lintSiteRepo(config: Record<string, string>): { findings: Findings; files: string[] } {
   const root = mkdtempSync(join(tmpdir(), 'pebbletech-config-oxlint-site-'));
   mkdirSync(join(root, 'node_modules', '@pebbletech'), { recursive: true });
   symlinkSync(packageDir, join(root, 'node_modules', '@pebbletech', 'config'), 'dir');
-  writeFileSync(join(root, 'oxlint.config.ts'), consumerConfig);
-  for (const [file, source] of Object.entries(fixtures)) {
+  for (const [file, source] of Object.entries({ ...config, ...fixtures })) {
     mkdirSync(join(root, dirname(file)), { recursive: true });
     writeFileSync(join(root, file), source);
   }
-  // Without the ignore list oxlint walks the linked package's own node_modules, so the report can be large.
-  const run = spawnSync(process.execPath, [oxlintBin, '--format', 'json'], {
+  // apps and packages only, so a run without the ignores does not walk the linked package itself.
+  const run = spawnSync(process.execPath, [oxlintBin, '--format', 'json', 'apps', 'packages'], {
     cwd: root,
     encoding: 'utf8',
-    maxBuffer: 256 * 1024 * 1024,
   });
-  diagnostics = (JSON.parse(run.stdout) as { diagnostics: Diagnostic[] }).diagnostics;
-});
+  const { diagnostics } = JSON.parse(run.stdout) as { diagnostics: Diagnostic[] };
+  return {
+    findings: (file) =>
+      diagnostics
+        .filter((diagnostic) => diagnostic.filename === file)
+        .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
+        .sort(),
+    files: [...new Set(diagnostics.map((diagnostic) => diagnostic.filename))].sort(),
+  };
+}
 
-describe('oxlint-site.json through the oxlint CLI', () => {
-  const confined = [
-    "eslint(no-restricted-imports): '@payloadcms/db-postgres' import is restricted from being used by a pattern.",
-    "eslint(no-restricted-imports): 'next/link' import is restricted from being used by a pattern.",
-    "eslint(no-restricted-imports): 'payload' import is restricted from being used by a pattern.",
-  ];
+describe('oxlint-site.json through oxlint.config.ts', () => {
+  let lint: ReturnType<typeof lintSiteRepo>;
+  beforeAll(() => {
+    lint = lintSiteRepo(consumerConfig);
+  });
 
-  test.each(['apps/marketing/src/page.tsx', 'packages/x/src/index.ts'])(
-    'next, payload and @payloadcms imports are errors in %s',
-    (file) => {
-      expect(findings(file)).toEqual(confined);
-    }
-  );
+  test.each(outsideCms)('next, payload and @payloadcms imports, deep ones too, are errors in %s', (file) => {
+    expect(lint.findings(file)).toEqual(confined);
+  });
 
   test('apps/cms may import next and payload', () => {
-    expect(findings('apps/cms/src/payload.config.ts')).toEqual([]);
+    expect(lint.findings('apps/cms/src/payload.config.ts')).toEqual([]);
   });
 
   test('the base preset still applies, in apps/cms too', () => {
-    expect(findings('apps/cms/src/loose.ts')).toEqual(['eslint(eqeqeq): Expected === and instead saw ==']);
+    expect(lint.findings('apps/cms/src/loose.ts')).toEqual([eqeqeq]);
   });
 
   test.each(ignored)('%s is ignored', (file) => {
-    expect(findings(file)).toEqual([]);
+    expect(lint.findings(file)).toEqual([]);
   });
 
   test('the run reports no other file', () => {
-    expect([...new Set(diagnostics.map((diagnostic) => diagnostic.filename))].sort()).toEqual([
-      'apps/cms/src/loose.ts',
-      'apps/marketing/src/page.tsx',
-      'packages/x/src/index.ts',
-    ]);
+    expect(lint.files).toEqual(['apps/cms/src/loose.ts', ...outsideCms].sort());
+  });
+});
+
+describe('oxlint-site.json through a plain extends in .oxlintrc.json', () => {
+  let lint: ReturnType<typeof lintSiteRepo>;
+  beforeAll(() => {
+    lint = lintSiteRepo(extendsConfig);
+  });
+
+  test('the import rule and the apps/cms exemption apply', () => {
+    expect(lint.findings('apps/marketing/src/page.tsx')).toEqual(confined);
+    expect(lint.findings('apps/cms/src/payload.config.ts')).toEqual([]);
+  });
+
+  test('the base preset applies through the preset’s own extends', () => {
+    expect(lint.findings('apps/cms/src/loose.ts')).toEqual([eqeqeq]);
+  });
+
+  test('the ignores do not: oxlint reads ignorePatterns only from the root config', () => {
+    expect(lint.findings('packages/x/dist/index.js')).toEqual([...confined, eqeqeq].sort());
   });
 });

@@ -16,11 +16,11 @@
       {
         "patterns": [
           {
-            "group": ["next", "next/*"],
+            "group": ["next", "next/**"],
             "message": "Next.js is confined to apps/cms."
           },
           {
-            "group": ["payload", "payload/*", "@payloadcms/*"],
+            "group": ["payload", "payload/**", "@payloadcms/**"],
             "message": "Payload runtime imports are confined to apps/cms. Import generated types and REST helpers from the content package instead."
           }
         ]
