@@ -82,6 +82,17 @@ describe('shape', () => {
     expect(config.collections.map((collection) => collection.slug).slice(0, 3)).toEqual(['users', 'media', 'products']);
   });
 
+  test('importMapBaseDir keeps the other admin.importMap settings it is given', async () => {
+    const config = await createCmsConfig({
+      importMapBaseDir: '/app/src',
+      admin: { importMap: { importMapFile: '/app/src/app/(payload)/admin/importMap.js' } },
+    });
+    expect(config.admin.importMap).toMatchObject({
+      baseDir: '/app/src',
+      importMapFile: '/app/src/app/(payload)/admin/importMap.js',
+    });
+  });
+
   test('a cap that is not a positive whole number of bytes is refused', () => {
     expect(() => createCmsConfig({ maxUploadBytes: 0 })).toThrow('maxUploadBytes');
     expect(() => createCmsConfig({ maxUploadBytes: Number.POSITIVE_INFINITY })).toThrow('maxUploadBytes');

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { formatStampNotice, postToSlack } from './index.js';
+import { formatStampNotice, notifySlackOnCreate, postToSlack } from './index.js';
 
 const base = {
   stampUrl: 'https://media-pebbletech.pebbletech.my/stamps/s42.png',
@@ -193,4 +193,16 @@ describe('postToSlack', () => {
       postToSlack('hi', { webhookUrl: 'https://hooks.slack.com/services/x', fetch: slack.fetch })
     ).rejects.toThrow('Slack answered 500');
   });
+});
+
+test('a message builder that throws is logged and the create still succeeds', async () => {
+  const logged: unknown[] = [];
+  const hook = notifySlackOnCreate(() => {
+    throw new Error('no count yet');
+  });
+  // Payload's request as the hook sees it: only its logger is used here.
+  const req = { payload: { logger: { error: (...args: unknown[]) => logged.push(args) } } };
+  const doc = { id: 1 };
+  await expect(hook({ doc, operation: 'create', req } as never)).resolves.toBe(doc);
+  expect(logged).toHaveLength(1);
 });

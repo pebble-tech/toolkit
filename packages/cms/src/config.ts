@@ -167,7 +167,9 @@ export function createCmsConfig(options: CmsConfigOptions = {}): Promise<Sanitiz
     admin: {
       ...options.admin,
       user: USERS_SLUG,
-      ...(options.importMapBaseDir ? { importMap: { baseDir: options.importMapBaseDir } } : {}),
+      ...(options.importMapBaseDir
+        ? { importMap: { ...options.admin?.importMap, baseDir: options.importMapBaseDir } }
+        : {}),
     },
     collections: [
       createUsersCollection({ serviceRoles: options.serviceRoles }),

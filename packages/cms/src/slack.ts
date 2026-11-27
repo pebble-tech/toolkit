@@ -34,7 +34,7 @@ export async function postToSlack(message: SlackMessage | string, options: Slack
 
 /**
  * An afterChange hook that posts `message(doc)` to Slack when a document is created, for submissions such as stamps or
- * contact forms. A Slack failure is logged and never fails the create.
+ * contact forms. A failure building or posting the message is logged and never fails the create.
  */
 export function notifySlackOnCreate(
   message: (doc: Record<string, unknown>, req: PayloadRequest) => SlackMessage | string | null,
@@ -42,13 +42,11 @@ export function notifySlackOnCreate(
 ): CollectionAfterChangeHook {
   return async ({ doc, operation, req }) => {
     if (operation !== 'create') return doc;
-    const built = message(doc, req);
-    if (built) {
-      try {
-        await postToSlack(built, options);
-      } catch (error) {
-        req.payload.logger.error({ err: error }, 'Slack notification failed');
-      }
+    try {
+      const built = message(doc, req);
+      if (built) await postToSlack(built, options);
+    } catch (error) {
+      req.payload.logger.error({ err: error }, 'Slack notification failed');
     }
     return doc;
   };

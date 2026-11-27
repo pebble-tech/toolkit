@@ -24,7 +24,7 @@ export interface PurgeTarget {
 }
 
 /**
- * Posts a signed purge of `tags` to the marketing app and throws unless it answers 2xx. The body and signature follow
+ * Posts a signed purge of `tags` to the marketing app (in batches of MAX_TAGS) and throws unless each answers 2xx. The body and signature follow
  * `signPurge`; the bypass header is sent when a bypass secret is known.
  */
 export async function sendPurge(tags: string[], target: PurgeTarget = {}): Promise<void> {
@@ -34,18 +34,20 @@ export async function sendPurge(tags: string[], target: PurgeTarget = {}): Promi
   if (!siteUrl) throw new Error('MARKETING_URL is not set');
   if (!secret) throw new Error('REVALIDATE_SECRET is not set');
   // The receiver refuses a whole purge for one bad tag, so a tag it would refuse (empty, or over MAX_TAG_LENGTH as a
-  // long slug makes) is dropped here and the rest still purge.
-  const valid = [...new Set(tags)].filter((tag) => tag.length > 0 && tag.length <= MAX_TAG_LENGTH).slice(0, MAX_TAGS);
+  // long slug makes) is dropped here and the rest still purge. More than MAX_TAGS go as several signed purges.
+  const valid = [...new Set(tags)].filter((tag) => tag.length > 0 && tag.length <= MAX_TAG_LENGTH);
   if (valid.length === 0) throw new Error('no purgeable tags');
-  const { body, headers } = signPurge({ tags: valid, secret });
-  if (bypass) headers[VERCEL_BYPASS_HEADER] = bypass;
-  const response = await (target.fetch ?? globalThis.fetch)(new URL(target.route ?? '/api/revalidate', siteUrl), {
-    method: 'POST',
-    headers,
-    body,
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) throw new Error(`purge answered ${response.status}`);
+  for (let start = 0; start < valid.length; start += MAX_TAGS) {
+    const { body, headers } = signPurge({ tags: valid.slice(start, start + MAX_TAGS), secret });
+    if (bypass) headers[VERCEL_BYPASS_HEADER] = bypass;
+    const response = await (target.fetch ?? globalThis.fetch)(new URL(target.route ?? '/api/revalidate', siteUrl), {
+      method: 'POST',
+      headers,
+      body,
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new Error(`purge answered ${response.status}`);
+  }
 }
 
 type Doc = Record<string, unknown> | undefined;
