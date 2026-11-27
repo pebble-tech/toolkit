@@ -527,12 +527,15 @@ new VercelProject('cms', { stage, projectId: cmsId, cnameTarget: 'cname.vercel-d
 A provider is not part of a URN, so moving an existing project to its own provider changes no resource name; the
 preview shows the provider change. `cnameTarget` fixes every CNAME's target and skips `getDomainConfig`, a lookup a
 project-scoped token may not be allowed to make; without it each CNAME is Vercel's recommendation for its hostname.
+It does not stop `ProjectDomain`'s own domain-config calls (see below).
 
 What may still need a team-scoped token, as far as the provider and CLI show (none of it checked against Vercel):
 creating the project, its custom environments and the protection bypass (`shared`), `getDomainConfig`, adding a
 domain the team has not verified, reading `ProjectDomain.verifications`, and aliasing a custom domain with
 `vercel alias set`. Deploys, env vars and a `*.vercel.app` alias need the project only, if Vercel scopes them as it
-documents.
+documents. `cnameTarget` does not take every domain-config call away: the
+provider's `ProjectDomain` itself calls Vercel's domain config on create and on every read (refresh), with or without
+`cnameTarget`, so a project-scoped token that cannot make that call may fail there (unverified).
 
 ### Remove a protected prod resource
 
@@ -1026,6 +1029,11 @@ What the deploy trusts, and what it does not:
   is decided from the event and the tip, never `head_branch`, and the tip is read again right before `vercel deploy`.
   The PR number comes from the API; it is checked again right before the alias and the comment.
 - **The URL is checked.** The deployment URL is the CLI's last line and must be `https://<name>.vercel.app`.
+- **A stale staging build cannot cancel the tip's deploy.** The staging group never cancels and keeps every pending
+  run (`queue: max`); each run checks the tip itself and skips unless it is the tip. Previews still cancel the PR's
+  older run.
+- **A failed alias still leaves the PR its URL.** The comment is posted (after the PR recheck) with the deployment URL
+  and no alias, and the job stays failed.
 - **The alias is main's.** `alias-template` (`marketing-pr-{pr}.vercel.app`) must come out as `<name>-pr-<n>.vercel.app`
   for the verified PR number, and none of `protected-hosts`.
 - **The CLI is locked.** It is installed with `npm ci --ignore-scripts` from `.github/site-deploy/vercel/package-lock.json`;
@@ -1039,7 +1047,8 @@ Inputs of `site-deploy.yml`: `toolkit-ref`, `build-workflow`, `vercel-project-id
 name, so keep production's secrets out of the environments the stub names.
 Secrets: `VERCEL_TOKEN` and `RUNTIME_ENV`, both environment secrets passed by name (optional at the call; the job
 fails without a token). Inputs of `site-build.yml`: `working-directory` (`apps/marketing`), `build-command`
-(`pnpm build`), `build-env` (plain JSON), `artifact-name`, `runs-on`. A repository with two sites (marketing and CMS)
+(`pnpm build`), `build-env` (a plain JSON object; `NODE_OPTIONS` is refused, since GitHub does not take it from
+`GITHUB_ENV`: set it in `build-command`), `artifact-name`, `runs-on`. A repository with two sites (marketing and CMS)
 calls each workflow once per app, with its own `artifact-name`, project id and pair of environments.
 
 ### The Vercel token
