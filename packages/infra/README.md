@@ -443,10 +443,16 @@ verify a hostname on its own (for example when the apex is in use elsewhere in V
 to add, add that record, name `_vercel` on the apex and the value Vercel shows, unproxied, in the apex's Cloudflare
 zone.
 
-For a production domain (`productionDomains`, [Custom and apex domains](#custom-and-apex-domains)) Pulumi can make it:
-the `verification` output lists the challenges Vercel returns for each hostname. When one shows a `TXT` challenge on
-`_vercel.<zone>`, set `verificationTxt: true` on that hostname (its zone must be ours, `zoneId`) and release again:
-`<name>-vercel-txt-<hostname>` holds the challenge's value. For a client's zone, add what `clientDnsRecords` lists.
+For a production domain (`productionDomains`, [Custom and apex domains](#custom-and-apex-domains)) Pulumi can make it,
+in two releases:
+
+1. The release that adds the hostname prints the `verification` output: the challenges Vercel lists for each
+   hostname (also on the project's Settings, Domains page).
+2. If one is a `TXT` challenge on `_vercel.<zone>`, copy its value (`vc-domain-verify=<hostname>,<code>`) into that
+   hostname's `verificationTxt` (its zone must be ours, `zoneId`) and release again: `<name>-vercel-txt-<hostname>`
+   holds that value.
+
+For a client's zone, add what `clientDnsRecords` lists.
 
 ### Custom and apex domains
 
@@ -465,7 +471,8 @@ new VercelProject('web', {
   domain: { hostname: stage.hostname('www', 'pebbletech.my'), zoneId },
   productionDomains: [
     { hostname: 'new.pebbletech.my', zoneName: 'pebbletech.my', zoneId },
-    { hostname: 'pebbletech.my', zoneName: 'pebbletech.my', zoneId, verificationTxt: true },
+    // The challenge value the verification output printed on the release before.
+    { hostname: 'pebbletech.my', zoneName: 'pebbletech.my', zoneId, verificationTxt: 'vc-domain-verify=pebbletech.my,abc123' },
     // A client's zone: no zoneId, so Pulumi makes no DNS; clientDnsRecords lists what to add there.
     { hostname: 'www.client.com', zoneName: 'client.com' },
   ],
@@ -486,11 +493,10 @@ Outputs (both only when `productionDomains` is set, so a program that does not u
 
 Resource names carry the hostname, never a list index: `<name>-domain-<hostname>`, `<name>-cname-<hostname>`,
 `<name>-vercel-txt-<hostname>`. Adding, removing or reordering one hostname leaves every other in place, and the stage
-domain keeps `<name>-domain` and `<name>-cname`. The TXT record answers the challenge Vercel lists, and follows it
-if Vercel issues a new one. With `verificationTxt` on and no TXT challenge listed, the preview fails rather than make
-an empty record, whether the hostname is unverified or already verified (also on its first release, when Vercel
-verified it on its own): turn the flag off once the hostname is verified. The record is retained and not protected,
-so turning the flag off drops it from the state and leaves it in the zone.
+domain keeps `<name>-domain` and `<name>-cname`. The TXT record holds the value `verificationTxt` passes, never
+Vercel's live challenge list, so nothing changes or fails when Vercel verifies the hostname, during a release or
+after it. A new challenge from Vercel is a new value to copy in. The record is retained and not protected, so leaving
+`verificationTxt` out drops it from the state and leaves it in the zone.
 
 Hand steps:
 

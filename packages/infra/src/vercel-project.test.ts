@@ -371,7 +371,8 @@ describe('VercelProject production domains (custom and apex hostnames on prod)',
     });
 
   const NEW = { hostname: 'new.pebbletech.my', zoneName: 'pebbletech.my', zoneId: 'zone-1' };
-  const APEX = { hostname: 'pebbletech.my', zoneName: 'pebbletech.my', zoneId: 'zone-1', verificationTxt: true };
+  const CHALLENGE = 'vc-domain-verify=pebbletech.my,abc123';
+  const APEX = { hostname: 'pebbletech.my', zoneName: 'pebbletech.my', zoneId: 'zone-1', verificationTxt: CHALLENGE };
 
   test('binds each hostname to production with an unproxied CNAME, the apex by its full name, and the opt-in TXT', async () => {
     const { resources } = await prodWith([NEW, APEX]);
@@ -534,33 +535,50 @@ describe('VercelProject production domains (custom and apex hostnames on prod)',
     ]);
   });
 
-  // Also a first release: Vercel can verify a hostname on its own, and then lists no challenge to answer.
-  test('refuses the TXT for a verified hostname, saying to turn it off, rather than make an empty record', async () => {
-    await expect(prodWith([APEX], {}, { 'pebbletech.my': true })).rejects.toThrow(
-      '"pebbletech.my" is verified and Vercel lists no _vercel.pebbletech.my challenge: turn `verificationTxt` off'
-    );
-  });
-
-  test('refuses the TXT when Vercel lists no challenge and the hostname is not verified', async () => {
-    const program = runProgram(
+  // The record holds the value main passed, whatever Vercel lists now: verified with no challenge (on any release,
+  // also the first, when Vercel verifies it mid-up), or not verified with no challenge at all.
+  test.each<[string, Record<string, boolean>, pulumi.runtime.Mocks['newResource'] | undefined]>([
+    ['verified, no challenge listed', { 'pebbletech.my': true }, undefined],
+    [
+      'unverified, no challenge listed',
+      {},
+      (args) => {
+        const base = mocks().newResource(args) as { id: string; state: Record<string, any> };
+        return { ...base, state: { ...base.state, verifications: [] } };
+      },
+    ],
+  ])('makes the TXT from the value passed when the hostname is %s', async (_what, verified, newResource) => {
+    const { resources } = await runProgram(
       {
         project: 'basefresh',
         stack: 'prod',
-        mocks: {
-          ...mocks(),
-          newResource: (args) => {
-            const base = mocks().newResource(args) as { id: string; state: Record<string, any> };
-            return { ...base, state: { ...base.state, verifications: [] } };
-          },
-        },
+        mocks: { ...mocks(verified), ...(newResource ? { newResource } : {}) },
       },
       () => {
         const stage = new Stage('stage', { product: 'basefresh' });
         new VercelProject('web', { stage, projectId: 'prj_123', productionDomains: [APEX] });
       }
     );
-    await expect(program).rejects.toThrow(/lists no _vercel.pebbletech.my TXT challenge/);
+    const txt = resources.find((r) => r.name === 'web-vercel-txt-pebbletech.my')!;
+    expect([txt.inputs.content, txt.dependencies, txt.protect, txt.retainOnDelete]).toEqual([
+      CHALLENGE,
+      [],
+      false,
+      true,
+    ]);
   });
+
+  test('without the value there is no TXT record: leaving it out drops the record', async () => {
+    const { resources } = await prodWith([{ ...APEX, verificationTxt: undefined }]);
+    expect(resources.filter((r) => r.name.includes('vercel-txt'))).toEqual([]);
+  });
+
+  test.each(['', 'abc123', 'vc-domain-verify=pebbletech.my,abc 123', 'v=spf1 include:evil'])(
+    'refuses %j as the TXT value',
+    async (verificationTxt) => {
+      await expect(prodWith([{ ...APEX, verificationTxt }])).rejects.toThrow("must be Vercel's challenge value");
+    }
+  );
 
   test('refuses a zone id whose zone is not the zone named', async () => {
     await expect(prodWith([{ ...NEW, zoneId: 'zone-2' }])).rejects.toThrow(
@@ -582,7 +600,7 @@ describe('VercelProject production domains (custom and apex hostnames on prod)',
     ['a zone that is one label', { ...NEW, hostname: 'new.my', zoneName: 'my' }, /zone "my"/],
     [
       'the TXT with no zone of ours',
-      { hostname: 'client.com', zoneName: 'client.com', verificationTxt: true },
+      { hostname: 'client.com', zoneName: 'client.com', verificationTxt: 'vc-domain-verify=client.com,abc123' },
       /pass it/,
     ],
   ])('refuses %s', async (_what, domain, message) => {
