@@ -7,10 +7,10 @@ pinning a version; the guardrails are defaults it cannot turn off.
 |---|---|---|
 | `Stage` | nothing; parses the stack name and names, tags and protects everything else | a product id that is not one DNS label, is `pebble`, or is `pr`/`staging`/`prod`/`shared`; a kind that is not one DNS label; any stack other than `pr-<n>`, `staging`, `prod`, `shared` |
 | `VercelProject` | `shared`: the project (no Git connection, private source, Vercel Authentication on previews, Node `24.x` unless `nodeVersion` names another, Skew Protection at 12 hours unless `skewProtection` names another age or `false` ([Skew Protection](#skew-protection))), custom environments, the protection bypass, and a placeholder deployment so a pull request's preview is never the project's first deployment ([First deployment](#first-deployment)). `staging`/`prod`: env vars (secrets `sensitive`), the domain bound to the stage's environment (replaced delete-first, because a hostname is on one project: a new `projectId` leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname), an unproxied Cloudflare CNAME (not the `_vercel` TXT record Vercel may ask for: [Verify a Vercel domain](#verify-a-vercel-domain)). `prod`: custom and apex `productionDomains` with their CNAMEs, an opt-in `_vercel` TXT, and the `clientDnsRecords` and `verification` outputs ([Custom and apex domains](#custom-and-apex-domains)) | previews; the project outside `shared`; env vars or domains on `shared`; a secret-looking name in `vars`; `productionDomains` outside `prod`, outside their zone, with a hyphen below the zone, named twice, or in a `zoneId` whose zone is not `zoneName` |
-| `Database` | an explicit Postgres provider on port 5432 with `sslmode=verify-full`, the owner login role, the database owned by it, the owner's grant to `pebble_operators`, the `public` revoke, and on staging/prod the runtime role (made, unless `runtime` names one) and its grants; `directUrl` (owner) and `pooledUrl` (runtime) as secrets. See [Database](#database) | any `owner*` argument; `runtime` on a preview; a runtime role that is the owner or the operators group; a database or owner name longer than 63 characters. The names are always derived from `stage.databaseName()` |
+| `Database` | an explicit Postgres provider on port 5432 with `sslmode=verify-full`, the owner login role, the database owned by it, the owner's grant to `pebble_operators`, the `public` revoke, each of `schemas` other than `public`, and on staging/prod the runtime role (made, unless `runtime` names one) and its grants on each of `schemas`; `directUrl` (owner) and `pooledUrl` (runtime) as secrets. `flavor: 'neon'` for a Neon branch. See [Database](#database) | any `owner*` argument; `runtime` on a preview; a runtime role that is the owner or the operators group; a database or owner name longer than 63 characters; a `schemas` that is not a list, an empty or repeated one, or a schema name that is not a lowercase identifier or is `pg_*` or `information_schema`; an unknown `flavor`; on Neon, a `-pooler` admin host. The names are always derived from `stage.databaseName()` |
 | `ApiFunction` | Lambda `nodejs22.x` from a prebuilt bundle, log group (30 days), role with the permissions boundary and only `AWSLambdaBasicExecutionRole`, a CloudWatch alarm on the function's errors (see [Errors alarm](#errors-alarm); `alarm: false` opts out), HTTP API without the execute-api endpoint, regional ACM certificate validated in Cloudflare, custom domain, CNAME | no domain; a boundary other than the stage's own `<product>-<env>-boundary` in the current account (a typed `PermissionsBoundaryArn` from `Stage` or `DeployRole`, checked when it resolves, so `pulumi preview` fails). Timeouts above 29 s are clamped |
 | `Worker` | Workers script from a prebuilt module with Workers observability on (`headSamplingRate`, 0 to 1, default 1: every request), R2 bucket `<product>-<env>-<kind>` (on prod, `adoptExisting` imports that same name instead of creating it), plain and secret bindings, custom domain (replaced delete-first, because a hostname has one custom domain: a new script name leaves the hostname unserved for a few seconds during the apply; protected but not retained on prod, so that delete frees the hostname) | a secret-looking name in `vars` unless listed in `plainTextAllowed`; `adoptExisting` outside prod |
-| `DeployRole` | the GitHub OIDC role for one product and env, its inline policy, and the boundary policy its roles must carry. `preview` allows the state bucket and the KMS key only. `staging` and `prod` also allow Lambda, API Gateway, ACM, logs, CloudWatch alarms and IAM inside `<product>-<env>`. Takes `product`, `env`, the repo and the apex (the zone name): the trusted GitHub environment, the account's OIDC provider, the state bucket and paths (`pebble-<stg\|prd>-pulumi-state/<product>/<env>`, plus `<product>/shared` for staging) and the KMS key (`alias/pebble-<stg\|prd>-pulumi-<env>`) are derived | a product id that is not one DNS label, the id `pebble`, or an apex that is not lowercase labels with no leading or trailing dot |
+| `DeployRole` | the GitHub OIDC role for one product and env, its inline policy, and the boundary policy its roles must carry. `preview` allows the state bucket and the KMS key only. `staging` and `prod` also allow Lambda, API Gateway, ACM, logs, CloudWatch alarms and IAM inside `<product>-<env>`, unless `awsResources: false` (see [Deploy roles without AWS resources](#deploy-roles-without-aws-resources)). Takes `product`, `env`, the repo and the apex (the zone name): the trusted GitHub environment, the account's OIDC provider, the state bucket and paths (`pebble-<stg\|prd>-pulumi-state/<product>/<env>`, plus `<product>/shared` for staging) and the KMS key (`alias/pebble-<stg\|prd>-pulumi-<env>`) are derived | a product id that is not one DNS label, a `pebble` product, or an apex that is not lowercase labels with no leading or trailing dot |
 | `Operators` | the cluster's `pebble_operators` group (kept on destroy) and one membership grant per name in `members`, through the same admin provider as `Database`. Used by the cluster's operators program (`cluster`, which can adopt the existing group); a product's `shared` or `prod` stack (`stage`) is the 0.3.x form. See [Operators](#operators) | both or neither of `stage` and `cluster`; a cluster name that is not `pebble-` and kebab words; with `stage`, `pr-<n>` and `staging`, and `adoptExisting`; a second `Operators` in the same program; an empty or repeated member name; a member name with a dot (a PlanetScale login username: list the role before the dot) |
 
 Every component refuses a hostname or name outside its stage (`NamespaceError`), and every refusal is a
@@ -79,6 +79,61 @@ const db = new Database('db', {
     : { runtime: { role: config.require('pgRuntimeRole'), password: config.requireSecret('pgRuntimePassword') } }),
 });
 ```
+
+### Schemas
+
+`schemas` lists the schemas the runtime role is granted, `['public']` by default. Each schema other than `public` is
+created as `<name>-schema-<schema>`, owned by the owner role, on every stage, previews included; it waits for the
+database and the admin's membership in the owner (on PostgreSQL 16+ creating a schema for another owner needs SET ROLE
+to it). On staging and prod the runtime role gets the same rights on it as on `public`, in resources named like
+`public`'s with `-<schema>` at the end (`db-runtime-tables-cms`, `db-runtime-default-tables-cms`). `public`'s resources
+keep their names, so a stack that adds a schema keeps every grant it has.
+
+```ts
+const db = new Database('db', { stage, adminUrl: config.requireSecret('pgAdminUrl'), schemas: ['public', 'cms'] });
+```
+
+- The list says which grants the program declares. A new stack with `schemas: ['cms']` gets none on `public`. An
+  existing stack that drops `public` from its list loses the declarations, not necessarily the grants:
+  - outside prod, the next `up` deletes the `public` grants and default privileges, which revokes them;
+  - on prod they are protected, so `up` fails; and they are retained on delete, so clearing the protection removes
+    them from the state and leaves them in Postgres. They stay until someone revokes them directly in the database.
+    The toolkit has no step for that: do not treat `public` as closed to the runtime role until it is done.
+  On PostgreSQL 15+ PUBLIC also keeps USAGE on `public`, so the runtime role can see the schema, though not its tables.
+- A release workflow migrates before `up` ([A web-only production workflow](#a-web-only-production-workflow)), so a
+  release that adds a schema to the list and a migration that uses it would migrate before the schema exists. Either
+  add the schema in an earlier release, or have the migration create it first (`CREATE SCHEMA IF NOT EXISTS cms`; it
+  runs as the owner, who owns the database). The component then takes the existing schema over (the provider's
+  `ifNotExists`, default true) and grants on the tables already in it. A first release, which migrates after `up`, and
+  any program reading `directUrl` in the same update find the schemas: the direct URL waits for them and their grants.
+- A preview's schemas are dropped with what they hold (`dropCascade`), as the preview's whole database is. On staging
+  and prod a schema is dropped only when it is empty: taking a schema that holds tables out of the list fails the `up`
+  rather than destroying its data. Move or drop its tables first.
+- The component sets no `search_path`: the app names its schema in its queries or its connection settings.
+- PUBLIC's CONNECT revoke is on the database and stays whatever the list says.
+
+### Neon
+
+`flavor: 'neon'` runs the same component against one Neon branch: `adminUrl` is the Neon project owner's login on the
+branch's direct host, and each branch (`production`, `staging`) is its own stack with its own `adminUrl`. The Neon
+project and its branches are made outside the toolkit (in bootstrap); the toolkit calls no Neon API.
+
+- Usernames are used as given: no `.<branch>` suffix is split off or added.
+- No owner role is granted to `pebble_operators`: a Neon project has none.
+- The owner, database, runtime role and grants are the same resources with the same names as on PlanetScale, and
+  `-admin-member` stays: on PostgreSQL 16+ the owner login holds ADMIN, not SET, on a role it made.
+- `pooledUrl` is on the admin host with `-pooler` added to its first label (`ep-x-123-pooler.<region>.aws.neon.tech`),
+  port 5432; `pooler.host` and `pooler.port` override them. An admin URL on a `-pooler` host (in any letter case) is refused: DDL and grants
+  go to the direct endpoint.
+- Both URLs keep the admin URL's query, `channel_binding=require` included, with `sslmode` set to `verify-full`.
+- A preview gets the owner-only database on its own stack's `adminUrl`, as on PlanetScale.
+
+```ts
+const db = new Database('db', { stage, adminUrl: config.requireSecret('neonAdminUrl'), flavor: 'neon' });
+```
+
+`flavor` is explicit, never read from `adminUrl`: the URL is a secret known only at apply time, and the resources a
+program declares cannot wait for it.
 
 ## Operators
 
@@ -243,6 +298,20 @@ const customEnvironmentId = stage.isProd
 
 Tearing down `shared` or `prod` takes an explicit step: every child there is protected, so run
 `pulumi state unprotect --all -s <stack>` before `pulumi destroy -s <stack>`.
+
+### Deploy roles without AWS resources
+
+A product whose stacks hold no AWS resources (a site on Vercel and Neon) passes `awsResources: false` to its `staging`
+and `prod` `DeployRole`. Their policy is then the state statements a preview role has (`StateList`, `StateObjects`,
+`StateSecrets`); the role, its OIDC trust, the boundary and their names do not change. Only `false` turns the AWS
+statements off: leaving it out or passing `true` gives the full policy. A `preview` role ignores it.
+
+```ts
+new DeployRole('deploy', { product, env, apex, github, awsResources: false });
+```
+
+A program that passes none of 0.8.0's options (`schemas`, `flavor`, `awsResources`) declares the same resources,
+names and inputs as on 0.7.0, so its next `up` changes nothing.
 
 ### Upgrade from 0.5: the Vercel project
 

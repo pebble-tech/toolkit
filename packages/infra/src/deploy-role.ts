@@ -34,6 +34,13 @@ export interface DeployRoleArgs {
   apex: string;
   /** The product's repository. The trusted GitHub environment comes from `env` (`preview`, `staging`, `production`). */
   github: { org: string; repo: string };
+  /**
+   * Whether a `staging` or `prod` role also manages AWS resources (Lambda, HTTP APIs, certificates, logs, alarms,
+   * workload roles), `true` by default. `false` leaves only the state statements a preview role has, for a product
+   * whose stacks hold no AWS resources (a site on Vercel and Neon). Ignored on `preview`, which never has them. The
+   * role, its trust and the boundary are the same either way.
+   */
+  awsResources?: boolean;
 }
 
 type Statement = Record<string, unknown>;
@@ -44,8 +51,9 @@ type Statement = Record<string, unknown>;
  * to an env (trusted GitHub environment, OIDC provider, state bucket and paths, KMS key) is derived from `product` and
  * `env`, so a role cannot be pointed at another env's state or tokens. Domain globs end with the given `apex`. A `preview`
  * role deploys only `pr-<n>` stacks
- * (a database and a SQL role on PlanetScale), so its policy is the state path and its KMS key. `staging` and `prod`
- * also manage AWS resources named `<product>-<env>-*`, CloudWatch alarms included.
+ * (a database and a SQL role on PlanetScale or Neon), so its policy is the state path and its KMS key. `staging` and
+ * `prod` also manage AWS resources named `<product>-<env>-*`, CloudWatch alarms included, unless `awsResources` is
+ * `false`.
  */
 export class DeployRole extends pulumi.ComponentResource {
   readonly roleArn: pulumi.Output<string>;
@@ -59,6 +67,8 @@ export class DeployRole extends pulumi.ComponentResource {
     super('pebbletech:index:DeployRole', name, {}, opts);
 
     const { product, env, apex } = args;
+    // Read once here: the policy is built in an apply, after a caller may have changed or reused `args`.
+    const stateOnlyPolicy = env === 'preview' || args.awsResources === false;
     const scope = env === 'preview' ? `${product}-pr-*` : `${product}-${env}-*`;
     const roleName = `${product}-${env}-deploy`;
     const boundaryName = boundaryPolicyName(product, env);
@@ -157,7 +167,7 @@ export class DeployRole extends pulumi.ComponentResource {
     ];
     const statements = (boundaryArn: string, kmsKeyArn: string): Statement[] => {
       const stateOnly = stateStatements(kmsKeyArn);
-      if (env === 'preview') return stateOnly;
+      if (stateOnlyPolicy) return stateOnly;
       // Hostname suffix Stage.domainSuffix uses: `stg` on staging, none on prod (`<kind>-<product>[-stg].<apex>`).
       // The apex is literal. `*` still matches a dot, so a name in a sub-zone of the apex whose label ends with
       // `-<product>[-stg]` matches too.
