@@ -1,0 +1,92 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Pebble's shared Renovate preset: weekly, grouped, three-day release age, security fixes any time, auto-merge only for Payload and Next.js patch and security updates",
+  "extends": ["config:recommended", ":semanticCommits", ":prConcurrentLimit10"],
+  "timezone": "Asia/Kuala_Lumpur",
+  "schedule": ["before 6am on monday"],
+  "minimumReleaseAge": "3 days",
+  "labels": ["dependencies"],
+  "postUpdateOptions": ["pnpmDedupe"],
+  "automergeType": "pr",
+  "platformAutomerge": true,
+  "customManagers": [
+    {
+      "description": "The toolkit's action and reusable-workflow pins: a SHA with a # @pebbletech/infra@<version> comment, read from the toolkit's release tags. A toolkit-ref input right below the pin (the site-deploy stub) is part of the match, so its SHA moves with the pin's",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStrings": [
+        "uses: pebble-tech/toolkit/\\.github/(?:actions/[a-z-]+|workflows/[a-z-]+\\.ya?ml)@(?<currentDigest>[0-9a-f]{40}) # @pebbletech/infra@(?<currentValue>\\S+)(?:\\s+with:\\s+toolkit-ref: '?[0-9a-f]{40}'?)?"
+      ],
+      "depNameTemplate": "@pebbletech/infra",
+      "packageNameTemplate": "pebble-tech/toolkit",
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "npm",
+      "extractVersionTemplate": "^@pebbletech/infra@(?<version>.+)$"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "schedule": ["at any time"],
+    "minimumReleaseAge": "0 days",
+    "labels": ["dependencies", "security"]
+  },
+  "packageRules": [
+    {
+      "description": "Patch and minor updates for everything, one PR. First, so any later group (the ones below, and every group a repo adds) takes its packages out: the last matching rule wins",
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "minor and patch"
+    },
+    {
+      "description": "Majors stay one PR each so the changelog is read. A repo's own group sets matchUpdateTypes [\"!major\"] to keep this for its packages",
+      "matchUpdateTypes": ["major"],
+      "groupName": null
+    },
+    {
+      "description": "Payload: payload and every @payloadcms package share one version, so they move together, majors included. Patches get their own branch (renovate/patch-payload), so a branch GitHub was told to auto-merge never later holds a minor: Renovate does not take auto-merge off a PR",
+      "matchDatasources": ["npm"],
+      "matchPackageNames": ["payload", "/^@payloadcms\\//"],
+      "groupName": "payload",
+      "separateMinorPatch": true
+    },
+    {
+      "description": "Next.js: next and its @next packages share one version, so they move together, majors included. Patches get their own branch (renovate/patch-next), for the same reason as Payload's",
+      "matchDatasources": ["npm"],
+      "matchPackageNames": ["next", "/^@next\\//", "eslint-config-next"],
+      "groupName": "next",
+      "separateMinorPatch": true
+    },
+    {
+      "description": "Node and pnpm pins move on purpose, not by bot; by dep name, so setup-node's node-version input is covered too",
+      "matchDepNames": ["node", "pnpm", "@types/node"],
+      "enabled": false
+    },
+    {
+      "description": "The toolkit's actions are pinned through the regex manager above, never by the github-actions manager",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["pebble-tech/toolkit"],
+      "enabled": false
+    },
+    {
+      "description": "@pebbletech/infra on npm and the toolkit action pins move together, as soon as a release is out: they are ours",
+      "matchDepNames": ["@pebbletech/infra"],
+      "groupName": "@pebbletech/infra",
+      "minimumReleaseAge": "0 days"
+    },
+    {
+      "description": "Payload and Next.js patches auto-merge once the required checks pass, unless Renovate marks them breaking (a prerelease step, a 0.x patch); their minors and majors wait for a person",
+      "matchDatasources": ["npm"],
+      "matchPackageNames": ["payload", "/^@payloadcms\\//", "next", "/^@next\\//", "eslint-config-next"],
+      "matchUpdateTypes": ["patch"],
+      "matchJsonata": ["$not(isBreaking = true)"],
+      "automerge": true
+    },
+    {
+      "description": "Payload and Next.js security fixes that are a patch or a minor auto-merge once the required checks pass; a major security fix waits for a person. Renovate sets isVulnerabilityAlert from its alert rules, which it appends after every rule here and applies before this rule is read again",
+      "matchDatasources": ["npm"],
+      "matchPackageNames": ["payload", "/^@payloadcms\\//", "next", "/^@next\\//", "eslint-config-next"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "matchJsonata": ["isVulnerabilityAlert = true"],
+      "automerge": true
+    }
+  ]
+}

@@ -48,6 +48,15 @@ jobs:
       - name: Verify (lint, format, typecheck, build, tests)
         run: pnpm verify
 
+      # Renovate's own validator on the shared preset and on toolkit's config, at a pinned Renovate version. Install
+      # scripts are skipped: they only build re2, and the validator falls back to JavaScript regular expressions.
+      - name: Validate Renovate config
+        env:
+          npm_config_ignore_scripts: 'true'
+        run: >-
+          npx --yes --package renovate@44.239.1 --
+          renovate-config-validator --strict --no-global renovate.json packages/config/renovate.json
+
       # The filter leaves out the private workspace root, which pnpm -r pack would otherwise pack too.
       - name: Pack every package
         run: pnpm -r --filter './packages/*' pack --pack-destination out
