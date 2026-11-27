@@ -15,6 +15,7 @@ async function databaseIn(stack: string, args: Extra = {}, product = 'basefresh'
     return {
       database,
       directUrl: await valueOf(database.directUrl),
+      directWaitsFor: await dependencies(database.directUrl),
       pooledUrl: database.pooledUrl ? await valueOf(database.pooledUrl) : undefined,
       pooledWaitsFor: database.pooledUrl ? await dependencies(database.pooledUrl) : [],
       secret: [
@@ -487,9 +488,11 @@ describe('Database schemas', () => {
     });
   });
 
-  test('a preview creates the schema, owned by its one role, and grants nothing', async () => {
+  test('a preview creates the schema, owned by its one role, dropped with what it holds, and grants nothing', async () => {
     const { resources } = await databaseIn('pr-7', { schemas: ['public', 'cms'] });
+    // The whole database goes with the preview, so its schema's tables must not block the destroy.
     expect(one(resources, 'db-schema-cms').inputs).toEqual({
+      dropCascade: true,
       name: 'cms',
       database: 'basefresh_pr_7',
       owner: 'basefresh_pr_7',
@@ -510,6 +513,28 @@ describe('Database schemas', () => {
         'db-schema-cms',
       ].map((name) => [name, true, true])
     );
+  });
+
+  test('only a preview drops a schema with what it holds; staging and prod refuse to drop one that is not empty', async () => {
+    const cascade = async (stack: string) =>
+      one((await databaseIn(stack, { schemas: ['public', 'cms'] })).resources, 'db-schema-cms').inputs.dropCascade;
+    expect([await cascade('pr-7'), await cascade('staging'), await cascade('prod')]).toEqual([
+      true,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  test.each(['pr-7', 'staging'])('%s: the direct URL waits for each schema, so a migration finds it', async (stack) => {
+    const { result } = await databaseIn(stack, { schemas: ['public', 'cms', 'audit'] });
+    expect(result.directWaitsFor).toEqual(expect.arrayContaining(['db-schema-audit', 'db-schema-cms']));
+  });
+
+  test('refuses schemas given as a string, not a list', async () => {
+    await expect(databaseIn('staging', { schemas: 'cms' } as never)).rejects.toThrow(
+      'schemas must be a list of schema names'
+    );
+    await expect(databaseIn('pr-7', { schemas: 'cms' } as never)).rejects.toThrow(DatabaseNameError);
   });
 
   test.each([
@@ -608,6 +633,24 @@ describe('Database on Neon', () => {
         new Database('db', { stage, adminUrl: pulumi.secret(pooledAdmin), flavor: 'neon' });
       });
     await expect(program()).rejects.toThrow('the Neon admin URL must use the direct host, not the pooled one');
+  });
+
+  test.each(['EP-COOL-123-POOLER', 'ep-cool-123-Pooler'])(
+    'refuses a pooled admin host in any case: %s',
+    async (label) => {
+      const pooledAdmin = NEON_URL.replace('ep-cool-123.', `${label}.`);
+      const program = () =>
+        runProgram({ project: 'basefresh', stack: 'staging' }, () => {
+          const stage = new Stage('stage', { product: 'basefresh' });
+          new Database('db', { stage, adminUrl: pulumi.secret(pooledAdmin), flavor: 'neon' });
+        });
+      await expect(program()).rejects.toThrow('the Neon admin URL must use the direct host, not the pooled one');
+    }
+  );
+
+  test('an upper-case direct host gets the lower-case -pooler host', async () => {
+    const { result } = await neonIn('staging', {}, NEON_URL.replace('ep-cool-123.', 'EP-COOL-123.'));
+    expect(new URL(result.pooledUrl!).hostname).toBe('ep-cool-123-pooler.ap-southeast-1.aws.neon.tech');
   });
 
   test('refuses an unknown flavor', async () => {

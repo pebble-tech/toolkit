@@ -84,7 +84,7 @@ function splitUser(user: string, flavor: DatabaseFlavor): { role: string; branch
 
 /** Neon's pooled endpoint for a direct host: `ep-x-123.region.aws.neon.tech` -> `ep-x-123-pooler.region.aws.neon.tech`. */
 function neonPoolerHost(host: string): string {
-  const [first, ...rest] = host.split('.');
+  const [first, ...rest] = host.toLowerCase().split('.');
   return [`${first}-pooler`, ...rest].join('.');
 }
 
@@ -111,6 +111,7 @@ const SEQUENCE_PRIVILEGES = ['USAGE', 'SELECT', 'UPDATE'];
 
 /** Throws unless `schemas` is a non-empty list of distinct schema names a component may create and grant on. */
 function assertSchemas(schemas: string[]): void {
+  if (!Array.isArray(schemas)) throw new DatabaseNameError('schemas must be a list of schema names');
   if (schemas.length === 0) throw new DatabaseNameError('schemas cannot be empty: leave it out for public');
   for (const schema of schemas) {
     if (!IDENTIFIER.test(schema)) throw new DatabaseNameError(`schema "${schema}" must match ${IDENTIFIER}`);
@@ -149,7 +150,7 @@ export function adminProvider(
   const admin = pulumi.secret(
     pulumi.output(adminUrl).apply((raw) => {
       const parsed = parseAdminUrl(raw);
-      if (flavor === 'neon' && parsed.host.split('.')[0]!.endsWith('-pooler')) {
+      if (flavor === 'neon' && parsed.host.split('.')[0]!.toLowerCase().endsWith('-pooler')) {
         throw new DatabaseNameError(
           `the Neon admin URL must use the direct host, not the pooled one (${parsed.host}): drop "-pooler"`
         );
@@ -301,13 +302,20 @@ export class Database extends pulumi.ComponentResource {
     );
 
     // Schemas other than public, owned by the owner role. Creating one with an owner needs SET ROLE to it, as above.
+    // A preview's schema is dropped with what it holds, as its whole database is. On staging and prod a schema that
+    // holds tables is never dropped by Pulumi: removing it from the list fails the `up` instead.
     const created = new Map<string, postgresql.Schema>();
     for (const schema of schemas.filter((schema) => schema !== PUBLIC)) {
       created.set(
         schema,
         new postgresql.Schema(
           `${name}-schema-${schema}`,
-          { name: schema, database: database.name, owner: ownerRole },
+          {
+            name: schema,
+            database: database.name,
+            owner: ownerRole,
+            ...(stage.isPreview ? { dropCascade: true } : {}),
+          },
           withProvider({ dependsOn: [database, membership] })
         )
       );
@@ -389,6 +397,11 @@ export class Database extends pulumi.ComponentResource {
       );
     }
 
+    // With schemas beyond public the direct URL waits for them too, so a migration run in the same update finds them.
+    const databaseReady =
+      created.size > 0
+        ? pulumi.all([database.name, ...[...created.values()].map((schema) => schema.id)]).apply(([db]) => db)
+        : database.name;
     const poolerHost = (host: string) => args.pooler?.host ?? (flavor === 'neon' ? neonPoolerHost(host) : host);
     const poolerPort = args.pooler?.port ?? (flavor === 'neon' ? DIRECT_PORT : 6432);
     this.databaseName = databaseName;
@@ -396,7 +409,7 @@ export class Database extends pulumi.ComponentResource {
     this.runtimeRole = runtimeRole;
     this.directUrl = pulumi.secret(
       pulumi
-        .all([admin, ownerPassword, database.name])
+        .all([admin, ownerPassword, databaseReady])
         .apply(([a, password, db]) => connectionUrl(a, flavor, ownerRole, password, db, a.host, DIRECT_PORT))
     );
     this.pooledUrl =
