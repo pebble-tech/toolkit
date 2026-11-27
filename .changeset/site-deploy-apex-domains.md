@@ -9,7 +9,10 @@ Custom and apex production domains for `VercelProject`, a project-scoped Vercel 
   flattens it on the apex; `zoneName` is checked against `zoneId`'s zone), an opt-in `_vercel.<zone>` TXT record made
   from Vercel's challenge (`verificationTxt`), and the `clientDnsRecords` and `verification` outputs for a client's
   zone. Resource names carry the hostname, so adding or removing one leaves the others in place.
-  `Stage.assertCustomHostname` is the new rule; `assertOwnsHostname`, and everything a program that does not pass the
+  A production domain's zone is a stage zone (`STAGE_ZONES`, plus the stage domain's own) or a client's, never a name
+  inside a stage zone. With `verificationTxt` on and no challenge listed (unverified, or already verified), the preview
+  fails rather than make an empty record; the record is retained and not protected, so turning the flag off leaves it
+  in the zone. `Stage.assertCustomHostname` is the new rule; `assertOwnsHostname`, and everything a program that does not pass the
   new options registers, are unchanged (pinned by compat goldens captured from 0.7.0).
 - `cnameTarget` fixes every CNAME's target and skips the `getDomainConfig` lookup. A `VercelProject` takes its own
   Vercel provider through the component's `providers` option, so a stack with a marketing and a CMS project can give
