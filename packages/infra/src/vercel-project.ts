@@ -306,7 +306,9 @@ export class VercelProject extends pulumi.ComponentResource {
             ttl: 1,
             proxied: false,
           },
-          child()
+          // The DNS change waits for Vercel's binding: through the lookup, which waits on the domain, or, with a
+          // fixed target and no lookup, explicitly. Left as it was without `cnameTarget`, so 0.7.0's registration holds.
+          child(args.cnameTarget === undefined ? undefined : { dependsOn: [domain] })
         );
       }
       const production = (args.productionDomains ?? []).map((spec) =>
@@ -414,13 +416,15 @@ function productionDomain(name: string, spec: ProductionDomain, context: DomainC
     new cloudflare.DnsRecord(
       `${name}-cname-${hostname}`,
       { zoneId, name: hostname, type: 'CNAME', content: cname, ttl: 1, proxied: false },
-      child()
+      // Never pointed at Vercel before Vercel serves the hostname, with or without `cnameTarget`.
+      child({ dependsOn: [domain] })
     );
   }
   if (zoneId && spec.verificationTxt !== undefined) {
     // The value main passes, never Vercel's live challenge list: that list empties once the hostname is verified, and
     // a record that read it would have nothing to hold. Retained and, unlike the stage's other prod records, not
     // protected: leaving the value out drops the record from the state and leaves it in the zone.
+    // Not after the domain: the record answers Vercel's challenge, so it may exist before the binding does.
     new cloudflare.DnsRecord(
       `${name}-vercel-txt-${hostname}`,
       { zoneId, name: `_vercel.${zoneName}`, type: 'TXT', content: spec.verificationTxt, ttl: 1 },

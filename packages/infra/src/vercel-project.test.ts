@@ -698,6 +698,41 @@ describe('VercelProject with a project-scoped Vercel token', () => {
     }
   );
 
+  // A DNS change never lands before Vercel serves the hostname: each CNAME waits on its own project domain.
+  test.each([
+    ['with cnameTarget', { cnameTarget: 'cname.vercel-dns.com' }],
+    ['with the lookup', {}],
+  ])('every CNAME waits on its project domain, %s', async (_what, extra) => {
+    const call: pulumi.runtime.Mocks['call'] = (a) =>
+      a.token === 'vercel:index/getDomainConfig:getDomainConfig' ? defaultMocks.call(a) : noLookup.call(a);
+    const { resources } = await runProgram(
+      {
+        project: 'basefresh',
+        stack: 'prod',
+        mocks: { ...noLookup, call: 'cnameTarget' in extra ? noLookup.call : call },
+      },
+      () => {
+        const stage = new Stage('stage', { product: 'basefresh' });
+        new VercelProject('web', {
+          stage,
+          ...stageArgs('prod'),
+          ...extra,
+          productionDomains: [{ hostname: 'new.pebbletech.my', zoneName: 'pebbletech.my', zoneId: 'zone-1' }],
+        });
+      }
+    );
+    const urnOf = (name: string) => resources.find((r) => r.name === name)!.urn;
+    expect(
+      ofType(resources, 'cloudflare:index/dnsRecord:DnsRecord').map((r) => [
+        r.name,
+        r.dependencies.includes(urnOf(r.name.replace('-cname', '-domain'))),
+      ])
+    ).toEqual([
+      ['web-cname', true],
+      ['web-cname-new.pebbletech.my', true],
+    ]);
+  });
+
   test("two projects in one stack each use their own Vercel provider; Cloudflare stays on the program's default", async () => {
     const { resources } = await runProgram({ project: 'basefresh', stack: 'prod', mocks: noLookup }, () => {
       const stage = new Stage('stage', { product: 'basefresh' });
