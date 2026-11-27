@@ -1,14 +1,12 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Pebble's shared Renovate preset: weekly, grouped, three-day release age, security fixes any time, auto-merge only for Payload and Next.js patch and security updates",
+  "description": "Pebble's shared Renovate preset: weekly, grouped, three-day release age, security fixes any time, nothing auto-merges (auto-merge is the separate opt-in preset renovate-automerge)",
   "extends": ["config:recommended", ":semanticCommits", ":prConcurrentLimit10"],
   "timezone": "Asia/Kuala_Lumpur",
   "schedule": ["before 6am on monday"],
   "minimumReleaseAge": "3 days",
   "labels": ["dependencies"],
   "postUpdateOptions": ["pnpmDedupe"],
-  "automergeType": "pr",
-  "platformAutomerge": true,
   "customManagers": [
     {
       "description": "The toolkit's action and reusable-workflow pins: a SHA with a # @pebbletech/infra@<version> comment, read from the toolkit's release tags. A toolkit-ref input right below the pin (the site-deploy stub) is part of the match, so its SHA moves with the pin's",
@@ -42,7 +40,7 @@
       "groupName": null
     },
     {
-      "description": "Payload: payload and every @payloadcms package share one version, so they move together, majors included. Patches get their own branch (renovate/patch-payload), so a branch GitHub was told to auto-merge never later holds a minor: Renovate does not take auto-merge off a PR",
+      "description": "Payload: payload and every @payloadcms package share one version, so they move together, majors included. Patches get their own branch (renovate/patch-payload), so a repo that opts in to auto-merge never has a branch that was set to auto-merge later hold a minor: Renovate does not take auto-merge off a PR",
       "matchDatasources": ["npm"],
       "matchPackageNames": ["payload", "/^@payloadcms\\//"],
       "groupName": "payload",
@@ -71,22 +69,6 @@
       "matchDepNames": ["@pebbletech/infra"],
       "groupName": "@pebbletech/infra",
       "minimumReleaseAge": "0 days"
-    },
-    {
-      "description": "Payload and Next.js patches auto-merge once the required checks pass, unless Renovate marks them breaking (a prerelease step, a 0.x patch); their minors and majors wait for a person",
-      "matchDatasources": ["npm"],
-      "matchPackageNames": ["payload", "/^@payloadcms\\//", "next", "/^@next\\//", "eslint-config-next"],
-      "matchUpdateTypes": ["patch"],
-      "matchJsonata": ["$not(isBreaking = true)"],
-      "automerge": true
-    },
-    {
-      "description": "Payload and Next.js security fixes that are a patch or a minor auto-merge once the required checks pass; a major security fix waits for a person. Renovate sets isVulnerabilityAlert from its alert rules, which it appends after every rule here and applies before this rule is read again",
-      "matchDatasources": ["npm"],
-      "matchPackageNames": ["payload", "/^@payloadcms\\//", "next", "/^@next\\//", "eslint-config-next"],
-      "matchUpdateTypes": ["patch", "minor"],
-      "matchJsonata": ["isVulnerabilityAlert = true"],
-      "automerge": true
     }
   ]
 }

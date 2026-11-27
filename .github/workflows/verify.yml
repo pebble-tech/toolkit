@@ -56,6 +56,7 @@ jobs:
         run: >-
           npx --yes --package renovate@44.239.1 --
           renovate-config-validator --strict --no-global renovate.json packages/config/renovate.json
+          packages/config/renovate-automerge.json
 
       # The filter leaves out the private workspace root, which pnpm -r pack would otherwise pack too.
       - name: Pack every package
