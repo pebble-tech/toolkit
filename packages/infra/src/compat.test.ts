@@ -15,10 +15,14 @@ const PLANETSCALE = 'postgresql://postgres.abc123:admin-pw@sin.pg.psdb.cloud:643
 const RUNTIME = { role: 'basefresh_app', password: 'runtime-pw' };
 const GITHUB = { org: 'pebble-tech', repo: 'basefresh' };
 
-const database = (stack: string, args: { runtime?: typeof RUNTIME; pooler?: { host?: string; port?: number } }) =>
+const database = (
+  stack: string,
+  args: { runtime?: typeof RUNTIME; pooler?: { host?: string; port?: number } },
+  adminUrl = PLANETSCALE
+) =>
   runProgram({ project: 'basefresh', stack }, () => {
     const stage = new Stage('stage', { product: 'basefresh' });
-    new Database('db', { stage, adminUrl: PLANETSCALE, ...args });
+    new Database('db', { stage, adminUrl, ...args });
   });
 
 const deployRole = (env: 'preview' | 'staging' | 'prod') =>
@@ -32,6 +36,11 @@ const SCENARIOS: Record<string, () => Promise<{ resources: Registration[] }>> = 
   'database staging, made runtime': () => database('staging', {}),
   'database staging, pooler host and port': () =>
     database('staging', { runtime: RUNTIME, pooler: { host: 'pool.example.com', port: 7432 } }),
+  // The host as the URL spells it: 0.7.0 lower-cased nothing and refused no `-pooler` host on PlanetScale.
+  'database staging, mixed-case admin host': () =>
+    database('staging', {}, 'postgresql://postgres.abc123:admin-pw@SIN.Pg.PSDB.cloud:6432/postgres?sslmode=require'),
+  'database staging, -POOLER admin host': () =>
+    database('staging', {}, 'postgresql://postgres.abc123:admin-pw@X-POOLER.pg.psdb.cloud:6432/postgres'),
   'database prod, passed runtime': () => database('prod', { runtime: RUNTIME }),
   'database prod, made runtime': () => database('prod', {}),
   'operators and database in prod': () =>
