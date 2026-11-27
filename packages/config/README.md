@@ -47,8 +47,9 @@ apps that read its content) needs:
 
 - It ignores generated files and build output: `node_modules`, `routeTree.gen.ts`, `payload-types.ts`, `importMap.js`,
   `.next`, `.output`, `.vercel` and `dist`.
-- It makes `next`, `next/*`, `payload`, `payload/*` and `@payloadcms/*` imports errors everywhere except `apps/cms`.
-  A new app or package is covered without a config change.
+- It makes imports of `next`, `payload` and `@payloadcms/*`, and of any path under them (`next/dist/client/link`,
+  `@payloadcms/richtext-lexical/react`), errors everywhere except `apps/cms`. A new app or package is covered without a
+  config change. Packages that only share the prefix, such as `next-themes`, `next-auth` and `payload-types`, are allowed.
 
 oxlint applies `ignorePatterns` only from the root config, not from a config it `extends`. So a site takes this preset
 through `oxlint.config.ts`, not through `extends` in `.oxlintrc.json`:
@@ -63,6 +64,17 @@ export default { ...site, extends: [base] };
 
 oxlint marks TypeScript config files as experimental and loads them only when it runs under Node.js, which the npm
 package does.
+
+A plain `.oxlintrc.json` with `"extends": ["./node_modules/@pebbletech/config/oxlint-site.json"]` gets the rules but not
+the ignores. oxlint resolves `extends` as a path, so `"@pebbletech/config/oxlint-site.json"` there does not resolve.
+
+What the import rule does not do:
+
+- It does not exempt `import type`: a type-only import from `payload` outside `apps/cms` is an error too. Allow it
+  file by file with an override that turns `no-restricted-imports` off for those files.
+- It does not cover `require()`.
+- A product override that sets `no-restricted-imports` for some files replaces this rule's patterns there; it does not
+  add to them. Repeat the patterns in that override to keep them.
 
 ## Vite helpers: `@pebbletech/config/vite`
 
