@@ -25,6 +25,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "import": "./dist/vite.js",
+      "default": "./dist/vite.js"
+    },
     "./tsconfig.base.json": "./tsconfig.base.json",
     "./oxlint.json": "./oxlint.json",
     "./oxlint-site.json": "./oxlint-site.json",
