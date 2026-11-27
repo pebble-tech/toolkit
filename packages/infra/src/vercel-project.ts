@@ -140,7 +140,7 @@ export interface ProductionDomain {
   zoneId?: pulumi.Input<string>;
   /**
    * The `_vercel.<zoneName>` TXT record's value, copied from the `verification` output (or Vercel's Domains page),
-   * such as `vc-domain-verify=new.pebbletech.my,abc123`. Pulumi makes that record in `zoneId`'s zone. A fixed value,
+   * such as `vc-domain-verify=new.pebbletech.my,abc123` for `new.pebbletech.my` (another hostname's is refused). Pulumi makes that record in `zoneId`'s zone. A fixed value,
    * so the record never depends on whether Vercel has verified the hostname yet; leave it out once verified to drop
    * the record from the state (it stays in the zone). Needs `zoneId`.
    */
@@ -350,9 +350,11 @@ function assertProductionDomains(stage: Stage, args: VercelProjectArgs): void {
     stage.assertCustomHostname(hostname, zoneName, stageZones);
     if (seen.has(hostname)) throw new NamespaceError(`hostname "${hostname}" is bound twice`);
     seen.add(hostname);
-    if (verificationTxt !== undefined && !/^vc-domain-verify=[^\s"]+$/.test(verificationTxt)) {
+    // The challenge for this hostname, not another's: vc-domain-verify=<this hostname>,<ASCII code>.
+    const challenge = new RegExp(`^vc-domain-verify=${hostname.replaceAll('.', '\\.')},[A-Za-z0-9_-]+$`);
+    if (verificationTxt !== undefined && !challenge.test(verificationTxt)) {
       throw new NamespaceError(
-        `hostname "${hostname}": \`verificationTxt\` must be Vercel's challenge value, vc-domain-verify=<hostname>,<code>`
+        `hostname "${hostname}": \`verificationTxt\` must be Vercel's challenge for it, vc-domain-verify=${hostname},<code>`
       );
     }
     if (verificationTxt !== undefined && zoneId === undefined) {

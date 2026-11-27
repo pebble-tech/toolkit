@@ -448,8 +448,9 @@ in two releases:
 
 1. The release that adds the hostname prints the `verification` output: the challenges Vercel lists for each
    hostname (also on the project's Settings, Domains page).
-2. If one is a `TXT` challenge on `_vercel.<zone>`, copy its value (`vc-domain-verify=<hostname>,<code>`) into that
-   hostname's `verificationTxt` (its zone must be ours, `zoneId`) and release again: `<name>-vercel-txt-<hostname>`
+2. If one is a `TXT` challenge on `_vercel.<zone>`, copy its value (`vc-domain-verify=<hostname>,<code>`, for that
+   very hostname; another hostname's challenge, or a code with anything but ASCII letters, digits, `_` and `-`, is
+   refused) into that hostname's `verificationTxt` (its zone must be ours, `zoneId`) and release again: `<name>-vercel-txt-<hostname>`
    holds that value.
 
 For a client's zone, add what `clientDnsRecords` lists.

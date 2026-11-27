@@ -573,12 +573,24 @@ describe('VercelProject production domains (custom and apex hostnames on prod)',
     expect(resources.filter((r) => r.name.includes('vercel-txt'))).toEqual([]);
   });
 
-  test.each(['', 'abc123', 'vc-domain-verify=pebbletech.my,abc 123', 'v=spf1 include:evil'])(
-    'refuses %j as the TXT value',
-    async (verificationTxt) => {
-      await expect(prodWith([{ ...APEX, verificationTxt }])).rejects.toThrow("must be Vercel's challenge value");
-    }
-  );
+  test.each([
+    '',
+    'abc123',
+    'vc-domain-verify=pebbletech.my,abc 123',
+    'v=spf1 include:evil',
+    // Another host's challenge, in the same zone or not.
+    'vc-domain-verify=new.pebbletech.my,abc123',
+    'vc-domain-verify=pebbletechxmy,abc123',
+    'vc-domain-verify=client.com,abc123',
+    'vc-domain-verify=,',
+    'vc-domain-verify=pebbletech.my,',
+    'vc-domain-verify=pebbletech.my,abc123\u200b',
+    'vc-domain-verify=pebbletech.my,abc123\n',
+  ])('refuses %j as the TXT value for pebbletech.my', async (verificationTxt) => {
+    await expect(prodWith([{ ...APEX, verificationTxt }])).rejects.toThrow(
+      "`verificationTxt` must be Vercel's challenge for it, vc-domain-verify=pebbletech.my,<code>"
+    );
+  });
 
   test('refuses a zone id whose zone is not the zone named', async () => {
     await expect(prodWith([{ ...NEW, zoneId: 'zone-2' }])).rejects.toThrow(
