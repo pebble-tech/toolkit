@@ -1,4 +1,5 @@
 import * as pulumi from '@pulumi/pulumi';
+import * as vercel from '@pulumiverse/vercel';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
@@ -589,5 +590,96 @@ describe('VercelProject production domains (custom and apex hostnames on prod)',
 
   test('refuses a hostname bound twice', async () => {
     await expect(prodWith([NEW, { ...NEW }])).rejects.toThrow('hostname "new.pebbletech.my" is bound twice');
+  });
+});
+
+describe('VercelProject with a project-scoped Vercel token', () => {
+  /** Fails the run on Vercel's domain config lookup, which a fixed CNAME target replaces. */
+  const noLookup: pulumi.runtime.Mocks = {
+    newResource: defaultMocks.newResource,
+    call(args) {
+      if (args.token === 'vercel:index/getDomainConfig:getDomainConfig') throw new Error('getDomainConfig was called');
+      if (args.token === 'cloudflare:index/getZone:getZone') return { id: 'zone-1', name: 'pebbletech.my' };
+      return defaultMocks.call(args);
+    },
+  };
+
+  test.each(['staging', 'prod'])(
+    '%s: cnameTarget points every CNAME at it with no lookup, and keeps every URN',
+    async (stack) => {
+      const args = {
+        ...stageArgs(stack),
+        ...(stack === 'prod'
+          ? { productionDomains: [{ hostname: 'new.pebbletech.my', zoneName: 'pebbletech.my', zoneId: 'zone-1' }] }
+          : {}),
+      };
+      const run = (mocks: pulumi.runtime.Mocks, extra: Partial<VercelProjectArgs>) =>
+        runProgram({ project: 'basefresh', stack, mocks }, () => {
+          const stage = new Stage('stage', { product: 'basefresh' });
+          new VercelProject('web', { stage, ...args, ...extra });
+        });
+      const looked = await run(
+        {
+          ...noLookup,
+          call: (a) =>
+            a.token === 'vercel:index/getDomainConfig:getDomainConfig' ? defaultMocks.call(a) : noLookup.call(a),
+        },
+        {}
+      );
+      const fixed = await run(noLookup, { cnameTarget: 'cname.vercel-dns.com.' });
+      const urns = (resources: Registration[]) => resources.map((r) => r.urn).sort();
+      expect([
+        urns(fixed.resources),
+        ofType(fixed.resources, 'cloudflare:index/dnsRecord:DnsRecord').map((r) => r.inputs.content),
+      ]).toEqual([
+        urns(looked.resources),
+        stack === 'prod' ? ['cname.vercel-dns.com', 'cname.vercel-dns.com'] : ['cname.vercel-dns.com'],
+      ]);
+    }
+  );
+
+  test("two projects in one stack each use their own Vercel provider; Cloudflare stays on the program's default", async () => {
+    const { resources } = await runProgram({ project: 'basefresh', stack: 'prod', mocks: noLookup }, () => {
+      const stage = new Stage('stage', { product: 'basefresh' });
+      const marketing = new vercel.Provider('vercel-marketing', { apiToken: 'marketing-token', team: 'team_1' });
+      const cms = new vercel.Provider('vercel-cms', { apiToken: 'cms-token', team: 'team_1' });
+      const domain = (hostname: string) => ({ hostname, zoneId: 'zone-1' });
+      new VercelProject(
+        'site',
+        {
+          stage,
+          projectId: 'prj_site',
+          cnameTarget: 'cname.vercel-dns.com',
+          domain: domain('site-basefresh.pebbletech.my'),
+          vars: { A: 'a' },
+        },
+        { providers: [marketing] }
+      );
+      new VercelProject(
+        'cms',
+        {
+          stage,
+          projectId: 'prj_cms',
+          cnameTarget: 'cname.vercel-dns.com',
+          domain: domain('cms-basefresh.pebbletech.my'),
+          vars: { A: 'a' },
+        },
+        { providers: [cms] }
+      );
+    });
+    const providerOf = (r: Registration) => r.provider.split('::')[3] ?? '';
+    expect(
+      resources
+        .filter((r) => r.custom && !r.type.startsWith('pulumi:providers:'))
+        .map((r) => [r.name, providerOf(r)])
+        .sort()
+    ).toEqual([
+      ['cms-cname', ''],
+      ['cms-domain', 'vercel-cms'],
+      ['cms-env-A', 'vercel-cms'],
+      ['site-cname', ''],
+      ['site-domain', 'vercel-marketing'],
+      ['site-env-A', 'vercel-marketing'],
+    ]);
   });
 });

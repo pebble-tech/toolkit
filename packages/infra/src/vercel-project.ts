@@ -112,6 +112,12 @@ export interface VercelProjectArgs {
   /** Sensitive env vars: write-only in Vercel. */
   secrets?: Record<string, pulumi.Input<string>>;
   plainTextAllowed?: string[];
+  /**
+   * The CNAME target every domain points at, such as `cname.vercel-dns.com`. Given, it replaces the
+   * `getDomainConfig` lookup, which a project-scoped Vercel token may not be allowed to make; the records' names,
+   * types and the domains are unchanged. Unset, each CNAME is the target Vercel recommends for its hostname.
+   */
+  cnameTarget?: pulumi.Input<string>;
   /** The stage's web domain, bound to its environment, with an unproxied CNAME in Cloudflare. */
   domain?: { hostname: string; zoneId: pulumi.Input<string> };
   /**
@@ -281,17 +287,20 @@ export class VercelProject extends pulumi.ComponentResource {
           { projectId, teamId, domain: hostname, customEnvironmentId: args.customEnvironmentId },
           { ...child({ deleteBeforeReplace: true }), retainOnDelete: false }
         );
-        const config = vercel.getDomainConfigOutput(
-          { domain: hostname, projectIdOrName: projectId, teamId },
-          { parent: this, dependsOn: [domain] }
-        );
+        const recommended =
+          args.cnameTarget === undefined
+            ? vercel.getDomainConfigOutput(
+                { domain: hostname, projectIdOrName: projectId, teamId },
+                { parent: this, dependsOn: [domain] }
+              ).recommendedCname
+            : pulumi.output(args.cnameTarget);
         new cloudflare.DnsRecord(
           `${name}-cname`,
           {
             zoneId,
             name: hostname,
             type: 'CNAME',
-            content: config.recommendedCname.apply((cname) => cname.replace(/\.$/, '')),
+            content: recommended.apply((cname) => cname.replace(/\.$/, '')),
             ttl: 1,
             proxied: false,
           },
@@ -299,7 +308,7 @@ export class VercelProject extends pulumi.ComponentResource {
         );
       }
       const production = (args.productionDomains ?? []).map((spec) =>
-        productionDomain(name, spec, { projectId, teamId, parent: this, child })
+        productionDomain(name, spec, { projectId, teamId, cnameTarget: args.cnameTarget, parent: this, child })
       );
       this.projectId = projectId;
       this.bypassSecret = undefined;
@@ -343,6 +352,7 @@ function assertProductionDomains(stage: Stage, args: VercelProjectArgs): void {
 interface DomainContext {
   projectId: pulumi.Output<string>;
   teamId: pulumi.Input<string> | undefined;
+  cnameTarget: pulumi.Input<string> | undefined;
   parent: pulumi.Resource;
   child: (extra?: pulumi.CustomResourceOptions) => pulumi.CustomResourceOptions;
 }
@@ -354,7 +364,7 @@ interface DomainContext {
  */
 function productionDomain(name: string, spec: ProductionDomain, context: DomainContext) {
   const { hostname, zoneName } = spec;
-  const { projectId, teamId, parent, child } = context;
+  const { projectId, teamId, cnameTarget, parent, child } = context;
   const apex = hostname === zoneName;
   // The zone the id names must be the zone the hostname was checked against: a mismatch fails the preview before
   // anything is created, since the domain and its records wait on this check.
@@ -375,11 +385,16 @@ function productionDomain(name: string, spec: ProductionDomain, context: DomainC
     { projectId, teamId, domain: zoneId ? zoneId.apply(() => hostname) : hostname },
     { ...child({ deleteBeforeReplace: true }), retainOnDelete: false }
   );
-  const config = vercel.getDomainConfigOutput(
-    { domain: hostname, projectIdOrName: projectId, teamId },
-    { parent, dependsOn: [domain] }
+  const config =
+    cnameTarget === undefined
+      ? vercel.getDomainConfigOutput(
+          { domain: hostname, projectIdOrName: projectId, teamId },
+          { parent, dependsOn: [domain] }
+        )
+      : undefined;
+  const cname = (config ? config.recommendedCname : pulumi.output(cnameTarget!)).apply((value) =>
+    value.replace(/\.$/, '')
   );
-  const cname = config.recommendedCname.apply((value) => value.replace(/\.$/, ''));
   if (zoneId) {
     // On the apex Cloudflare flattens the CNAME; the record's name is the zone's full name.
     new cloudflare.DnsRecord(
@@ -407,8 +422,10 @@ function productionDomain(name: string, spec: ProductionDomain, context: DomainC
       child({ ignoreChanges: ['content'] })
     );
   }
+  // An apex in a client's zone gets Vercel's A records, unless a fixed CNAME target is given: then the client's DNS
+  // must flatten that CNAME at the apex.
   const routing =
-    apex && !zoneId
+    apex && !zoneId && config
       ? config.recommendedIpv4s.apply((ips) => ips.map((value) => ({ hostname, type: 'A', name: hostname, value })))
       : cname.apply((value) => [{ hostname, type: 'CNAME', name: hostname, value }]);
   const clientDnsRecords = pulumi
