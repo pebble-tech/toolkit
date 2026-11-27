@@ -97,7 +97,6 @@ jobs:
       contents: read
       pull-requests: write
     env:
-      GITHUB_TOKEN: ${{ github.token }}
       BUILD_WORKFLOW: ${{ inputs.build-workflow }}
       TOOLKIT: ${{ github.workspace }}/.toolkit/.github/site-deploy
     steps:
@@ -112,6 +111,8 @@ jobs:
 
       - name: Decide from the event and the API (same repo, this run, PR head still this sha)
         id: decide
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: node "$TOOLKIT/site-deploy.mjs" decide preview
 
       - name: Download the artifact by the triggering run id
@@ -162,6 +163,7 @@ jobs:
         id: before-alias
         if: steps.decide.outputs.deploy == 'true' && inputs.alias-template != ''
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           PR: ${{ steps.decide.outputs.pr }}
           SHA: ${{ steps.decide.outputs.sha }}
         run: node "$TOOLKIT/site-deploy.mjs" recheck
@@ -191,6 +193,7 @@ jobs:
         id: before-comment
         if: steps.decide.outputs.deploy == 'true'
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           PR: ${{ steps.decide.outputs.pr }}
           SHA: ${{ steps.decide.outputs.sha }}
         run: node "$TOOLKIT/site-deploy.mjs" recheck
@@ -198,6 +201,7 @@ jobs:
       - name: Comment the preview URL on the PR (its number from the API, never the artifact)
         if: steps.before-comment.outputs.current == 'true'
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           PR: ${{ steps.decide.outputs.pr }}
           SHA: ${{ steps.decide.outputs.sha }}
           ARTIFACT_NAME: ${{ inputs.artifact-name }}
@@ -222,7 +226,6 @@ jobs:
       actions: read
       contents: read
     env:
-      GITHUB_TOKEN: ${{ github.token }}
       BUILD_WORKFLOW: ${{ inputs.build-workflow }}
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       VERCEL_ENVIRONMENT: ${{ inputs.vercel-environment }}
@@ -239,6 +242,8 @@ jobs:
 
       - name: Decide from the event and the API (same repo, this run, still the default branch's tip)
         id: decide
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: node "$TOOLKIT/site-deploy.mjs" decide staging
 
       - name: Download the artifact by the triggering run id

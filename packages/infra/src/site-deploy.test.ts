@@ -114,6 +114,9 @@ function violations(build: Workflow, deploy: Workflow): string[] {
       if (vercel && (step as any)['working-directory'] !== '${{ runner.temp }}/deploy') {
         found.push(`${where}: runs vercel outside the prepared directory (${step.name})`);
       }
+      if (vercel && (step.env?.GITHUB_TOKEN || (job as any).env?.GITHUB_TOKEN)) {
+        found.push(`${where}: the GitHub token reaches the Vercel CLI (${step.name})`);
+      }
       if (vercel && step.env?.VERCEL_PROJECT_ID !== '${{ inputs.vercel-project-id }}') {
         found.push(`${where}: the project id is not main's input (${step.name})`);
       }
@@ -189,6 +192,11 @@ describe('the site workflows', () => {
       'the PR number from elsewhere',
       (_b, d) => (d.jobs.preview!.steps!.at(-1)!.env!.PR = '${{ env.PR }}'),
       'not the verified',
+    ],
+    [
+      'the GitHub token in the job env',
+      (_b, d) => ((d.jobs.preview as any).env.GITHUB_TOKEN = '${{ github.token }}'),
+      'reaches the Vercel CLI',
     ],
     ['no concurrency', (_b, d) => delete d.jobs.preview!.concurrency, 'site-deploy#preview: no concurrency'],
   ])('fail on %s', (_what, breakIt, message) => {
