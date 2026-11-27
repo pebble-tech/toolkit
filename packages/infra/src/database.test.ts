@@ -8,10 +8,10 @@ const ADMIN_URL = 'postgresql://postgres.abc123:admin-pw@sin.pg.psdb.cloud:6432/
 const RUNTIME = { role: 'basefresh_app', password: 'runtime-pw' };
 type Extra = Omit<DatabaseArgs, 'stage' | 'adminUrl'>;
 
-async function databaseIn(stack: string, args: Extra = {}, product = 'basefresh') {
+async function databaseIn(stack: string, args: Extra = {}, product = 'basefresh', adminUrl = ADMIN_URL) {
   return runProgram({ project: product, stack }, async () => {
     const stage = new Stage('stage', { product });
-    const database = new Database('db', { stage, adminUrl: ADMIN_URL, ...args });
+    const database = new Database('db', { stage, adminUrl, ...args });
     return {
       database,
       directUrl: await valueOf(database.directUrl),
@@ -413,5 +413,206 @@ describe('Database', () => {
 
   test('refuses the shared stack', async () => {
     await expect(databaseIn('shared', { runtime: RUNTIME })).rejects.toThrow(OwnershipError);
+  });
+});
+
+describe('Database schemas', () => {
+  /** Name, schema and dependencies (as names) of each grant and default privilege. */
+  const granted = (resources: Registration[]) => {
+    const nameOf = new Map(resources.map((r) => [r.urn, r.name]));
+    return [
+      ...ofType(resources, 'postgresql:index/grant:Grant'),
+      ...ofType(resources, 'postgresql:index/defaultPrivileges:DefaultPrivileges'),
+    ]
+      .filter((r) => r.name.startsWith('db-runtime-') && r.name !== 'db-runtime-connect')
+      .map((r) => [
+        r.name,
+        r.inputs.schema,
+        r.inputs.objectType,
+        r.inputs.privileges,
+        r.dependencies.map((u) => nameOf.get(u)).sort(),
+      ]);
+  };
+
+  test('public and cms: public keeps its grants and names, cms is created, owned by the owner, and granted alike', async () => {
+    const { resources, result } = await databaseIn('staging', { runtime: RUNTIME, schemas: ['public', 'cms'] });
+    const before = children((await databaseIn('staging', { runtime: RUNTIME })).resources);
+    expect(children(resources)).toEqual(
+      [
+        ...before,
+        'postgresql:index/schema:Schema db-schema-cms',
+        'postgresql:index/grant:Grant db-runtime-schema-cms',
+        'postgresql:index/grant:Grant db-runtime-tables-cms',
+        'postgresql:index/grant:Grant db-runtime-sequences-cms',
+        'postgresql:index/defaultPrivileges:DefaultPrivileges db-runtime-default-tables-cms',
+        'postgresql:index/defaultPrivileges:DefaultPrivileges db-runtime-default-sequences-cms',
+      ].sort()
+    );
+    const schema = one(resources, 'db-schema-cms');
+    expect(schema.inputs).toEqual({ name: 'cms', database: 'basefresh_stg', owner: 'basefresh_stg_owner' });
+    // Creating a schema owned by the owner role needs the admin's SET ROLE membership, and the database.
+    const nameOf = new Map(resources.map((r) => [r.urn, r.name]));
+    expect(schema.dependencies.map((urn) => nameOf.get(urn)).sort()).toEqual(['db', 'db-admin-member']);
+    const tables = ['SELECT', 'INSERT', 'UPDATE', 'DELETE'];
+    const sequences = ['USAGE', 'SELECT', 'UPDATE'];
+    expect(granted(resources).filter(([name]) => String(name).endsWith('-cms'))).toEqual([
+      ['db-runtime-schema-cms', 'cms', 'schema', ['USAGE'], ['db', 'db-schema-cms']],
+      ['db-runtime-sequences-cms', 'cms', 'sequence', sequences, ['db', 'db-schema-cms']],
+      ['db-runtime-tables-cms', 'cms', 'table', tables, ['db', 'db-schema-cms']],
+      ['db-runtime-default-sequences-cms', 'cms', 'sequence', sequences, ['db', 'db-schema-cms']],
+      ['db-runtime-default-tables-cms', 'cms', 'table', tables, ['db', 'db-schema-cms']],
+    ]);
+    expect(one(resources, 'db-runtime-default-tables-cms').inputs).toMatchObject({
+      owner: 'basefresh_stg_owner',
+      role: 'basefresh_app',
+    });
+    expect(result.pooledWaitsFor).toEqual(
+      expect.arrayContaining(['db-runtime-schema-cms', 'db-runtime-default-tables-cms'])
+    );
+  });
+
+  test('cms alone grants nothing on public; the database revoke and CONNECT stay', async () => {
+    const { resources } = await databaseIn('staging', { schemas: ['cms'] });
+    expect(granted(resources).map(([name, schema]) => [name, schema])).toEqual([
+      ['db-runtime-schema-cms', 'cms'],
+      ['db-runtime-sequences-cms', 'cms'],
+      ['db-runtime-tables-cms', 'cms'],
+      ['db-runtime-default-sequences-cms', 'cms'],
+      ['db-runtime-default-tables-cms', 'cms'],
+    ]);
+    expect(one(resources, 'db-revoke-public').inputs).toMatchObject({ role: 'public', privileges: [] });
+    expect(one(resources, 'db-runtime-connect').inputs).toMatchObject({
+      role: 'basefresh_stg_runtime',
+      privileges: ['CONNECT'],
+    });
+  });
+
+  test('a preview creates the schema, owned by its one role, and grants nothing', async () => {
+    const { resources } = await databaseIn('pr-7', { schemas: ['public', 'cms'] });
+    expect(one(resources, 'db-schema-cms').inputs).toEqual({
+      name: 'cms',
+      database: 'basefresh_pr_7',
+      owner: 'basefresh_pr_7',
+    });
+    expect(granted(resources)).toEqual([]);
+  });
+
+  test('on prod the schema and its grants are protected and retained', async () => {
+    const { resources } = await databaseIn('prod', { runtime: RUNTIME, schemas: ['public', 'cms'] });
+    const added = resources.filter((r) => r.name.endsWith('-cms'));
+    expect(added.map((r) => [r.name, r.protect, r.retainOnDelete]).sort()).toEqual(
+      [
+        'db-runtime-default-sequences-cms',
+        'db-runtime-default-tables-cms',
+        'db-runtime-schema-cms',
+        'db-runtime-sequences-cms',
+        'db-runtime-tables-cms',
+        'db-schema-cms',
+      ].map((name) => [name, true, true])
+    );
+  });
+
+  test.each([
+    [['Cms'], 'schema "Cms" must match'],
+    [['my-cms'], 'schema "my-cms" must match'],
+    [['pg_cms'], 'schema "pg_cms" is reserved by Postgres'],
+    [['information_schema'], 'schema "information_schema" is reserved by Postgres'],
+    [[], 'schemas cannot be empty'],
+    [['cms', 'public', 'cms'], 'schema cms is listed twice'],
+  ])('refuses schemas %j', async (schemas, message) => {
+    await expect(databaseIn('staging', { schemas })).rejects.toThrow(DatabaseNameError);
+    await expect(databaseIn('pr-7', { schemas })).rejects.toThrow(message);
+  });
+});
+
+describe('Database on Neon', () => {
+  const NEON_HOST = 'ep-cool-123.ap-southeast-1.aws.neon.tech';
+  const NEON_URL = `postgresql://site.owner:admin-pw@${NEON_HOST}/neondb?sslmode=require&channel_binding=require`;
+  const neonIn = (stack: string, args: Extra = {}, adminUrl = NEON_URL) =>
+    databaseIn(stack, { flavor: 'neon', ...args }, 'basefresh', adminUrl);
+
+  test('the admin username is the role as given, with no .<branch> split, on the direct host', async () => {
+    const { resources } = await neonIn('staging');
+    const provider = resources.find((r) => r.type === 'pulumi:providers:postgresql')!;
+    expect(provider.inputs).toMatchObject({
+      host: NEON_HOST,
+      port: '5432',
+      username: 'site.owner',
+      databaseUsername: 'site.owner',
+      database: 'neondb',
+      sslmode: 'verify-full',
+      superuser: 'false',
+    });
+    expect(one(resources, 'db-admin-member').inputs).toEqual({ role: 'site.owner', grantRole: 'basefresh_stg_owner' });
+  });
+
+  test.each(['pr-7', 'staging', 'prod'])(
+    '%s grants no owner role to pebble_operators; the rest keeps its names',
+    async (stack) => {
+      const { resources } = await neonIn(stack);
+      const planetscale = children((await databaseIn(stack)).resources);
+      expect(children(resources)).toEqual(planetscale.filter((line) => !line.endsWith(' db-operators')));
+      expect(resources.filter((r) => r.inputs.role === OPERATORS_GROUP)).toEqual([]);
+    }
+  );
+
+  test('the URLs log in as the role names, the pooled one on the -pooler host, port 5432, channel binding kept', async () => {
+    const { result } = await neonIn('staging');
+    const direct = new URL(result.directUrl);
+    const pooled = new URL(result.pooledUrl!);
+    expect([direct.username, direct.hostname, direct.port, direct.pathname]).toEqual([
+      'basefresh_stg_owner',
+      NEON_HOST,
+      '5432',
+      '/basefresh_stg',
+    ]);
+    expect([pooled.username, pooled.password, pooled.hostname, pooled.port, pooled.pathname]).toEqual([
+      'basefresh_stg_runtime',
+      'mock-password-db-runtime-password',
+      'ep-cool-123-pooler.ap-southeast-1.aws.neon.tech',
+      '5432',
+      '/basefresh_stg',
+    ]);
+    for (const url of [direct, pooled]) {
+      expect([url.searchParams.get('sslmode'), url.searchParams.get('channel_binding')]).toEqual([
+        'verify-full',
+        'require',
+      ]);
+    }
+    expect(result.secret).toEqual([true, true]);
+  });
+
+  test('pooler host and port override the derived ones, with the role name unsplit', async () => {
+    const { result } = await neonIn('staging', { pooler: { host: 'pool.example.com', port: 6543 } });
+    const pooled = new URL(result.pooledUrl!);
+    expect([pooled.username, pooled.hostname, pooled.port]).toEqual([
+      'basefresh_stg_runtime',
+      'pool.example.com',
+      '6543',
+    ]);
+  });
+
+  test('a preview is the owner-only database on its own admin URL, with no pooled URL', async () => {
+    const { result, resources } = await neonIn('pr-7');
+    expect(one(resources, 'db').inputs).toMatchObject({ name: 'basefresh_pr_7', owner: 'basefresh_pr_7' });
+    expect(new URL(result.directUrl).username).toBe('basefresh_pr_7');
+    expect(result.pooledUrl).toBeUndefined();
+  });
+
+  test('refuses a pooled admin host: DDL goes to the direct endpoint', async () => {
+    const pooledAdmin = NEON_URL.replace('ep-cool-123.', 'ep-cool-123-pooler.');
+    // The URL is a secret Input, so the refusal comes from inside an apply and fails the run.
+    const program = () =>
+      runProgram({ project: 'basefresh', stack: 'staging' }, () => {
+        const stage = new Stage('stage', { product: 'basefresh' });
+        new Database('db', { stage, adminUrl: pulumi.secret(pooledAdmin), flavor: 'neon' });
+      });
+    await expect(program()).rejects.toThrow('the Neon admin URL must use the direct host, not the pooled one');
+  });
+
+  test('refuses an unknown flavor', async () => {
+    await expect(databaseIn('staging', { flavor: 'supabase' } as never)).rejects.toThrow(
+      'flavor "supabase" must be one of planetscale, neon'
+    );
   });
 });

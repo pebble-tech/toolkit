@@ -2,11 +2,16 @@ import * as postgresql from '@pulumi/postgresql';
 import * as pulumi from '@pulumi/pulumi';
 import * as random from '@pulumi/random';
 
-import { DatabaseNameError, OwnershipError } from './errors.js';
+import { DatabaseNameError, GuardrailError, OwnershipError } from './errors.js';
 import type { Stage } from './stage.js';
 
 const IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/;
 const DIRECT_PORT = 5432;
+const PUBLIC = 'public';
+
+/** Where the cluster runs: PlanetScale Postgres (the default) or a Neon project. */
+export type DatabaseFlavor = 'planetscale' | 'neon';
+const FLAVORS: readonly DatabaseFlavor[] = ['planetscale', 'neon'];
 
 export interface DatabaseRuntime {
   /** An existing role, used instead of the one the component makes. It is granted rights; it never owns anything. */
@@ -19,18 +24,34 @@ export interface DatabaseArgs {
   stage: Stage;
   /**
    * Admin connection URL for the cluster (a role with CREATEDB and CREATEROLE, not a superuser), as a secret. The
-   * component always connects on the direct port 5432 with `sslmode=verify-full`, whatever the URL says.
+   * component always connects on the direct port 5432 with `sslmode=verify-full`, whatever the URL says. On Neon it is
+   * the project owner's login on the branch's direct host (not the `-pooler` one): one Neon branch, one stack.
    */
   adminUrl: pulumi.Input<string>;
   /**
    * An existing role for runtimes on staging and prod. Without it the component makes `<database>_runtime`, a login
-   * role with a generated password; the pooler accepts a role made with SQL. Either role gets CONNECT, USAGE on
-   * `public`, DML on every table and sequence, and the same on tables and sequences the owner creates later. Refused on
-   * a preview, whose generated role is both owner and runtime.
+   * role with a generated password; the pooler accepts a role made with SQL. Either role gets CONNECT, and on each of
+   * `schemas` USAGE, DML on every table and sequence, and the same on tables and sequences the owner creates later.
+   * Refused on a preview, whose generated role is both owner and runtime.
    */
   runtime?: DatabaseRuntime;
-  /** The pooler endpoint; defaults to the admin host on port 6432. */
+  /**
+   * The pooler endpoint. On PlanetScale it defaults to the admin host on port 6432; on Neon to the admin host with
+   * `-pooler` added to its first label, on port 5432.
+   */
   pooler?: { host?: string; port?: number };
+  /**
+   * The schemas the runtime role is granted, `['public']` by default. Each schema other than `public` is created,
+   * owned by the owner role, on previews too. A list without `public` grants nothing on `public`. Names are lowercase
+   * identifiers, not `pg_*` or `information_schema`; an empty list or a repeated name is refused.
+   */
+  schemas?: string[];
+  /**
+   * `planetscale` (the default) or `neon`. Neon usernames carry no `.<branch>` suffix and a Neon project has no
+   * `pebble_operators` group, so on Neon no owner role is granted to it. Explicit: the admin URL is a secret and
+   * cannot decide which resources the program declares.
+   */
+  flavor?: DatabaseFlavor;
 }
 
 interface ParsedUrl {
@@ -52,14 +73,31 @@ function parseAdminUrl(raw: string): ParsedUrl {
   };
 }
 
-/** PlanetScale routes by a `.branch` suffix on the username; SQL role names carry none. */
-function splitUser(user: string): { role: string; branch: string } {
-  const dot = user.lastIndexOf('.');
+/**
+ * PlanetScale routes by a `.branch` suffix on the username; SQL role names carry none. Neon routes by host, so its
+ * usernames are role names as given.
+ */
+function splitUser(user: string, flavor: DatabaseFlavor): { role: string; branch: string } {
+  const dot = flavor === 'neon' ? -1 : user.lastIndexOf('.');
   return dot === -1 ? { role: user, branch: '' } : { role: user.slice(0, dot), branch: user.slice(dot + 1) };
 }
 
-function connectionUrl(admin: ParsedUrl, role: string, password: string, database: string, host: string, port: number) {
-  const { branch } = splitUser(admin.user);
+/** Neon's pooled endpoint for a direct host: `ep-x-123.region.aws.neon.tech` -> `ep-x-123-pooler.region.aws.neon.tech`. */
+function neonPoolerHost(host: string): string {
+  const [first, ...rest] = host.split('.');
+  return [`${first}-pooler`, ...rest].join('.');
+}
+
+function connectionUrl(
+  admin: ParsedUrl,
+  flavor: DatabaseFlavor,
+  role: string,
+  password: string,
+  database: string,
+  host: string,
+  port: number
+) {
+  const { branch } = splitUser(admin.user, flavor);
   const url = new URL(`postgresql://${host}:${port}/${database}${admin.search}`);
   url.username = branch ? `${role}.${branch}` : role;
   url.password = password;
@@ -70,7 +108,19 @@ function connectionUrl(admin: ParsedUrl, role: string, password: string, databas
 /** DML for the runtime role, on what exists now and on what the owner creates later. */
 const TABLE_PRIVILEGES = ['SELECT', 'INSERT', 'UPDATE', 'DELETE'];
 const SEQUENCE_PRIVILEGES = ['USAGE', 'SELECT', 'UPDATE'];
-const SCHEMA = 'public';
+
+/** Throws unless `schemas` is a non-empty list of distinct schema names a component may create and grant on. */
+function assertSchemas(schemas: string[]): void {
+  if (schemas.length === 0) throw new DatabaseNameError('schemas cannot be empty: leave it out for public');
+  for (const schema of schemas) {
+    if (!IDENTIFIER.test(schema)) throw new DatabaseNameError(`schema "${schema}" must match ${IDENTIFIER}`);
+    if (schema.startsWith('pg_') || schema === 'information_schema') {
+      throw new DatabaseNameError(`schema "${schema}" is reserved by Postgres`);
+    }
+  }
+  const duplicate = schemas.find((schema, index) => schemas.indexOf(schema) !== index);
+  if (duplicate) throw new DatabaseNameError(`schema ${duplicate} is listed twice`);
+}
 
 /**
  * The cluster's operators group (NOLOGIN). Every database's owner role is granted to it, so a member can connect to,
@@ -86,16 +136,34 @@ export const OPERATORS_GROUP = 'pebble_operators';
  */
 export const KEEP_MEMBERSHIP = { ignoreChanges: ['withAdminOption'] };
 
-/** The admin's Postgres provider: direct port 5432, `sslmode=verify-full`, never superuser, whatever the URL says. */
-export function adminProvider(name: string, adminUrl: pulumi.Input<string>, parent: pulumi.Resource) {
-  const admin = pulumi.secret(pulumi.output(adminUrl).apply(parseAdminUrl));
+/**
+ * The admin's Postgres provider: direct port 5432, `sslmode=verify-full`, never superuser, whatever the URL says. On
+ * Neon a `-pooler` admin host is refused: DDL and role grants go to the direct endpoint.
+ */
+export function adminProvider(
+  name: string,
+  adminUrl: pulumi.Input<string>,
+  parent: pulumi.Resource,
+  flavor: DatabaseFlavor = 'planetscale'
+) {
+  const admin = pulumi.secret(
+    pulumi.output(adminUrl).apply((raw) => {
+      const parsed = parseAdminUrl(raw);
+      if (flavor === 'neon' && parsed.host.split('.')[0]!.endsWith('-pooler')) {
+        throw new DatabaseNameError(
+          `the Neon admin URL must use the direct host, not the pooled one (${parsed.host}): drop "-pooler"`
+        );
+      }
+      return parsed;
+    })
+  );
   const provider = new postgresql.Provider(
     `${name}-admin`,
     {
       host: admin.host,
       port: DIRECT_PORT,
       username: admin.user,
-      databaseUsername: admin.user.apply((user) => splitUser(user).role),
+      databaseUsername: admin.user.apply((user) => splitUser(user, flavor).role),
       password: admin.password,
       database: admin.database,
       sslmode: 'verify-full',
@@ -146,8 +214,9 @@ function propertyNames(args: object): string[] {
 }
 
 /**
- * A database in an existing Postgres cluster (PlanetScale), owned by a login role the component creates, with grants
- * for the runtime role on staging and prod. Outputs connection URLs as secrets. Retained and protected on prod.
+ * A database in an existing Postgres cluster (PlanetScale, or a Neon branch with `flavor: 'neon'`), owned by a login
+ * role the component creates, with its `schemas` and grants for the runtime role on staging and prod. Outputs
+ * connection URLs as secrets. Retained and protected on prod.
  */
 export class Database extends pulumi.ComponentResource {
   readonly databaseName: string;
@@ -157,11 +226,17 @@ export class Database extends pulumi.ComponentResource {
   readonly directUrl: pulumi.Output<string>;
   /** `<databaseName>_runtime` on staging and prod unless `runtime` names another role; none on a preview. */
   readonly runtimeRole: string | undefined;
-  /** Pooled connection (port 6432) as the runtime role, on staging and prod only. */
+  /** Pooled connection (PlanetScale port 6432, Neon's `-pooler` host) as the runtime role, on staging and prod only. */
   readonly pooledUrl: pulumi.Output<string> | undefined;
 
   constructor(name: string, args: DatabaseArgs, opts?: pulumi.ComponentResourceOptions) {
     const { stage } = args;
+    const flavor = args.flavor ?? 'planetscale';
+    if (!FLAVORS.includes(flavor)) {
+      throw new GuardrailError(`flavor "${String(flavor)}" must be one of ${FLAVORS.join(', ')}`);
+    }
+    const schemas = args.schemas ?? [PUBLIC];
+    assertSchemas(schemas);
     // The name is the stage's, never the caller's: a preview cannot name staging's database on the shared cluster.
     stage.requireKind('a database', ['preview', 'staging', 'prod']);
     const databaseName = stage.databaseName();
@@ -192,7 +267,7 @@ export class Database extends pulumi.ComponentResource {
     }
     super('pebbletech:index:Database', name, {}, opts);
 
-    const { admin, provider } = adminProvider(name, args.adminUrl, this);
+    const { admin, provider } = adminProvider(name, args.adminUrl, this, flavor);
     const withProvider = (extra?: pulumi.CustomResourceOptions) => stage.childOptions(this, { ...extra, provider });
 
     const password = new random.RandomPassword(
@@ -211,7 +286,7 @@ export class Database extends pulumi.ComponentResource {
     // may grant this membership because it created the owner role (PlanetScale-made roles only `pscale_admin` can).
     const membership = new postgresql.GrantRole(
       `${name}-admin-member`,
-      { role: admin.user.apply((user) => splitUser(user).role), grantRole: ownerRole },
+      { role: admin.user.apply((user) => splitUser(user, flavor).role), grantRole: ownerRole },
       withProvider({ dependsOn: [owner], ...KEEP_MEMBERSHIP })
     );
     const database = new postgresql.Database(
@@ -224,6 +299,19 @@ export class Database extends pulumi.ComponentResource {
       { database: database.name, role: 'public', objectType: 'database', privileges: [] },
       withProvider()
     );
+
+    // Schemas other than public, owned by the owner role. Creating one with an owner needs SET ROLE to it, as above.
+    const created = new Map<string, postgresql.Schema>();
+    for (const schema of schemas.filter((schema) => schema !== PUBLIC)) {
+      created.set(
+        schema,
+        new postgresql.Schema(
+          `${name}-schema-${schema}`,
+          { name: schema, database: database.name, owner: ownerRole },
+          withProvider({ dependsOn: [database, membership] })
+        )
+      );
+    }
 
     let runtime: { role: pulumi.Input<string>; password: pulumi.Input<string> } | undefined = args.runtime;
     if (runtimeRole && !runtime) {
@@ -245,51 +333,71 @@ export class Database extends pulumi.ComponentResource {
     const runtimeGrants: pulumi.CustomResource[] = [];
     if (runtime) {
       const role = runtime.role;
-      const grant = (kind: string, args: Omit<postgresql.GrantArgs, 'database' | 'role'>) =>
+      const grant = (
+        kind: string,
+        args: Omit<postgresql.GrantArgs, 'database' | 'role'>,
+        extra?: pulumi.CustomResourceOptions
+      ) =>
         runtimeGrants.push(
-          new postgresql.Grant(`${name}-runtime-${kind}`, { database: database.name, role, ...args }, withProvider())
+          new postgresql.Grant(
+            `${name}-runtime-${kind}`,
+            { database: database.name, role, ...args },
+            withProvider(extra)
+          )
         );
       grant('connect', { objectType: 'database', privileges: ['CONNECT'] });
-      grant('schema', { objectType: 'schema', schema: SCHEMA, privileges: ['USAGE'] });
-      grant('tables', { objectType: 'table', schema: SCHEMA, privileges: TABLE_PRIVILEGES });
-      grant('sequences', { objectType: 'sequence', schema: SCHEMA, privileges: SEQUENCE_PRIVILEGES });
-      // Tables and sequences the owner creates later (migrations run as the owner).
-      for (const [kind, privileges] of [
-        ['table', TABLE_PRIVILEGES],
-        ['sequence', SEQUENCE_PRIVILEGES],
-      ] as const) {
-        const defaults = new postgresql.DefaultPrivileges(
-          `${name}-runtime-default-${kind}s`,
-          {
-            database: database.name,
-            owner: ownerRole,
-            role,
-            schema: SCHEMA,
-            objectType: kind,
-            privileges,
-          },
-          withProvider()
-        );
-        runtimeGrants.push(defaults);
+      // Public keeps its 0.7.0 names; every other schema's names end with `-<schema>`. A schema name has no `-`, so
+      // no two names collide.
+      for (const schema of schemas) {
+        const suffix = schema === PUBLIC ? '' : `-${schema}`;
+        const made = created.get(schema);
+        const extra = made ? { dependsOn: [made] } : undefined;
+        grant(`schema${suffix}`, { objectType: 'schema', schema, privileges: ['USAGE'] }, extra);
+        grant(`tables${suffix}`, { objectType: 'table', schema, privileges: TABLE_PRIVILEGES }, extra);
+        grant(`sequences${suffix}`, { objectType: 'sequence', schema, privileges: SEQUENCE_PRIVILEGES }, extra);
+        // Tables and sequences the owner creates later (migrations run as the owner).
+        for (const [kind, privileges] of [
+          ['table', TABLE_PRIVILEGES],
+          ['sequence', SEQUENCE_PRIVILEGES],
+        ] as const) {
+          const defaults = new postgresql.DefaultPrivileges(
+            `${name}-runtime-default-${kind}s${suffix}`,
+            {
+              database: database.name,
+              owner: ownerRole,
+              role,
+              schema,
+              objectType: kind,
+              privileges,
+            },
+            withProvider(extra)
+          );
+          runtimeGrants.push(defaults);
+        }
       }
     }
 
     // On PostgreSQL 16+ a plain GRANT gives INHERIT TRUE (the group's default) and SET TRUE. The group must exist:
     // `Operators` creates it, earlier in this stack (then this grant waits for it) or in the cluster's operators stack.
-    const group = operatorsGroup();
-    new postgresql.GrantRole(
-      `${name}-operators`,
-      { role: OPERATORS_GROUP, grantRole: ownerRole },
-      withProvider({ dependsOn: [owner, ...(group ? [group] : [])], ...KEEP_MEMBERSHIP })
-    );
+    // A Neon project has no operators group: its owner login already holds every role it made.
+    if (flavor === 'planetscale') {
+      const group = operatorsGroup();
+      new postgresql.GrantRole(
+        `${name}-operators`,
+        { role: OPERATORS_GROUP, grantRole: ownerRole },
+        withProvider({ dependsOn: [owner, ...(group ? [group] : [])], ...KEEP_MEMBERSHIP })
+      );
+    }
 
+    const poolerHost = (host: string) => args.pooler?.host ?? (flavor === 'neon' ? neonPoolerHost(host) : host);
+    const poolerPort = args.pooler?.port ?? (flavor === 'neon' ? DIRECT_PORT : 6432);
     this.databaseName = databaseName;
     this.ownerRole = ownerRole;
     this.runtimeRole = runtimeRole;
     this.directUrl = pulumi.secret(
       pulumi
         .all([admin, ownerPassword, database.name])
-        .apply(([a, password, db]) => connectionUrl(a, ownerRole, password, db, a.host, DIRECT_PORT))
+        .apply(([a, password, db]) => connectionUrl(a, flavor, ownerRole, password, db, a.host, DIRECT_PORT))
     );
     this.pooledUrl =
       runtime && runtimeRole
@@ -297,7 +405,7 @@ export class Database extends pulumi.ComponentResource {
             pulumi
               .all([admin, runtime.password, database.name, pulumi.all(runtimeGrants.map((grant) => grant.id))])
               .apply(([a, password, db]) =>
-                connectionUrl(a, runtimeRole, password, db, args.pooler?.host ?? a.host, args.pooler?.port ?? 6432)
+                connectionUrl(a, flavor, runtimeRole, password, db, poolerHost(a.host), poolerPort)
               )
           )
         : undefined;

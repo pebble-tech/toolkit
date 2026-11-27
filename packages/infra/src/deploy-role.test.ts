@@ -562,4 +562,43 @@ describe('DeployRole', () => {
       await expect(roleFor('staging', { apex })).rejects.toThrow(/zone name/);
     }
   );
+
+  describe('awsResources', () => {
+    /** Each resource's type, name and inputs, policy included. */
+    const shape = (resources: { type: string; name: string; inputs: Record<string, any> }[]) =>
+      resources.map((r) => [r.type, r.name, r.inputs]).sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+    const policyOf = (resources: { type: string }[]) =>
+      JSON.parse(find(resources, 'aws:iam/rolePolicy:RolePolicy').inputs.policy);
+    const sids = (resources: { type: string }[]) => policyOf(resources).Statement.map((s: { Sid: string }) => s.Sid);
+
+    test.each(['staging', 'prod'] as const)(
+      '%s with awsResources false keeps only the state statements, and the same role, trust, boundary and protection',
+      async (env) => {
+        const off = (await roleFor(env, { awsResources: false })).resources;
+        const on = (await roleFor(env)).resources;
+        expect(sids(off)).toEqual(['StateList', 'StateObjects', 'StateSecrets']);
+        // The full policy's own state statements, so the state paths and key stay this env's.
+        expect(policyOf(off).Statement).toEqual(
+          policyOf(on).Statement.filter((s: { Sid: string }) => s.Sid.startsWith('State'))
+        );
+        const lambda = `arn:aws:lambda:ap-southeast-1:1:function:basefresh-${env}-api`;
+        expect(allows(policyOf(off), 'lambda:CreateFunction', lambda)).toBe(false);
+        const withoutPolicy = (resources: typeof on) => shape(resources.filter((r) => r.name !== 'deploy-policy'));
+        expect(withoutPolicy(off)).toEqual(withoutPolicy(on));
+        expect(off.map((r) => [r.name, r.urn, r.protect, r.retainOnDelete]).sort()).toEqual(
+          on.map((r) => [r.name, r.urn, r.protect, r.retainOnDelete]).sort()
+        );
+      }
+    );
+
+    test('only awsResources false turns the AWS statements off, and a preview ignores it', async () => {
+      const staging = (await roleFor('staging')).resources;
+      expect(shape((await roleFor('staging', { awsResources: true })).resources)).toEqual(shape(staging));
+      expect(sids(staging)).toContain('Lambda');
+      expect(sids((await roleFor('staging', { awsResources: false })).resources)).not.toContain('Lambda');
+      const preview = (await roleFor('preview')).resources;
+      expect(shape((await roleFor('preview', { awsResources: true })).resources)).toEqual(shape(preview));
+      expect(sids(preview)).toEqual(['StateList', 'StateObjects', 'StateSecrets']);
+    });
+  });
 });
