@@ -1,6 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
+import https from 'node:https';
+import { syncBuiltinESMExports } from 'node:module';
 import type { AddressInfo } from 'node:net';
+import { Readable, Writable } from 'node:stream';
 import { getPayload, handleEndpoints, type Payload, type SanitizedConfig } from 'payload';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
@@ -76,6 +79,38 @@ async function api(
   const text = await response.text();
   return { status: response.status, json: text ? JSON.parse(text) : null };
 }
+
+// R2 at its boundary: the AWS SDK's HTTPS request. Every PUT is answered 200 and recorded as the object key it writes.
+function fakeR2(): { puts: string[]; restore: () => void } {
+  const puts: string[] = [];
+  const spy = vi.spyOn(https, 'request').mockImplementation(((options: https.RequestOptions, onResponse: never) => {
+    const request = new Writable({
+      write(_chunk, _encoding, done) {
+        done();
+      },
+      final(done) {
+        if (options.method === 'PUT') puts.push(String(options.path).split('?')[0]!);
+        const response = Object.assign(Readable.from([]), { statusCode: 200, statusMessage: 'OK', headers: {} });
+        (onResponse as (res: unknown) => void)(response);
+        done();
+      },
+    });
+    return Object.assign(request, { setTimeout: () => request, setNoDelay: () => {}, setSocketKeepAlive: () => {} });
+  }) as never);
+  syncBuiltinESMExports();
+  return {
+    puts,
+    restore: () => {
+      spy.mockRestore();
+      syncBuiltinESMExports();
+    },
+  };
+}
+
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  'base64'
+);
 
 // Setup runs in beforeAll, where oxlint's vitest rules allow no expect: a failed step throws instead.
 function setupStep(ok: boolean, message: string): void {
@@ -441,6 +476,46 @@ describe.skipIf(skipped)(`@pebbletech/cms on Postgres${skipped ? ` (${skipReason
         expect(key).not.toBe(serverOnlyKey);
         expect(signed.json.headers['If-None-Match']).toBe('*');
         expect(new URL(signed.json.url).searchParams.get('X-Amz-SignedHeaders')).toContain('if-none-match');
+      }
+    });
+
+    test('a create-only upload to a storage collection can never write a media object, whatever its name or prefix', async () => {
+      const upload = async (collection: string, auth: string, fields: Record<string, unknown>) => {
+        const form = new FormData();
+        form.append('file', new Blob([PNG], { type: 'image/png' }), 'photo.png');
+        form.append('_payload', JSON.stringify(fields));
+        const response = await handleEndpoints({
+          config,
+          request: new Request(`http://localhost:3000/api/${collection}`, {
+            method: 'POST',
+            headers: { authorization: auth },
+            body: form,
+          }),
+        });
+        return { status: response.status, json: JSON.parse(await response.text()) };
+      };
+      const r2 = fakeR2();
+      try {
+        const media = await upload('media', editorAuth, { alt: 'public' });
+        expect(media.status).toBe(201);
+        const mediaKey = r2.puts.at(-1);
+        expect(mediaKey).toBe('/photo.png');
+
+        // The first is a plain upload. The others try to steer the key with a prefix; where the collection has no
+        // prefix field Payload refuses them, so only the keys that were written are asserted.
+        const plain = await upload('stamp-pngs', `users API-Key ${submitterKey}`, {});
+        expect(plain.status).toBe(201);
+        // Media keeps its URL; the opted-out collection's URLs carry its folder.
+        expect(media.json.doc.url).toBe('https://media.example/photo.png');
+        expect(plain.json.doc.url).toBe('https://media.example/stamp-pngs/photo.png');
+        for (const fields of [{ prefix: media.json.doc.prefix ?? '' }, { prefix: '../' }, { prefix: '/x/../y' }]) {
+          await upload('stamp-pngs', `users API-Key ${submitterKey}`, fields);
+        }
+        expect(r2.puts.filter((key) => key === mediaKey)).toHaveLength(1);
+        expect(r2.puts.slice(1).every((key) => key.startsWith('/stamp-pngs/'))).toBe(true);
+        expect(r2.puts.length).toBeGreaterThan(1);
+      } finally {
+        r2.restore();
       }
     });
 

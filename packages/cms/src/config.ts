@@ -129,7 +129,7 @@ const signOnlyAllowedTypes =
     }),
   });
 
-function r2Plugin(storage: R2StorageOptions, slugs: string[], clientUploads: boolean): Plugin {
+function r2Plugin(storage: R2StorageOptions, slugs: string[], clientUploads: boolean, folders = false): Plugin {
   const base = storage.mediaBaseUrl?.replace(/\/+$/, '');
   const collection = base
     ? {
@@ -141,7 +141,11 @@ function r2Plugin(storage: R2StorageOptions, slugs: string[], clientUploads: boo
   return s3Storage({
     bucket: storage.bucket,
     clientUploads,
-    collections: Object.fromEntries(slugs.map((slug) => [slug, collection])),
+    // `prefix: slug` is the collection's own folder: every key it writes, and any prefix a caller sets on a document, stays
+    // beneath it, so an upload cannot name a key another collection owns.
+    collections: Object.fromEntries(
+      slugs.map((slug) => [slug, folders ? { ...(collection === true ? {} : collection), prefix: slug } : collection])
+    ),
     config: {
       endpoint: `https://${storage.accountId}.r2.cloudflarestorage.com`,
       region: 'auto',
@@ -153,6 +157,8 @@ function r2Plugin(storage: R2StorageOptions, slugs: string[], clientUploads: boo
   });
 }
 
+// Media and the listed collections keep the bucket root, where existing files already are. An opted-out collection is
+// new, so it gets its own folder: a server-side upload is a plain PUT that replaces whatever is at its key.
 // One s3Storage instance per upload mode: `clientUploads` is an instance option, and an instance with it off adds no
 // signing route or browser upload handler for its collections, so they upload through the CMS only.
 function storagePlugins(
@@ -160,10 +166,15 @@ function storagePlugins(
   entries: NonNullable<CmsConfigOptions['storageCollections']>
 ): Plugin[] {
   const serverOnly = entries.filter((entry) => typeof entry === 'object').map((entry) => entry.slug);
+  if (serverOnly.includes(MEDIA_SLUG)) {
+    throw new Error(
+      'storageCollections cannot opt media out of signed client uploads: the media library uploads from the browser'
+    );
+  }
   const signed = entries.filter((entry) => typeof entry === 'string').filter((slug) => !serverOnly.includes(slug));
   return [
     r2Plugin(storage, [MEDIA_SLUG, ...signed], true),
-    ...(serverOnly.length > 0 ? [r2Plugin(storage, serverOnly, false)] : []),
+    ...(serverOnly.length > 0 ? [r2Plugin(storage, serverOnly, false, true)] : []),
     signOnlyAllowedTypes(new Set(serverOnly)),
   ];
 }

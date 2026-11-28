@@ -79,6 +79,14 @@ describe('storageCollections', () => {
   });
 });
 
+describe('storageCollections media', () => {
+  test('media cannot opt out of signed client uploads', () => {
+    expect(() =>
+      createCmsConfig({ storage: r2, storageCollections: [{ slug: 'media', clientUploads: false }] })
+    ).toThrow('cannot opt media out of signed client uploads');
+  });
+});
+
 describe('shape', () => {
   test('types are written with declare: false; locales default to en; uploads cap at 10 MB', async () => {
     const config = await createCmsConfig({ typesOutputFile: '/tmp/payload-types.ts' });
