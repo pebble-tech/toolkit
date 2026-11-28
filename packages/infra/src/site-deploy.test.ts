@@ -163,6 +163,14 @@ function violations(build: Workflow, deploy: Workflow): string[] {
     ) {
       found.push(`${where}: the download is not by the decided run id`);
     }
+    // The project's root directory is main's input, handed to prepare through the environment, never the artifact's.
+    const prepare = step(job, 'Prepare');
+    if (
+      prepare?.env?.ROOT_DIRECTORY !== '${{ inputs.working-directory }}' ||
+      !prepare.run?.endsWith('site-deploy.mjs" prepare "$RUNNER_TEMP/artifact" "$RUNNER_TEMP/deploy" "$ROOT_DIRECTORY"')
+    ) {
+      found.push(`${where}: prepare does not get main's working-directory through ROOT_DIRECTORY`);
+    }
     const token = step(job, 'The Vercel token is set');
     const tokenTest = /^\s*if \[ -z "\$VERCEL_TOKEN" \]; then\n[^\n]*\n\s*exit 1\n\s*fi\s*$/m;
     if (!tokenTest.test(token?.run ?? '') || token?.if !== DECIDED) {
@@ -433,6 +441,16 @@ describe('the site workflows', () => {
       'site-deploy#preview: "Deploy the preview" runs whatever decide decided',
     ],
     [
+      'a preview prepare with no root directory',
+      (_b, d) => delete p(d, 'Prepare').env!.ROOT_DIRECTORY,
+      'site-deploy#preview: prepare does not get main',
+    ],
+    [
+      'a staging prepare that takes the root directory from the artifact',
+      (_b, d) => (st(d, 'Prepare').env!.ROOT_DIRECTORY = '${{ steps.decide.outputs.sha }}'),
+      'site-deploy#staging: prepare does not get main',
+    ],
+    [
       'a prepare that ignores the decision',
       (_b, d) => (st(d, 'Prepare').if = 'always()'),
       'site-deploy#staging: "Prepare',
@@ -539,6 +557,13 @@ describe('the copyable stubs', () => {
       'pebble-tech/toolkit/.github/workflows/site-deploy.yml',
       sha(buildJob!.uses!),
       sha(buildJob!.uses!),
+    ]);
+  });
+
+  test('the deploy stub gets the same working-directory as the build stub, so the project root exists for the CLI', () => {
+    expect([deployJob!.with!['working-directory'], buildJob!.with!['working-directory']]).toEqual([
+      'apps/marketing',
+      'apps/marketing',
     ]);
   });
 
@@ -992,6 +1017,62 @@ describe('prepare', () => {
       expect.stringContaining('is not empty'),
       ['package.json'],
     ]);
+  });
+
+  describe('with the project root directory', () => {
+    test('makes it an empty directory beside .vercel/output, and no file anywhere else', async () => {
+      const to = mkdtempSync(join(tmpdir(), 'site-deploy-dir-'));
+      const result = await script(['prepare', artifact(OUTPUT), to, 'apps/marketing'], {});
+      expect([
+        result.code,
+        readdirSync(join(to, 'apps/marketing')),
+        readdirSync(to).sort(),
+        readdirSync(join(to, 'apps')),
+        tree(to).every((file) => file.startsWith('.vercel/output/')),
+      ]).toEqual([0, [], ['.vercel', 'apps'], ['marketing'], true]);
+    });
+
+    test.each(['', undefined])('without one (%j) leaves the tree as it was', async (root) => {
+      const to = mkdtempSync(join(tmpdir(), 'site-deploy-dir-'));
+      const result = await script(['prepare', artifact(OUTPUT), to, ...(root === undefined ? [] : [root])], {});
+      expect([result.code, readdirSync(to)]).toEqual([0, ['.vercel']]);
+    });
+
+    test.each([
+      ['a parent segment', '../marketing'],
+      ['a parent segment in the middle', 'apps/../marketing'],
+      ['an absolute path', '/apps/marketing'],
+      ['an empty segment', 'apps//marketing'],
+      ['a trailing slash', 'apps/marketing/'],
+      ['a dot segment', './apps'],
+      ['a backslash', 'apps\\marketing'],
+      ['a newline', 'apps\nmarketing'],
+      ['more than 64 bytes', `apps/${'a'.repeat(60)}`],
+      ['.vercel itself', '.vercel'],
+      ['a path inside .vercel', '.vercel/output/apps'],
+    ])('refuses %s as the root directory, and creates nothing', async (_what, root) => {
+      const to = mkdtempSync(join(tmpdir(), 'site-deploy-dir-'));
+      const result = await script(['prepare', artifact(OUTPUT), to, root], {});
+      expect([result.code, result.stderr, readdirSync(to)]).toEqual([
+        1,
+        expect.stringContaining('root directory'),
+        [],
+      ]);
+    });
+
+    test('takes exactly 64 bytes', async () => {
+      const to = mkdtempSync(join(tmpdir(), 'site-deploy-dir-'));
+      const root = `apps/${'a'.repeat(59)}`;
+      const result = await script(['prepare', artifact(OUTPUT), to, root], {});
+      expect([result.code, readdirSync(join(to, root))]).toEqual([0, []]);
+    });
+
+    test('refuses a root directory that is already in the destination, and adds nothing', async () => {
+      const to = mkdtempSync(join(tmpdir(), 'site-deploy-dir-'));
+      mkdirSync(join(to, 'apps/marketing'), { recursive: true });
+      const result = await script(['prepare', artifact(OUTPUT), to, 'apps/marketing'], {});
+      expect([result.code, result.stderr, tree(to)]).toEqual([1, expect.stringContaining('is not empty'), []]);
+    });
   });
 
   test.each([

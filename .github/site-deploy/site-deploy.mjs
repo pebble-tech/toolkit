@@ -3,7 +3,8 @@
 // payload GitHub wrote, the GitHub API and main's workflow inputs: nothing the artifact claims decides anything.
 //
 //   node site-deploy.mjs decide <preview|staging>   whether to deploy, and the verified run, sha and PR number
-//   node site-deploy.mjs prepare <artifact> <dir>   <dir>/.vercel/output from a downloaded artifact, or a refusal
+//   node site-deploy.mjs prepare <artifact> <dir> [root]   <dir>/.vercel/output from a downloaded artifact (and an
+//                                                          empty <dir>/<root>, the project's root directory), or a refusal
 //   node site-deploy.mjs runtime-env <args-file>    masks each RUNTIME_ENV value and writes one `--env` per line
 //   node site-deploy.mjs alias                      the preview alias from ALIAS_TEMPLATE, validated, or nothing
 //   node site-deploy.mjs recheck                    whether PR is still open with SHA as its head
@@ -207,8 +208,25 @@ function parseFile(artifact, rel) {
  * function config that maps files from elsewhere (`filePathMap`) or sets its own `environment`, and an output with no
  * version 3 `config.json`. Leaves out `builds.json` (the build's own report, which `--prebuilt` reads) and the
  * `.vercel` files a project link would use.
+ *
+ * `root` (main's input, never the artifact's) is the Vercel project's root directory, such as `apps/marketing`. It is
+ * made as an empty directory beside `.vercel`, because `vercel deploy --prebuilt` fails unless `<cwd>/<root>` exists.
+ * The CLI only stats this directory and uploads nothing from it. It must be a plain relative path, outside `.vercel`,
+ * and not already there.
  */
-export function prepare(artifact, dir) {
+export function prepare(artifact, dir, root = '') {
+  if (root !== '') {
+    const segments = root.split('/');
+    if (
+      Buffer.byteLength(root) > 64 ||
+      /[\\\0\r\n]/.test(root) ||
+      isAbsolute(root) ||
+      segments.some((s) => s === '' || s === '.' || s === '..') ||
+      segments[0] === '.vercel'
+    ) {
+      throw new Refusal(`root directory ${JSON.stringify(root)} is not a plain relative path outside .vercel`);
+    }
+  }
   if (existsSync(dir) && readdirSync(dir).length > 0) throw new Refusal(`${dir} is not empty`);
   const files = [];
   const walk = (at) => {
@@ -242,6 +260,9 @@ export function prepare(artifact, dir) {
     mkdirSync(join(output, rel, '..'), { recursive: true });
     copyFileSync(join(artifact, rel), join(output, rel));
   }
+  // The destination was empty, so the root cannot already exist unless the Build Output made it: `.vercel/output`
+  // holds the only thing written so far, and a root outside `.vercel` never collides with it.
+  if (root !== '') mkdirSync(join(dir, root), { recursive: true });
   return { kept: kept.length, skipped: files.filter((rel) => skipped.has(rel)) };
 }
 
@@ -351,7 +372,7 @@ async function main([command, ...args]) {
       return;
     }
     case 'prepare': {
-      const { kept, skipped } = prepare(args[0], args[1]);
+      const { kept, skipped } = prepare(args[0], args[1], args[2] ?? '');
       process.stdout.write(`copied ${kept} files; left out ${skipped.join(', ') || 'nothing'}\n`);
       return;
     }

@@ -194,8 +194,13 @@ jobs:
           VERCEL_PROJECT_ID: prj_main
           VERCEL_ORG_ID: team_main
         run: |
-          node "$SCRIPT" prepare "$RUNNER_TEMP/hostile" "$RUNNER_TEMP/deploy"
+          node "$SCRIPT" prepare "$RUNNER_TEMP/hostile" "$RUNNER_TEMP/deploy" apps/marketing
           cd "$RUNNER_TEMP/deploy"
+          # The project's root directory, as main passes it: an empty directory beside .vercel, never inside it.
+          test -d apps/marketing
+          test -z "$(ls -A apps/marketing)"
+          test ! -e .vercel/output/apps
+          test "$(ls -A . | wc -l)" = 2
           vercel deploy --prebuilt --environment=preview --yes > "$RUNNER_TEMP/deploy-out"
           GITHUB_OUTPUT="$RUNNER_TEMP/outputs" node "$SCRIPT" deployment-url "$RUNNER_TEMP/deploy-out"
           grep -qx 'url=https://fake-deployment.vercel.app' "$RUNNER_TEMP/outputs"

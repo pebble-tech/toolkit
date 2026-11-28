@@ -46,6 +46,13 @@ on:
         description: Production and staging hostnames (comma or space separated) an alias may never be.
         type: string
         default: ''
+      working-directory:
+        description: >-
+          The Vercel project's root directory, e.g. apps/marketing, the same value site-build gets. Main's input, never
+          read from the artifact. prepare makes it an empty directory beside .vercel/output, because the CLI fails
+          unless it exists.
+        type: string
+        default: ''
       runtime-vars:
         description: Plain runtime env vars for the deployment, a JSON object of strings (vercel deploy --env).
         type: string
@@ -170,7 +177,9 @@ jobs:
 
       - name: Prepare a fresh directory holding only .vercel/output
         if: steps.decide.outputs.deploy == 'true'
-        run: node "$TOOLKIT/site-deploy.mjs" prepare "$RUNNER_TEMP/artifact" "$RUNNER_TEMP/deploy"
+        env:
+          ROOT_DIRECTORY: ${{ inputs.working-directory }}
+        run: node "$TOOLKIT/site-deploy.mjs" prepare "$RUNNER_TEMP/artifact" "$RUNNER_TEMP/deploy" "$ROOT_DIRECTORY"
 
       - name: Runtime env (each RUNTIME_ENV value masked)
         if: steps.decide.outputs.deploy == 'true'
@@ -337,7 +346,9 @@ jobs:
 
       - name: Prepare a fresh directory holding only .vercel/output
         if: steps.decide.outputs.deploy == 'true'
-        run: node "$TOOLKIT/site-deploy.mjs" prepare "$RUNNER_TEMP/artifact" "$RUNNER_TEMP/deploy"
+        env:
+          ROOT_DIRECTORY: ${{ inputs.working-directory }}
+        run: node "$TOOLKIT/site-deploy.mjs" prepare "$RUNNER_TEMP/artifact" "$RUNNER_TEMP/deploy" "$ROOT_DIRECTORY"
 
       - name: Runtime env (each RUNTIME_ENV value masked)
         if: steps.decide.outputs.deploy == 'true'

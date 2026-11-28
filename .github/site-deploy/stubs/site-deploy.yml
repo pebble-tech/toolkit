@@ -26,6 +26,7 @@ jobs:
       vercel-project-id: ${{ vars.VERCEL_PROJECT_ID_MARKETING }}
       vercel-team-id: ${{ vars.VERCEL_TEAM_ID }}
       vercel-environment: staging
+      working-directory: apps/marketing
       alias-template: marketing-pr-{pr}.vercel.app
       protected-hosts: new.pebbletech.my pebbletech.my
       # One pair of GitHub environments per app, each holding that app's own VERCEL_TOKEN (and RUNTIME_ENV), with its
