@@ -324,7 +324,8 @@ gh api repos/<org>/<repo>/actions/oidc/customization/sub
 # use_immutable_subject: true, sub_claim_prefix: repo:<org>@<org id>/<repo>@<repo id>
 ```
 
-and pass `sub_claim_prefix` as `github.subjectPrefix`:
+Commit the value in the site's config, as a literal like the example. Do not read it at deploy time. The bootstrap
+checks it against the live `sub_claim_prefix`, refuses `use_default: false`, and stops on a mismatch.
 
 ```ts
 new DeployRole('deploy', {
