@@ -1053,11 +1053,7 @@ describe('prepare', () => {
     ])('refuses %s as the root directory, and creates nothing', async (_what, root) => {
       const to = mkdtempSync(join(tmpdir(), 'site-deploy-dir-'));
       const result = await script(['prepare', artifact(OUTPUT), to, root], {});
-      expect([result.code, result.stderr, readdirSync(to)]).toEqual([
-        1,
-        expect.stringContaining('root directory'),
-        [],
-      ]);
+      expect([result.code, result.stderr, readdirSync(to)]).toEqual([1, expect.stringContaining('root directory'), []]);
     });
 
     test('takes exactly 64 bytes', async () => {
