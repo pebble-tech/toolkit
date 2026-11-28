@@ -1069,7 +1069,7 @@ What the deploy trusts, and what it does not:
 
 Inputs of `site-deploy.yml`: `toolkit-ref`, `build-workflow`, `vercel-project-id`, `vercel-team-id` (required);
 `vercel-environment` (`staging`; `production`, `preview` and `development` are refused), `artifact-name`
-(`site-output`), `alias-template`, `protected-hosts`, `runtime-vars` (plain runtime env, JSON), `runs-on` (JSON,
+(`site-output`), `alias-template`, `protected-hosts`, `working-directory` (empty; see below), `runtime-vars` (plain runtime env, JSON), `runs-on` (JSON,
 `"ubuntu-latest"`), `vercel-cli-version`, `preview-environment` (`preview`), `staging-environment` (`staging`; the two must differ, each a plain ASCII name, and neither may be `prod` or
 `production`). That check is a deny-list: it cannot catch an environment that holds production secrets under another
 name, so keep production's secrets out of the environments the stub names.
@@ -1078,6 +1078,14 @@ fails without a token). Inputs of `site-build.yml`: `working-directory` (`apps/m
 (`pnpm build`), `build-env` (a plain JSON object; `NODE_OPTIONS` is refused, since GitHub does not take it from
 `GITHUB_ENV`: set it in `build-command`), `artifact-name`, `runs-on`. A repository with two sites (marketing and CMS)
 calls each workflow once per app, with its own `artifact-name`, project id and pair of environments.
+
+`site-deploy.yml`'s `working-directory` is the Vercel project's root directory (`apps/marketing`), the value
+`site-build.yml` gets for a subdirectory project. `vercel deploy --prebuilt` fails unless that directory exists under the directory it runs in, so
+`prepare` makes it as an empty directory beside `.vercel/output`; the CLI only checks that it exists and uploads nothing
+from it. The value is main's, never read from the artifact, and must be a plain relative path (no `..`, no empty
+segment, at most 64 bytes, not inside `.vercel`). For a root-level project leave it empty: `prepare` then creates no
+directory. Set it whenever the project has a subdirectory root. A caller that runs the script directly, such as a site's
+`deploy-production.yml`, passes `--root-directory apps/marketing` to the same `prepare` call.
 
 ### The Vercel token
 
