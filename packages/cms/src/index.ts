@@ -18,8 +18,14 @@ export type { CmsConfigOptions, R2StorageOptions } from './config.js';
 export { MEDIA_MIME_TYPES, MEDIA_SLUG, createMediaCollection } from './media.js';
 export { livePreviewLink, previewLink } from './preview.js';
 export type { PreviewLinkOptions } from './preview.js';
-export { sendPurge, withGlobalRevalidateHooks, withRevalidateHooks } from './revalidate.js';
-export type { PurgeTarget, RevalidateOptions } from './revalidate.js';
+export {
+  DEFAULT_PURGE_ATTEMPTS,
+  PurgeError,
+  sendPurge,
+  withGlobalRevalidateHooks,
+  withRevalidateHooks,
+} from './revalidate.js';
+export type { PurgeGiveUp, PurgeTarget, RevalidateOptions } from './revalidate.js';
 export { formatStampNotice, notifySlackOnCreate, postToSlack } from './slack.js';
 export type { SlackMessage, SlackOptions, StampDetails, StampNotice } from './slack.js';
 export {

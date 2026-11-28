@@ -120,7 +120,7 @@ signed purge to `${MARKETING_URL}/api/revalidate` with `REVALIDATE_SECRET`, and 
 `VERCEL_PROTECTION_BYPASS_MARKETING`. A draft save or autosave sends nothing. Default tags: `collection:<slug>`,
 `doc:<slug>:<id>` and `doc:<slug>:<slug field>` for the new and previous version; a global sends `global:<slug>` and
 `site`. A tag the receiver would refuse (empty, or over 256 characters, as a long slug makes) is left out and the rest
-still purge. A failed purge is logged and does not fail the save. In development and test with nothing configured it is
+still purge. A failed purge does not fail the save (see Retries). In development and test with nothing configured it is
 skipped.
 
 Wire format:
@@ -146,6 +146,32 @@ POST: async ({ request }) => {
   return Response.json({ revalidated: true, tags: result.tags });
 };
 ```
+
+### Retries
+
+A lost purge leaves a page stale under its long cache until the next publish, so the hooks retry. Each batch of tags
+gets up to 3 tries (`attempts`). A network error, a timeout, a 5xx or a 429 is tried again after a backoff of `250 ms`
+doubling to at most `2 s` (`baseDelayMs`, `maxDelayMs`), randomised between half and all of it. Any other 4xx (a bad
+signature, a refused body) will not heal, so it fails at once. Every try is signed afresh, so its timestamp is inside
+the receiver's 5 minute window, and a batch the site accepted is never sent again. The receiver treats a purge as
+idempotent, so a retry after a lost answer only purges twice.
+
+The retries run inside the hook, because Payload awaits hooks and a background retry could be cut off when a
+serverless host ends the response. The save waits only when the site is failing: at worst `attempts` requests of
+`timeoutMs` (10 s) plus the delays; lower `timeoutMs` to shorten that. The hook never throws.
+
+A purge that gives up is logged at error level as `cache purge failed` with `tags`, `attempts` and `status`, and passed
+to `onGiveUp`, which can raise an alert. The tags are the ones not purged: the failed batch and any after it.
+
+```ts
+withRevalidateHooks(Pages, {
+  attempts: 4,
+  onGiveUp: ({ tags, attempts, error }) => notifyOps(`purge gave up after ${attempts}: ${tags.join(', ')}`),
+});
+```
+
+`sendPurge(tags, target)` is exported and tries once unless `attempts` is set; it throws a `PurgeError` (`tags`,
+`attempts`, `status`) when a batch gives up.
 
 `collectionTag`, `docTag`, `globalTag` and `SITE_CACHE_TAG` are in `@pebbletech/cms/site` for the site's cache tags.
 
@@ -215,3 +241,8 @@ beneath it. A server-side upload replaces whatever object is at its key, so with
 upload a file named like a media file and overwrite it. `media` cannot opt out. Media and the plain-slug collections
 keep the bucket root, where their existing files are, so their keys and URLs do not change; a plain-slug collection
 that a create-only key can write to shares that root with media, so opt it out (a new folder) when that matters.
+
+Opt out every collection where a less-trusted caller can create (a create-only API key, a public form) with
+`{ slug, clientUploads: false }`. The root overwrite works both ways: a creator in a listed collection can set a
+`prefix` such as `stamps` and overwrite an opted-out collection's object too. Keep a collection listed only when its
+creators can already edit media.
