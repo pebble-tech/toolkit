@@ -180,7 +180,7 @@ jobs:
         if: steps.decide.outputs.deploy == 'true'
         env:
           ROOT_DIRECTORY: ${{ inputs.working-directory }}
-        run: node "$TOOLKIT/site-deploy.mjs" prepare "$RUNNER_TEMP/artifact" "$RUNNER_TEMP/deploy" "$ROOT_DIRECTORY"
+        run: node "$TOOLKIT/site-deploy.mjs" prepare "$RUNNER_TEMP/artifact" "$RUNNER_TEMP/deploy" --root-directory "$ROOT_DIRECTORY"
 
       - name: Runtime env (each RUNTIME_ENV value masked)
         if: steps.decide.outputs.deploy == 'true'
@@ -349,7 +349,7 @@ jobs:
         if: steps.decide.outputs.deploy == 'true'
         env:
           ROOT_DIRECTORY: ${{ inputs.working-directory }}
-        run: node "$TOOLKIT/site-deploy.mjs" prepare "$RUNNER_TEMP/artifact" "$RUNNER_TEMP/deploy" "$ROOT_DIRECTORY"
+        run: node "$TOOLKIT/site-deploy.mjs" prepare "$RUNNER_TEMP/artifact" "$RUNNER_TEMP/deploy" --root-directory "$ROOT_DIRECTORY"
 
       - name: Runtime env (each RUNTIME_ENV value masked)
         if: steps.decide.outputs.deploy == 'true'

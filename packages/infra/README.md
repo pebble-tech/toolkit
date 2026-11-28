@@ -1084,7 +1084,8 @@ calls each workflow once per app, with its own `artifact-name`, project id and p
 `prepare` makes it as an empty directory beside `.vercel/output`; the CLI only checks that it exists and uploads nothing
 from it. The value is main's, never read from the artifact, and must be a plain relative path (no `..`, no empty
 segment, at most 64 bytes, not inside `.vercel`). For a root-level project leave it empty: `prepare` then creates no
-directory. Set it whenever the project has a subdirectory root.
+directory. Set it whenever the project has a subdirectory root. A caller that runs the script directly, such as a site's
+`deploy-production.yml`, passes `--root-directory apps/marketing` to the same `prepare` call.
 
 ### The Vercel token
 
