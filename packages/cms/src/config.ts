@@ -19,9 +19,16 @@ type PoolOptions = Parameters<typeof postgresAdapter>[0]['pool'];
 
 export interface R2StorageOptions {
   bucket: string;
+  /** Only builds the default endpoint, `https://<accountId>.r2.cloudflarestorage.com`; `endpoint` replaces that. */
   accountId: string;
   accessKeyId: string;
   secretAccessKey: string;
+  /**
+   * The S3 API origin, used instead of the account's R2 one: a bare `https://host[:port]` with no credentials, path,
+   * query or fragment. `http://` is accepted only when `NODE_ENV` is `development` or `test`, for a local fake R2 such
+   * as MinIO. Default: from `R2_ENDPOINT` when `storage` is read from the environment, else the account endpoint.
+   */
+  endpoint?: string;
   /** Public origin media is read from, such as `https://media-bfa.pebbletech.my`. URLs are built from it on read. */
   mediaBaseUrl?: string;
 }
@@ -50,7 +57,10 @@ export interface CmsConfigOptions {
   /** Default: `DATABASE_URL`. */
   databaseUrl?: string;
   pool?: Omit<PoolOptions, 'connectionString'>;
-  /** Default: from `R2_BUCKET`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `MEDIA_BASE_URL`. */
+  /**
+   * Default: from `R2_BUCKET`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `MEDIA_BASE_URL` and the
+   * optional `R2_ENDPOINT`. When given, none of those variables are read, `R2_ENDPOINT` included.
+   */
   storage?: R2StorageOptions;
   /** Default: `lexicalEditor()`. */
   editor?: Config['editor'];
@@ -87,6 +97,8 @@ function storageFromEnv(): R2StorageOptions | undefined {
       accessKeyId: process.env.R2_ACCESS_KEY_ID!,
       secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
       mediaBaseUrl: process.env.MEDIA_BASE_URL,
+      // An empty R2_ENDPOINT is unset, like the other R2 variables; the option itself refuses an empty string.
+      endpoint: process.env.R2_ENDPOINT || undefined,
     };
   }
   // Uploads to a serverless function's disk are lost, so outside development storage is not optional.
@@ -129,7 +141,35 @@ const signOnlyAllowedTypes =
     }),
   });
 
-function r2Plugin(storage: R2StorageOptions, slugs: string[], clientUploads: boolean, folders = false): Plugin {
+/** The S3 endpoint: the given one, validated as a bare origin, else the account's R2 endpoint. */
+function r2Endpoint(storage: R2StorageOptions): string {
+  if (storage.endpoint === undefined) return `https://${storage.accountId}.r2.cloudflarestorage.com`;
+  const raw = storage.endpoint;
+  const allowed = devOrTest() ? 'https://host[:port] or http://host[:port]' : 'https://host[:port]';
+  // The value is never echoed: it may carry credentials.
+  const refuse = (why: string) =>
+    new Error(`R2 endpoint ${why}; it must be a bare origin, ${allowed}, with no credentials, path, query or fragment`);
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw refuse('is not an absolute URL');
+  }
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && devOrTest())) {
+    throw refuse(`has the scheme ${url.protocol}`);
+  }
+  if (url.username || url.password) throw refuse('has credentials in it');
+  if (url.pathname !== '/' || raw.includes('?') || raw.includes('#')) throw refuse('has a path, query or fragment');
+  return url.origin;
+}
+
+function r2Plugin(
+  storage: R2StorageOptions,
+  endpoint: string,
+  slugs: string[],
+  clientUploads: boolean,
+  folders = false
+): Plugin {
   const base = storage.mediaBaseUrl?.replace(/\/+$/, '');
   const collection = base
     ? {
@@ -147,7 +187,7 @@ function r2Plugin(storage: R2StorageOptions, slugs: string[], clientUploads: boo
       slugs.map((slug) => [slug, folders ? { ...(collection === true ? {} : collection), prefix: slug } : collection])
     ),
     config: {
-      endpoint: `https://${storage.accountId}.r2.cloudflarestorage.com`,
+      endpoint,
       region: 'auto',
       credentials: { accessKeyId: storage.accessKeyId, secretAccessKey: storage.secretAccessKey },
       // R2 rejects the CRC32 checksums the AWS SDK adds to presigned uploads by default.
@@ -172,9 +212,10 @@ function storagePlugins(
     );
   }
   const signed = entries.filter((entry) => typeof entry === 'string').filter((slug) => !serverOnly.includes(slug));
+  const endpoint = r2Endpoint(storage);
   return [
-    r2Plugin(storage, [MEDIA_SLUG, ...signed], true),
-    ...(serverOnly.length > 0 ? [r2Plugin(storage, serverOnly, false, true)] : []),
+    r2Plugin(storage, endpoint, [MEDIA_SLUG, ...signed], true),
+    ...(serverOnly.length > 0 ? [r2Plugin(storage, endpoint, serverOnly, false, true)] : []),
     signOnlyAllowedTypes(new Set(serverOnly)),
   ];
 }

@@ -46,6 +46,11 @@ export default createCmsConfig({
 - R2 through `@payloadcms/storage-s3` with `clientUploads`: the browser gets a signed PUT URL and sends the file
   straight to R2. Settings come from `R2_BUCKET`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (or the
   `storage` option). With `MEDIA_BASE_URL` set, media URLs are built from it when read and never stored.
+- The S3 endpoint is `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com` unless you set `R2_ENDPOINT` (or
+  `storage.endpoint`, which wins and means no `R2_*` variable is read). It must be a bare origin, `https://host[:port]`:
+  no credentials, path, query or fragment, or it throws. `http://host[:port]` is accepted only when `NODE_ENV` is
+  `development` or `test`, for a local fake R2 such as MinIO. `R2_ACCOUNT_ID` stays required and only builds the default
+  endpoint. The endpoint does not affect `MEDIA_BASE_URL`; media URLs never derive from either.
 - An upload cap, `maxUploadBytes`, default 10 MB. Payload refuses to sign an upload URL for a larger file and signs
   `Content-Length` into the URL, so R2 refuses a different size. Uploads through the CMS itself are capped the same.
 - Signed uploads only for the collection's `upload.mimeTypes`. Payload itself checks that list only for uploads through
