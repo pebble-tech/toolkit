@@ -1079,12 +1079,12 @@ fails without a token). Inputs of `site-build.yml`: `working-directory` (`apps/m
 `GITHUB_ENV`: set it in `build-command`), `artifact-name`, `runs-on`. A repository with two sites (marketing and CMS)
 calls each workflow once per app, with its own `artifact-name`, project id and pair of environments.
 
-`site-deploy.yml`'s `working-directory` is the Vercel project's root directory (`apps/marketing`), the same value
-`site-build.yml` gets. `vercel deploy --prebuilt` fails unless that directory exists under the directory it runs in, so
+`site-deploy.yml`'s `working-directory` is the Vercel project's root directory (`apps/marketing`), the value
+`site-build.yml` gets for a subdirectory project. `vercel deploy --prebuilt` fails unless that directory exists under the directory it runs in, so
 `prepare` makes it as an empty directory beside `.vercel/output`; the CLI only checks that it exists and uploads nothing
 from it. The value is main's, never read from the artifact, and must be a plain relative path (no `..`, no empty
-segment, at most 64 bytes, not inside `.vercel`). Left empty, nothing is made. Set it whenever the project has a root
-directory.
+segment, at most 64 bytes, not inside `.vercel`). For a root-level project leave it empty: `prepare` then creates no
+directory. Set it whenever the project has a subdirectory root.
 
 ### The Vercel token
 

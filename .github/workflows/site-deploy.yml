@@ -48,7 +48,8 @@ on:
         default: ''
       working-directory:
         description: >-
-          The Vercel project's root directory, e.g. apps/marketing, the same value site-build gets. Main's input, never
+          The Vercel project's root directory, e.g. apps/marketing (the value site-build gets for a subdirectory
+          project). For a root-level project leave it empty; prepare then creates no directory. Main's input, never
           read from the artifact. prepare makes it an empty directory beside .vercel/output, because the CLI fails
           unless it exists.
         type: string
