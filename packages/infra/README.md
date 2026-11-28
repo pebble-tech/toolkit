@@ -313,6 +313,33 @@ new DeployRole('deploy', { product, env, apex, github, awsResources: false });
 A program that passes none of 0.8.0's options (`schemas`, `flavor`, `awsResources`) declares the same resources,
 names and inputs as on 0.7.0, so its next `up` changes nothing.
 
+### Repos with an immutable OIDC subject
+
+A repo created with GitHub's immutable OIDC subject sends `repo:<org>@<org id>/<repo>@<repo id>:environment:<env>`, not
+`repo:<org>/<repo>:environment:<env>`, so a role that trusts the second form refuses its token
+(`Not authorized to perform sts:AssumeRoleWithWebIdentity`). Read the prefix GitHub sends:
+
+```sh
+gh api repos/<org>/<repo>/actions/oidc/customization/sub
+# use_immutable_subject: true, sub_claim_prefix: repo:<org>@<org id>/<repo>@<repo id>
+```
+
+and pass `sub_claim_prefix` as `github.subjectPrefix`:
+
+```ts
+new DeployRole('deploy', {
+  product,
+  env,
+  apex,
+  github: { org: 'pebble-tech', repo: 'pebbletech-web', subjectPrefix: 'repo:pebble-tech@80682521/pebbletech-web@1473997831' },
+});
+```
+
+The role then trusts `<subjectPrefix>:environment:<env>`, one exact `StringEquals` value, never both forms. Unset, it
+trusts `repo:<org>/<repo>:environment:<env>` as before. `subjectPrefix` must be exactly `repo:<org>/<repo>` or
+`repo:<org>@<digits>/<repo>@<digits>` with this `org` and `repo`; anything else (another org or repo, a wildcard,
+whitespace, a trailing `:environment:...`, a different case, an empty string) throws `StageError`.
+
 ### Upgrade from 0.5: the Vercel project
 
 - `shared`'s next `up` sets the project's Node to `24.x`, or to `project.nodeVersion`, on an existing project too. If

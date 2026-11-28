@@ -566,6 +566,123 @@ describe('DeployRole', () => {
     }
   );
 
+  describe('github.subjectPrefix', () => {
+    const subOf = async (github: DeployRoleArgs['github'], env: DeployRoleArgs['env'] = 'staging') => {
+      const { resources } = await roleFor(env, { github });
+      const trust = JSON.parse(find(resources, 'aws:iam/role:Role').inputs.assumeRolePolicy);
+      return trust.Statement[0].Condition;
+    };
+    const withPrefix = (subjectPrefix: string, org = 'pebble-tech', repo = 'basefresh') => ({
+      org,
+      repo,
+      subjectPrefix,
+    });
+    const RULE = /github\.subjectPrefix must be/;
+
+    test('unset pins exactly the mutable sub, with the rest of the trust policy as before', async () => {
+      expect(await subOf({ org: 'pebble-tech', repo: 'basefresh' })).toStrictEqual({
+        StringEquals: {
+          'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+          'token.actions.githubusercontent.com:sub': ['repo:pebble-tech/basefresh:environment:staging'],
+        },
+      });
+    });
+
+    test('the immutable form yields the sub GitHub sends for a repo with an immutable subject', async () => {
+      expect(
+        await subOf(withPrefix('repo:pebble-tech@80682521/pebbletech-web@1473997831', 'pebble-tech', 'pebbletech-web'))
+      ).toStrictEqual({
+        StringEquals: {
+          'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+          'token.actions.githubusercontent.com:sub': [
+            'repo:pebble-tech@80682521/pebbletech-web@1473997831:environment:staging',
+          ],
+        },
+      });
+      expect(
+        (await subOf(withPrefix('repo:org@1/repo@2', 'org', 'repo'), 'prod')).StringEquals[
+          'token.actions.githubusercontent.com:sub'
+        ]
+      ).toEqual(['repo:org@1/repo@2:environment:production']);
+    });
+
+    test("the mutable repo:<org>/<repo> is accepted and yields today's sub", async () => {
+      expect(
+        (await subOf(withPrefix('repo:pebble-tech/basefresh'), 'preview')).StringEquals[
+          'token.actions.githubusercontent.com:sub'
+        ]
+      ).toEqual(['repo:pebble-tech/basefresh:environment:preview']);
+    });
+
+    test('the sub is one exact value under StringEquals: no wildcard, no second form', async () => {
+      const condition = await subOf(withPrefix('repo:pebble-tech@1/basefresh@2'));
+      expect(Object.keys(condition)).toEqual(['StringEquals']);
+      expect(condition.StringEquals['token.actions.githubusercontent.com:sub']).toEqual([
+        'repo:pebble-tech@1/basefresh@2:environment:staging',
+      ]);
+    });
+
+    test.each([
+      ['a widened prefix', 'repo:pebble-tech'],
+      ['a widened prefix with a slash', 'repo:pebble-tech/'],
+      ['another org', 'repo:other-org/basefresh'],
+      ['another repo', 'repo:pebble-tech/other'],
+      ['another org, immutable', 'repo:other-org@1/basefresh@2'],
+      ['another repo, immutable', 'repo:pebble-tech@1/other@2'],
+      ['a repo that starts with the right one', 'repo:pebble-tech/basefresh-extra'],
+      ['a repo that starts with the right one, immutable', 'repo:pebble-tech@1/basefresh-extra@2'],
+      ['a repo that ends with the right one', 'repo:pebble-tech/xbasefresh'],
+      ['an org that contains the right one', 'repo:xpebble-tech/basefresh'],
+      ['an org that contains the right one, immutable', 'repo:xpebble-tech@1/basefresh@2'],
+      ['a different case', 'repo:Pebble-Tech/basefresh'],
+      ['a different case in the repo', 'repo:pebble-tech@1/Basefresh@2'],
+      ['a wildcard', '*'],
+      ['a wildcard repo', 'repo:pebble-tech/*'],
+      ['a wildcard id', 'repo:pebble-tech@*/basefresh@*'],
+      ['a question mark', 'repo:pebble-tech/basefres?'],
+      ['a full sub with an environment', 'repo:pebble-tech@1/basefresh@2:environment:staging'],
+      ['a mutable sub with an environment', 'repo:pebble-tech/basefresh:environment:staging'],
+      ['a trailing colon', 'repo:pebble-tech/basefresh:'],
+      ['a trailing newline', 'repo:pebble-tech@1/basefresh@2\n'],
+      ['a trailing newline, mutable', 'repo:pebble-tech/basefresh\n'],
+      ['a leading space', ' repo:pebble-tech/basefresh'],
+      ['a trailing space', 'repo:pebble-tech/basefresh '],
+      ['an embedded newline', 'repo:pebble-tech/basefresh\nrepo:pebble-tech/basefresh'],
+      ['ids that are not digits', 'repo:pebble-tech@abc/basefresh@abc'],
+      ['an org id that is not digits', 'repo:pebble-tech@abc/basefresh@2'],
+      ['a repo id that is not digits', 'repo:pebble-tech@1/basefresh@abc'],
+      ['an empty id', 'repo:pebble-tech@/basefresh@'],
+      ['an id on the org only', 'repo:pebble-tech@1/basefresh'],
+      ['an id on the repo only', 'repo:pebble-tech/basefresh@2'],
+      ['a negative id', 'repo:pebble-tech@-1/basefresh@2'],
+      ['a non-ASCII digit id', 'repo:pebble-tech@١/basefresh@2'],
+      ['no repo: scheme', 'pebble-tech/basefresh'],
+      ['an empty string', ''],
+    ])('refuses %s', async (_what, subjectPrefix) => {
+      await expect(roleFor('staging', { github: withPrefix(subjectPrefix) })).rejects.toThrow(RULE);
+      await expect(roleFor('staging', { github: withPrefix(subjectPrefix) })).rejects.toThrow(StageError);
+    });
+
+    test.each([
+      ['a dot in the repo', 'repo:pebble-tech/base.fresh', 'pebble-tech', 'base.fresh', 'repo:pebble-tech/baseXfresh'],
+      [
+        'a dot in the repo, immutable',
+        'repo:pebble-tech@1/base.fresh@2',
+        'pebble-tech',
+        'base.fresh',
+        'repo:pebble-tech@1/baseXfresh@2',
+      ],
+      ['a dot in the org', 'repo:peb.le/basefresh', 'peb.le', 'basefresh', 'repo:pebXle/basefresh'],
+      ['a plus in the repo', 'repo:pebble-tech/a+b', 'pebble-tech', 'a+b', 'repo:pebble-tech/aab'],
+    ])('escapes %s: only the literal name is accepted', async (_what, accepted, org, repo, lookalike) => {
+      const condition = await subOf(withPrefix(accepted, org, repo));
+      expect(condition.StringEquals['token.actions.githubusercontent.com:sub']).toEqual([
+        `${accepted}:environment:staging`,
+      ]);
+      await expect(roleFor('staging', { github: withPrefix(lookalike, org, repo) })).rejects.toThrow(RULE);
+    });
+  });
+
   describe('awsResources', () => {
     /** Each resource's type, name and inputs, policy included. */
     const shape = (resources: { type: string; name: string; inputs: Record<string, any> }[]) =>

@@ -26,6 +26,23 @@ function assertApex(apex: string): void {
   }
 }
 
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Throws StageError unless `subjectPrefix` is exactly `repo:<org>/<repo>` (the mutable form) or
+ * `repo:<org>@<id>/<repo>@<id>` (GitHub's immutable form, ids are digits), with `org` and `repo` literally the given
+ * ones. The whole string is matched: no case folding, no whitespace, nothing before or after.
+ */
+function assertSubjectPrefix(subjectPrefix: string, org: string, repo: string): void {
+  const [o, r] = [escapeRegExp(org), escapeRegExp(repo)];
+  if (!new RegExp(`^repo:${o}/${r}$|^repo:${o}@[0-9]+/${r}@[0-9]+$`).test(subjectPrefix)) {
+    throw new StageError(
+      `github.subjectPrefix must be exactly "repo:${org}/${repo}" or "repo:${org}@<id>/${repo}@<id>" (numeric ids), ` +
+        `with no environment and nothing before or after; got ${JSON.stringify(subjectPrefix)}`
+    );
+  }
+}
+
 export interface DeployRoleArgs {
   product: string;
   /** The stacks this role deploys: `preview` covers every `pr-<n>` stack. */
@@ -33,7 +50,17 @@ export interface DeployRoleArgs {
   /** Registered zone name. Staging and prod domain globs end with this literal. */
   apex: string;
   /** The product's repository. The trusted GitHub environment comes from `env` (`preview`, `staging`, `production`). */
-  github: { org: string; repo: string };
+  github: {
+    org: string;
+    repo: string;
+    /**
+     * The sub claim up to `:environment:`, for a repo whose OIDC subject is immutable: `repo:<org>@<id>/<repo>@<id>`
+     * (read it with `gh api repos/<org>/<repo>/actions/oidc/customization/sub`, `sub_claim_prefix`). Unset, the role
+     * trusts `repo:<org>/<repo>`. Only `repo:<org>/<repo>` and the immutable form with this `org` and `repo` are
+     * accepted, and only the one given is trusted, never both.
+     */
+    subjectPrefix?: string;
+  };
   /**
    * Whether a `staging` or `prod` role also manages AWS resources (Lambda, HTTP APIs, certificates, logs, alarms,
    * workload roles), `true` by default. `false` leaves only the state statements a preview role has, for a product
@@ -64,6 +91,9 @@ export class DeployRole extends pulumi.ComponentResource {
   constructor(name: string, args: DeployRoleArgs, opts?: pulumi.ComponentResourceOptions) {
     assertProduct(args.product);
     assertApex(args.apex);
+    const { org, repo } = args.github;
+    if (args.github.subjectPrefix !== undefined) assertSubjectPrefix(args.github.subjectPrefix, org, repo);
+    const subjectPrefix = args.github.subjectPrefix ?? `repo:${org}/${repo}`;
     super('pebbletech:index:DeployRole', name, {}, opts);
 
     const { product, env, apex } = args;
@@ -108,7 +138,7 @@ export class DeployRole extends pulumi.ComponentResource {
     const oidcProviderArn = pulumi.interpolate`arn:aws:iam::${accountId}:oidc-provider/token.actions.githubusercontent.com`;
     const state = deployState(product, env);
     const kmsKeyArn = aws.kms.getAliasOutput({ name: state.kmsAlias }, { parent: this }).targetKeyArn;
-    const subs = [`repo:${args.github.org}/${args.github.repo}:environment:${githubEnvironment(env)}`];
+    const subs = [`${subjectPrefix}:environment:${githubEnvironment(env)}`];
     const role = new aws.iam.Role(
       `${name}-role`,
       {
