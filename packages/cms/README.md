@@ -194,3 +194,24 @@ section at Slack's 3000.
 `media` holds raster images only (AVIF, GIF, JPEG, PNG, WebP; no SVG, which can carry script) with required alt text.
 Anyone reads; admins and editors upload, edit and delete. Other upload collections that store in R2 go in
 `storageCollections`.
+
+A slug there gets signed browser uploads like media: the browser PUTs the file straight to R2, so the collection's
+server-side checks (hooks, file validation) never see it, and any user who may create in the collection can get a
+signed URL, including a create-only API key. Only the MIME types the collection lists are signed. A collection whose
+files must pass its own checks opts out with an object entry:
+
+```ts
+createCmsConfig({
+  storageCollections: ['gallery', { slug: 'stamps', clientUploads: false }],
+});
+```
+
+`stamps` is stored in R2 but uploaded through the CMS only. The signing endpoint answers 403 for it to every user, and
+the admin sends its files to the server instead of R2.
+
+An opted-out collection also gets its own folder in the bucket, named by its slug: its files are stored at
+`stamps/<filename>`, their URLs under `MEDIA_BASE_URL` include `/stamps/`, and a `prefix` set on a document stays
+beneath it. A server-side upload replaces whatever object is at its key, so without the folder a create-only key could
+upload a file named like a media file and overwrite it. `media` cannot opt out. Media and the plain-slug collections
+keep the bucket root, where their existing files are, so their keys and URLs do not change; a plain-slug collection
+that a create-only key can write to shares that root with media, so opt it out (a new folder) when that matters.
